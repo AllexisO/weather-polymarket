@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Спорт — polymarket-lab{% endblock %}
+{% block content %}
+<p class="meta" style="color: var(--muted); font-size: 13px; margin-bottom: 20px;">
+  Эталон — no-vig линия Pinnacle (the-odds-api.com), не прогноз. Только матчи,
+  которые ещё не начались (иначе цена Polymarket уже отражает факт игры).
+</p>
+
+{% if not matches %}
+  <div class="empty">Пока нет сматченных матчей — либо крон ещё не запускался
+  (0 8,18 * * *), либо сейчас нет пересечения по времени между открытыми
+  матчами Polymarket и предматчевыми линиями Pinnacle.</div>
+{% else %}
+<table>
+  <thead>
+    <tr><th>Лига</th><th>Матч</th><th>Начало (UTC)</th><th style="width: 30%;">1X2: рынок vs Pinnacle</th><th>Макс edge</th></tr>
+  </thead>
+  <tbody>
+    {% for m in matches %}
+    <tr>
+      <td>{{ m.league }}</td>
+      <td>{{ m.home_team }} — {{ m.away_team }}</td>
+      <td>{{ m.commence_time[:16] }}</td>
+      <td>
+        {% for label, key in [('П1', 'home'), ('X', 'draw'), ('П2', 'away')] %}
+        {% set o = m.outcomes[key] %}
+        <div class="bar-row" style="margin-bottom: 3px;">
+          <span style="width: 18px; color: var(--muted); font-size: 11px;">{{ label }}</span>
+          <div class="bar-track">
+            <div class="bar-fill market" style="width: {{ (o.market_p * 100) | round(1) }}%;"></div>
+            <div class="bar-fill model" style="width: {{ (o.pinnacle_p * 100) | round(1) }}%;"></div>
+          </div>
+        </div>
+        {% endfor %}
+      </td>
+      <td style="font-weight: 600;">{{ '%.1f%%' | format(m.best_abs_edge * 100) }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}

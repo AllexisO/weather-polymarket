@@ -30,6 +30,12 @@ def unit_symbol(city_rows):
     return "°F" if city_rows and city_rows[0]["unit"] == "fahrenheit" else "°C"
 
 
+def table_exists(conn, name):
+    return conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
+    ).fetchone() is not None
+
+
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
     conn = db()
@@ -110,3 +116,35 @@ def city_detail(request: Request, city: str):
             "history": history,
         },
     )
+
+
+@app.get("/sports", response_class=HTMLResponse)
+def sports(request: Request):
+    conn = db()
+    matches = []
+    if table_exists(conn, "sports_snapshots"):
+        latest_ts = conn.execute("SELECT MAX(ts_utc) AS ts FROM sports_snapshots").fetchone()["ts"]
+        if latest_ts:
+            rows = conn.execute(
+                "SELECT * FROM sports_snapshots WHERE ts_utc = ? ORDER BY poly_slug", (latest_ts,)
+            ).fetchall()
+            by_slug = {}
+            for r in rows:
+                m = by_slug.setdefault(
+                    r["poly_slug"],
+                    {
+                        "league": r["league"],
+                        "home_team": r["home_team"],
+                        "away_team": r["away_team"],
+                        "commence_time": r["commence_time"],
+                        "event_vol": r["event_vol"],
+                        "outcomes": {},
+                    },
+                )
+                m["outcomes"][r["outcome"]] = {"market_p": r["market_p"], "pinnacle_p": r["pinnacle_p"], "edge": r["edge"]}
+            matches = list(by_slug.values())
+            for m in matches:
+                m["best_abs_edge"] = max(abs(o["edge"]) for o in m["outcomes"].values())
+            matches.sort(key=lambda m: m["best_abs_edge"], reverse=True)
+    conn.close()
+    return TEMPLATES.TemplateResponse("sports.html", {"request": request, "matches": matches})
