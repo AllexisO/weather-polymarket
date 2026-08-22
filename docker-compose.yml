@@ -12,3 +12,18 @@ services:
       POLY_LAB_DB: /data/db/polymarket_lab.sqlite3
     profiles:
       - cli
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile.dashboard
+    container_name: polymarket-lab-dashboard
+    restart: unless-stopped
+    volumes:
+      - ./app:/app
+      - ./data:/data
+    environment:
+      TZ: Europe/Chisinau
+      POLY_LAB_DB: /data/db/polymarket_lab.sqlite3
+    ports:
+      - "8093:8093"

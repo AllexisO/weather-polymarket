@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}polymarket-lab — обзор{% endblock %}
+{% block content %}
+{% if not cards %}
+  <div class="empty">Пока нет данных — жди первого прогона крона (раз в 2 часа) или запусти вручную:<br>
+  <code>docker compose run --rm collector weather_edge.py</code></div>
+{% else %}
+<div class="grid">
+  {% for c in cards %}
+  <a class="card" href="/city/{{ c.city }}">
+    <h2>{{ c.city.replace('_', ' ') }}</h2>
+    <div class="meta">{{ c.local_date }}, {{ '%02d'|format(c.local_hour) }}:00 местных · объём ${{ '{:,.0f}'.format(c.event_vol) }} · {{ c.n_snapshots }} снимков</div>
+    <div class="edge {{ 'pos' if c.best_edge >= 0 else 'neg' }}">{{ '%+.1f%%' | format(c.best_edge * 100) }}</div>
+    <div class="bucket-label">бакет {{ c.best_lo }}–{{ c.best_hi }}{{ c.unit }}: модель {{ '%.0f%%' | format(c.model_p * 100) }} vs рынок {{ '%.0f%%' | format(c.market_p * 100) }}</div>
+  </a>
+  {% endfor %}
+</div>
+{% endif %}
+{% endblock %}

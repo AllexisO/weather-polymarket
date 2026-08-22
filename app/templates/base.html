@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}polymarket-lab{% endblock %}</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --border: #262b36;
+    --text: #e6e8eb;
+    --muted: #8b93a3;
+    --accent: #4f8cff;
+    --pos: #34c759;
+    --neg: #ff5c5c;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  header {
+    padding: 20px 32px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+  }
+  header h1 { font-size: 18px; margin: 0; }
+  header a { color: var(--text); text-decoration: none; }
+  header .sub { color: var(--muted); font-size: 13px; }
+  main { padding: 24px 32px; max-width: 1100px; margin: 0 auto; }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 16px;
+  }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 18px;
+    text-decoration: none;
+    color: var(--text);
+    display: block;
+  }
+  .card:hover { border-color: var(--accent); }
+  .card h2 { margin: 0 0 4px 0; font-size: 16px; text-transform: capitalize; }
+  .card .meta { color: var(--muted); font-size: 12px; margin-bottom: 12px; }
+  .edge { font-size: 22px; font-weight: 600; }
+  .edge.pos { color: var(--pos); }
+  .edge.neg { color: var(--neg); }
+  .bucket-label { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 500; }
+  .bar-row { display: flex; align-items: center; gap: 8px; }
+  .bar-track { flex: 1; background: #22262f; border-radius: 4px; height: 14px; position: relative; overflow: hidden; }
+  .bar-fill { position: absolute; top: 0; left: 0; height: 100%; border-radius: 4px; }
+  .bar-fill.market { background: var(--accent); opacity: 0.55; }
+  .bar-fill.model { background: var(--pos); opacity: 0.85; height: 6px; top: 4px; }
+  .empty { color: var(--muted); padding: 40px; text-align: center; }
+  code { background: #22262f; padding: 1px 5px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<header>
+  <a href="/"><h1>polymarket-lab</h1></a>
+  <span class="sub">GFS-ансамбль vs Polymarket, paper-only</span>
+</header>
+<main>
+  {% block content %}{% endblock %}
+</main>
+</body>
+</html>
