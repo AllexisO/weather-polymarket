@@ -1,0 +1,14 @@
+services:
+  # Не постоянно работающий сервис — вызывается по крону (см. README):
+  # docker compose run --rm collector weather_edge.py
+  collector:
+    build: .
+    container_name: polymarket-lab-collector
+    volumes:
+      - ./app:/app
+      - ./data:/data
+    environment:
+      TZ: Europe/Chisinau
+      POLY_LAB_DB: /data/db/polymarket_lab.sqlite3
+    profiles:
+      - cli
