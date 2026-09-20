@@ -3,80 +3,385 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
 <title>{% block title %}polymarket-lab{% endblock %}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Onest:wght@400;500;600;700&display=swap" rel="stylesheet">
+{% import "_icons.html" as icon %}
 <style>
   :root {
-    --bg: #0f1115;
-    --panel: #171a21;
-    --border: #262b36;
-    --text: #e6e8eb;
-    --muted: #8b93a3;
+    --bg: #0a0f1a;
+    --bg-raised: #0d1420;
+    --panel: #121a2b;
+    --track: #1b2436;
+    --border: #232f45;
+    --border-soft: #1a2436;
+    --text: #eaeef5;
+    --muted: #8d99b3;
     --accent: #4f8cff;
-    --pos: #34c759;
-    --neg: #ff5c5c;
+    --accent-strong: #7fabff;
+    --highlight: #f0a83c;
+    --pos: #33c17c;
+    --neg: #ff6b6b;
+    --pos-bg: rgba(51, 193, 124, 0.14);
+    --neg-bg: rgba(255, 107, 107, 0.14);
+    --accent-bg: rgba(79, 140, 255, 0.14);
+    --sidebar-w: 240px;
+    --font-ui: "Onest", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --font-mono: "Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   }
   * { box-sizing: border-box; }
+  html { color-scheme: dark; }
   body {
     margin: 0;
     background: var(--bg);
     color: var(--text);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-family: var(--font-ui);
+    font-size: 14px;
+    line-height: 1.55;
   }
-  header {
-    padding: 20px 32px;
-    border-bottom: 1px solid var(--border);
+  table, .edge, .bar-fill, .bucket-label, .meta, td, .legend, .status-stat, code {
+    font-variant-numeric: tabular-nums;
+  }
+  code, .mono, th, td, .edge, .status-stat b { font-family: var(--font-mono); }
+
+  /* ---- accessibility ---- */
+  .skip-link {
+    position: fixed;
+    left: 12px;
+    top: -60px;
+    background: var(--accent);
+    color: #06101f;
+    padding: 10px 16px;
+    border-radius: 0 0 8px 8px;
+    font-size: 13px;
+    font-weight: 600;
+    text-decoration: none;
+    z-index: 200;
+    transition: top 0.15s ease;
+  }
+  .skip-link:focus { top: 0; }
+  a:focus-visible, .card:focus-visible, button:focus-visible, label:focus-visible, [tabindex]:focus-visible {
+    outline: 2px solid var(--accent-strong);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+  main:focus { outline: none; }
+
+  /* ---- shell layout: sidebar + content ---- */
+  .nav-toggle-input { display: none; }
+  .shell { display: flex; min-height: 100vh; align-items: stretch; }
+  .sidebar {
+    width: var(--sidebar-w);
+    flex-shrink: 0;
+    background: var(--bg-raised);
+    border-right: 1px solid var(--border);
+    padding: 20px 14px;
     display: flex;
-    align-items: baseline;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    padding: 4px 10px 20px;
+  }
+  .brand-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    color: var(--text);
+    text-decoration: none;
+    font-weight: 700;
+    font-size: 15px;
+    letter-spacing: -0.01em;
+  }
+  .brand-dot {
+    width: 9px; height: 9px; border-radius: 50%;
+    background: var(--highlight);
+    box-shadow: 0 0 0 3px var(--accent-bg);
+    flex-shrink: 0;
+  }
+  .side-group-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    padding: 14px 10px 6px;
+  }
+  .side-group-label:first-of-type { padding-top: 2px; }
+  .side-link {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    padding: 9px 10px;
+    border-radius: 8px;
+    color: var(--muted);
+    text-decoration: none;
+    font-size: 13.5px;
+    min-height: 40px;
+  }
+  .side-link:hover { color: var(--text); background: var(--panel); }
+  .side-link.active { color: var(--text); background: var(--accent-bg); font-weight: 600; }
+  .side-link.active .icon { color: var(--accent-strong); }
+  .side-link-icon { color: var(--muted); flex-shrink: 0; }
+  .side-foot {
+    margin-top: auto;
+    padding: 14px 10px 4px;
+    border-top: 1px solid var(--border-soft);
+  }
+  .paper-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: var(--muted);
+    line-height: 1.4;
+  }
+  .paper-badge::before {
+    content: "";
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--pos);
+    flex-shrink: 0;
+  }
+
+  .nav-scrim { display: none; }
+
+  .main-col { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .topbar {
+    display: none;
+    align-items: center;
     gap: 12px;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-raised);
+    position: sticky;
+    top: 0;
+    z-index: 20;
   }
-  header h1 { font-size: 18px; margin: 0; }
-  header a { color: var(--text); text-decoration: none; }
-  header .sub { color: var(--muted); font-size: 13px; }
-  main { padding: 24px 32px; max-width: 1100px; margin: 0 auto; }
-  .grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-    gap: 16px;
-  }
-  .card {
+  .nav-toggle-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px; height: 36px;
+    border-radius: 8px;
+    color: var(--text);
     background: var(--panel);
     border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 16px 18px;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .topbar-title { font-weight: 600; font-size: 14px; }
+
+  main { padding: 28px 32px 60px; max-width: 1120px; width: 100%; margin: 0 auto; }
+  main a { color: var(--accent-strong); text-underline-offset: 2px; }
+  main a:hover { color: var(--text); }
+  .card, .toc a, .status-link, .side-link { text-decoration: none; }
+
+  @media (max-width: 900px) {
+    .sidebar {
+      position: fixed;
+      inset: 0 auto 0 0;
+      height: 100vh;
+      transform: translateX(-100%);
+      transition: transform 0.2s ease;
+      z-index: 50;
+      box-shadow: 0 0 0 1px var(--border);
+    }
+    .nav-toggle-input:checked ~ .sidebar { transform: translateX(0); }
+    .nav-scrim {
+      display: none;
+      position: fixed; inset: 0;
+      background: rgba(4, 7, 13, 0.6);
+      z-index: 40;
+    }
+    .nav-toggle-input:checked ~ .nav-scrim { display: block; }
+    .topbar { display: flex; }
+    main { padding: 20px 18px 48px; }
+  }
+
+  /* ---- shared components ---- */
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
+    gap: 14px;
+  }
+  .card {
+    position: relative;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px 18px 16px 20px;
     text-decoration: none;
     color: var(--text);
     display: block;
+    overflow: hidden;
   }
+  .card::before {
+    content: "";
+    position: absolute; left: 0; top: 0; bottom: 0;
+    width: 3px;
+    background: var(--border);
+  }
+  .card:has(.edge.pos)::before { background: var(--pos); }
+  .card:has(.edge.neg)::before { background: var(--neg); }
   .card:hover { border-color: var(--accent); }
-  .card h2 { margin: 0 0 4px 0; font-size: 16px; text-transform: capitalize; }
+  @media (prefers-reduced-motion: no-preference) {
+    .card { transition: border-color 0.15s ease, transform 0.15s ease; }
+    .card:hover { transform: translateY(-2px); }
+  }
+  .card h2 { margin: 0 0 4px 0; font-size: 15.5px; font-weight: 600; text-transform: capitalize; }
   .card .meta { color: var(--muted); font-size: 12px; margin-bottom: 12px; }
-  .edge { font-size: 22px; font-weight: 600; }
+  .edge { font-size: 24px; font-weight: 600; letter-spacing: -0.01em; }
   .edge.pos { color: var(--pos); }
   .edge.neg { color: var(--neg); }
   .bucket-label { color: var(--muted); font-size: 12px; margin-top: 2px; }
+
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--border); }
-  th { color: var(--muted); font-weight: 500; }
+  th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--border-soft); }
+  th { color: var(--muted); font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; font-family: var(--font-ui); }
+  tbody tr:hover { background: var(--bg-raised); }
+
   .bar-row { display: flex; align-items: center; gap: 8px; }
-  .bar-track { flex: 1; background: #22262f; border-radius: 4px; height: 14px; position: relative; overflow: hidden; }
-  .bar-fill { position: absolute; top: 0; left: 0; height: 100%; border-radius: 4px; }
+  .bar-track { flex: 1; background: var(--track); border-radius: 5px; height: 14px; position: relative; overflow: hidden; }
+  .bar-fill { position: absolute; top: 0; left: 0; height: 100%; border-radius: 5px; }
   .bar-fill.market { background: var(--accent); opacity: 0.55; }
-  .bar-fill.model { background: var(--pos); opacity: 0.85; height: 6px; top: 4px; }
-  .empty { color: var(--muted); padding: 40px; text-align: center; }
-  code { background: #22262f; padding: 1px 5px; border-radius: 4px; }
+  .bar-fill.model { background: var(--pos); opacity: 0.9; height: 6px; top: 4px; }
+
+  .empty {
+    color: var(--muted);
+    padding: 48px 24px;
+    text-align: center;
+    font-size: 13px;
+    line-height: 1.6;
+  }
+  code { background: var(--track); padding: 2px 6px; border-radius: 5px; font-size: 12.5px; }
+
+  .legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px; color: var(--muted); font-size: 12px; margin-bottom: 12px; }
+  .legend-item { display: inline-flex; align-items: center; gap: 6px; }
+  .legend-dot { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
+  .legend-dot.market { background: var(--accent); opacity: 0.55; }
+  .legend-dot.model { background: var(--pos); opacity: 0.9; }
+
+  .icon { width: 18px; height: 18px; vertical-align: -4px; flex-shrink: 0; }
+  .block > h1 .icon { width: 20px; height: 20px; vertical-align: -5px; margin-right: 9px; color: var(--accent-strong); }
+  .side-link-icon { width: 18px; height: 18px; }
+
+  .verdict-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 11px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+    font-family: var(--font-ui);
+  }
+  .verdict-pill.good { background: var(--pos-bg); color: var(--pos); }
+  .verdict-pill.bad { background: var(--neg-bg); color: var(--neg); }
+  .verdict-pill.neutral { background: var(--accent-bg); color: var(--accent-strong); }
+  .verdict-pill.insufficient, .verdict-pill.none { background: var(--track); color: var(--muted); }
+
+  .block {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 22px 24px;
+    margin-bottom: 18px;
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .block > h1 {
+    font-size: 16.5px;
+    font-weight: 600;
+    margin: 0 0 16px;
+    display: flex;
+    align-items: center;
+    letter-spacing: -0.01em;
+  }
+  .block h2 {
+    font-size: 12.5px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin: 24px 0 8px;
+    font-weight: 600;
+  }
+  .block > h2:first-of-type { margin-top: 0; }
+  .block table { margin-bottom: 8px; }
+
+  .toc {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    background: var(--bg);
+    padding: 4px 0 16px;
+    margin-bottom: 4px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .toc a {
+    color: var(--muted);
+    text-decoration: none;
+    font-size: 12px;
+    padding: 6px 13px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--panel);
+    white-space: nowrap;
+  }
+  .toc a:hover { color: var(--text); border-color: var(--accent); }
+  section[id] { scroll-margin-top: 16px; }
+
+  @media (max-width: 640px) {
+    .block { padding: 18px; }
+  }
 </style>
 </head>
 <body>
-<header>
-  <a href="/"><h1>polymarket-lab</h1></a>
-  <span class="sub">paper-only</span>
-  <nav style="margin-left: auto; display: flex; gap: 16px;">
-    <a href="/" style="color: var(--muted); font-size: 13px;">погода</a>
-    <a href="/sports" style="color: var(--muted); font-size: 13px;">спорт</a>
-  </nav>
-</header>
-<main>
-  {% block content %}{% endblock %}
-</main>
+<a href="#main-content" class="skip-link">Перейти к содержимому</a>
+{% macro navlink(href, label, icon_name, active) -%}
+<a href="{{ href }}" class="side-link{{ ' active' if active else '' }}"{% if active %} aria-current="page"{% endif %}>{{ icon.render(icon_name, 'side-link-icon') }}<span>{{ label }}</span></a>
+{%- endmacro %}
+{% set path = request.url.path %}
+<div class="shell">
+  <input type="checkbox" id="nav-toggle" class="nav-toggle-input">
+  <aside class="sidebar">
+    <div class="brand">
+      <a href="/" class="brand-link"><span class="brand-dot" aria-hidden="true"></span>polymarket-lab</a>
+    </div>
+    <nav aria-label="Разделы">
+      <div class="side-group-label">Обзор</div>
+      {{ navlink('/status', 'статус', 'status', path == '/status') }}
+      <div class="side-group-label">Гипотезы</div>
+      {{ navlink('/', 'погода', 'weather', path == '/' or path.startswith('/city/')) }}
+      {{ navlink('/sports', 'спорт', 'sports', path == '/sports') }}
+      {{ navlink('/esports', 'киберспорт', 'esports', path == '/esports') }}
+      {{ navlink('/arbitrage', 'арбитраж', 'shuffle', path == '/arbitrage') }}
+      {{ navlink('/macro', 'макро', 'trending', path == '/macro') }}
+      {{ navlink('/musk', 'твиты Маска', 'message', path == '/musk') }}
+      {{ navlink('/news', 'новости', 'news', path == '/news') }}
+      <div class="side-group-label">Данные</div>
+      {{ navlink('/calibration', 'точность', 'target', path == '/calibration') }}
+    </nav>
+    <div class="side-foot">
+      <span class="paper-badge">paper trading · $0 реальных денег</span>
+    </div>
+  </aside>
+  <label for="nav-toggle" class="nav-scrim" aria-hidden="true"></label>
+  <div class="main-col">
+    <header class="topbar">
+      <label for="nav-toggle" class="nav-toggle-btn" aria-label="Открыть меню">{{ icon.render('menu') }}</label>
+      <span class="topbar-title">polymarket-lab</span>
+    </header>
+    <main id="main-content" tabindex="-1">
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+</div>
 </body>
 </html>

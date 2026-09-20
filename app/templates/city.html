@@ -2,19 +2,23 @@
 {% block title %}{{ city }} — polymarket-lab{% endblock %}
 {% block content %}
 <p><a href="/">&larr; все города</a></p>
-<h2 style="text-transform: capitalize;">{{ city.replace('_', ' ') }}</h2>
 
 {% if not buckets %}
   <div class="empty">Данных по этому городу пока нет.</div>
 {% else %}
-<p class="meta" style="color: var(--muted); font-size: 13px;">
-  Последний снимок: {{ buckets[0].local_date }}, {{ '%02d'|format(buckets[0].local_hour) }}:00 местных ·
-  синяя полоса — цена Polymarket, зелёная чёрточка — доля GFS-ансамбля в этом бакете
+<section class="block">
+<h1 style="text-transform: capitalize;">{{ city.replace('_', ' ') }} — сейчас</h1>
+<p class="meta" style="color: var(--muted); font-size: 13px; margin-bottom: 4px;">
+  Последний снимок: {{ buckets[0].local_date }}, {{ '%02d'|format(buckets[0].local_hour) }}:00 местных
 </p>
+<div class="legend">
+  <span class="legend-item"><span class="legend-dot market"></span>цена Polymarket</span>
+  <span class="legend-item"><span class="legend-dot model"></span>наш прогноз погоды</span>
+</div>
 
-<table style="margin-bottom: 32px;">
+<table>
   <thead>
-    <tr><th>Бакет</th><th style="width: 45%;">Рынок vs модель</th><th>Edge</th></tr>
+    <tr><th>Диапазон температуры</th><th style="width: 45%;">Рынок и наш прогноз</th><th>Расхождение</th></tr>
   </thead>
   <tbody>
     {% for b in buckets %}
@@ -33,11 +37,16 @@
     {% endfor %}
   </tbody>
 </table>
+</section>
 
-<h3 style="font-size: 14px; color: var(--muted); font-weight: 500;">История снимков (макс |edge| по всем бакетам)</h3>
+<section class="block">
+<h1>История снимков</h1>
+<p class="meta" style="color: var(--muted); font-size: 12px; margin-bottom: 8px;">
+  Самое большое расхождение среди всех диапазонов в каждом снимке.
+</p>
 <table>
   <thead>
-    <tr><th>UTC</th><th>Местное время</th><th>Дата</th><th>Макс |edge|</th></tr>
+    <tr><th>UTC</th><th>Местное время</th><th>Дата</th><th>Макс. расхождение</th></tr>
   </thead>
   <tbody>
     {% for h in history %}
@@ -50,5 +59,6 @@
     {% endfor %}
   </tbody>
 </table>
+</section>
 {% endif %}
 {% endblock %}

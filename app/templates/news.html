@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% import "_icons.html" as icon %}
+{% block title %}Новости — polymarket-lab{% endblock %}
+{% block content %}
+<section class="block">
+<h1>{{ icon.render('news') }}Что нашли сейчас</h1>
+<p class="meta" style="color: var(--muted); font-size: 13px; margin-bottom: 20px;">
+  Разведка, не находка: ищем в свежих новостях изменения в составе команды
+  (травмы, возвращения, трансферы, смена тренера) — читает и размечает
+  локальный ИИ на нашем сервере (Ollama). Пока не проверено, узнаём ли мы
+  об этом раньше, чем цена Polymarket успевает отреагировать. Ниже — только
+  команды, где действительно что-то нашли, остальные посчитаны внизу.
+</p>
+
+{% set type_ru = {'absence': 'отсутствие', 'return': 'возвращение', 'transfer_in': 'пришёл в команду',
+                   'transfer_out': 'ушёл из команды', 'manager_change': 'смена тренера'} %}
+{% set severity_ru = {'minor': 'немного', 'major': 'сильно'} %}
+{% set confidence_ru = {'low': 'низкая', 'medium': 'средняя', 'high': 'высокая'} %}
+
+{% if not rows %}
+  <div class="empty">Пока нет данных — крон sports_news.py ещё не запускался.</div>
+{% else %}
+  {% set flagged = rows | selectattr('severity', 'ne', 'none') | list %}
+  {% if not flagged %}
+    <div class="empty">Ни у одной из {{ rows | length }} проверенных команд ничего не нашли.</div>
+  {% else %}
+  <table>
+    <thead>
+      <tr><th>Матч</th><th>Команда</th><th>Насколько сильно</th><th>Насколько уверены</th><th>Что нашли</th><th>Заметка</th></tr>
+    </thead>
+    <tbody>
+      {% for r in flagged %}
+      <tr>
+        <td>{{ r.home_team }} — {{ r.away_team }}</td>
+        <td>{{ r.team }} ({{ r.side }})</td>
+        <td>{{ severity_ru.get(r.severity, r.severity) }}</td>
+        <td>{{ confidence_ru.get(r.confidence, r.confidence) }}</td>
+        <td>
+          {% for c in r.changes_parsed %}
+          <div style="margin-bottom: 3px;">
+            <span style="color: var(--muted); font-size: 11px;">{{ type_ru.get(c.type, c.type) }}</span>
+            {% if c.effect == 'weakens' %}<span style="color: var(--neg);">▼ ослабляет</span>
+            {% elif c.effect == 'strengthens' %}<span style="color: var(--pos);">▲ усиливает</span>
+            {% endif %}
+            — {{ c.detail }}
+          </div>
+          {% endfor %}
+        </td>
+        <td style="color: var(--muted); font-size: 12px;">{{ r.note }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+  <p class="meta" style="color: var(--muted); font-size: 12px; margin-top: 16px;">
+    Всего проверено команд в последнем снимке: {{ rows | length }}, из них с находкой: {{ flagged | length }}.
+  </p>
+{% endif %}
+</section>
+
+{% if news_results %}
+<section class="block">
+<h1>{{ icon.render('results') }}Результаты</h1>
+<p class="meta" style="color: var(--muted); font-size: 12px; margin-bottom: 8px;">
+  "Подтвердилось" — команда с находкой "ослабляет" правда не выиграла, или с находкой
+  "усиливает" правда выиграла.
+</p>
+<table>
+  <thead>
+    <tr><th>Команда</th><th>Матч</th><th>Находка</th><th>Факт</th><th>Ожидание рынка</th><th>Кто прав</th></tr>
+  </thead>
+  <tbody>
+    {% for r in news_results %}
+    <tr>
+      <td>{{ r.team }}</td>
+      <td>{{ r.match }}</td>
+      <td>{{ r.effect }}</td>
+      <td>{{ r.actual }}</td>
+      <td>{{ '%.0f%%' | format(r.market_p * 100) }}</td>
+      <td><span class="verdict-pill {{ r.verdict.tone }}">{{ r.verdict.label }}</span></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</section>
+{% endif %}
+{% endblock %}

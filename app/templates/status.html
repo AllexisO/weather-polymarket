@@ -1,0 +1,150 @@
+{% extends "base.html" %}
+{% import "_icons.html" as icon %}
+{% block title %}Статус — polymarket-lab{% endblock %}
+{% block content %}
+<style>
+  .money-banner {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--highlight);
+    border-radius: 12px;
+    padding: 14px 18px;
+    margin-bottom: 20px;
+    font-size: 13.5px;
+    color: var(--muted);
+    line-height: 1.55;
+  }
+  .money-banner strong { color: var(--text); }
+  .money-banner .icon { color: var(--highlight); margin-top: 1px; }
+  .status-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 14px;
+  }
+  .status-card h2 {
+    display: flex;
+    align-items: center;
+    margin: 0 0 12px;
+    font-size: 15px;
+    font-weight: 600;
+  }
+  .status-card h2 .icon { color: var(--accent-strong); margin-right: 9px; }
+  .status-stat { font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+  .status-stat b { color: var(--text); font-weight: 600; }
+  .status-n { font-size: 12px; color: var(--muted); margin-top: 10px; }
+  .status-bar-track { background: var(--track); border-radius: 4px; height: 6px; margin-top: 6px; overflow: hidden; }
+  .status-bar-fill { height: 100%; background: var(--accent); }
+  .status-note { font-size: 12.5px; color: var(--muted); margin-top: 12px; line-height: 1.5; }
+  .status-link { display: inline-block; margin-top: 12px; font-size: 13px; color: var(--accent-strong); text-decoration: none; }
+  .status-link:hover { text-decoration: underline; }
+</style>
+
+<div class="money-banner">
+  {{ icon.render('wallet') }}
+  <span>Реальных денег в игре: <strong>$0</strong>. Всё на этой странице — проверка гипотез на
+  бумаге, ничего не куплено на Polymarket. "Опережаем рынок" здесь значит "наш источник
+  угадывал исход чаще, чем цена Polymarket", а не "заработали".</span>
+</div>
+
+<div class="status-grid">
+
+  <div class="block status-card">
+    <h2>{{ icon.render('weather') }}Погода</h2>
+    <span class="verdict-pill {{ weather.verdict.tone }}">{{ weather.verdict.label }}</span>
+    {% if weather.source_rate is not none %}
+    <div class="status-stat">Наш прогноз угадывал: <b>{{ '%.1f%%' | format(weather.source_rate * 100) }}</b></div>
+    <div class="status-stat">Рынок Polymarket угадывал: <b>{{ '%.1f%%' | format(weather.market_rate * 100) }}</b></div>
+    {% else %}
+    <div class="status-stat">Пока нет проверенных дней с правильными координатами станций.</div>
+    {% endif %}
+    <div class="status-n">
+      Проверено случаев: {{ weather.n }} {% if weather.n < min_n %}(нужно хотя бы {{ min_n }}, чтобы вообще судить){% endif %}
+    </div>
+    <div class="status-bar-track"><div class="status-bar-fill" style="width: {{ [100, (weather.n / min_n * 100) | round(0)] | min }}%;"></div></div>
+    <a class="status-link" href="/calibration">Подробнее по городам →</a>
+  </div>
+
+  <div class="block status-card">
+    <h2>{{ icon.render('sports') }}Спорт: букмекер Pinnacle</h2>
+    <span class="verdict-pill {{ sports.verdict.tone }}">{{ sports.verdict.label }}</span>
+    {% if sports.source_rate is not none %}
+    <div class="status-stat">Pinnacle угадывал победителя: <b>{{ '%.1f%%' | format(sports.source_rate * 100) }}</b></div>
+    <div class="status-stat">Рынок Polymarket угадывал: <b>{{ '%.1f%%' | format(sports.market_rate * 100) }}</b></div>
+    {% else %}
+    <div class="status-stat">Пока нет матчей, которые уже сыграны и сматчены с нашими данными.</div>
+    {% endif %}
+    <div class="status-n">
+      Проверено случаев: {{ sports.n }} {% if sports.n < min_n %}(нужно хотя бы {{ min_n }}, чтобы вообще судить){% endif %}
+    </div>
+    <div class="status-bar-track"><div class="status-bar-fill" style="width: {{ [100, (sports.n / min_n * 100) | round(0)] | min }}%;"></div></div>
+    <a class="status-link" href="/sports">Подробнее по матчам →</a>
+  </div>
+
+  <div class="block status-card">
+    <h2>{{ icon.render('esports') }}Киберспорт: букмекер Pinnacle</h2>
+    <span class="verdict-pill {{ esports.verdict.tone }}">{{ esports.verdict.label }}</span>
+    {% if esports.source_rate is not none %}
+    <div class="status-stat">Pinnacle угадывал победителя: <b>{{ '%.1f%%' | format(esports.source_rate * 100) }}</b></div>
+    <div class="status-stat">Рынок Polymarket угадывал: <b>{{ '%.1f%%' | format(esports.market_rate * 100) }}</b></div>
+    {% else %}
+    <div class="status-stat">Пока нет матчей, которые уже сыграны и резолвлены.</div>
+    {% endif %}
+    <div class="status-n">
+      Проверено случаев: {{ esports.n }} {% if esports.n < min_n %}(нужно хотя бы {{ min_n }}, чтобы вообще судить){% endif %}
+    </div>
+    <div class="status-bar-track"><div class="status-bar-fill" style="width: {{ [100, (esports.n / min_n * 100) | round(0)] | min }}%;"></div></div>
+    <a class="status-link" href="/esports">Подробнее по матчам →</a>
+  </div>
+
+  <div class="block status-card">
+    <h2>{{ icon.render('trending') }}Макро: CPI/безработица/JOLTS/ВВП</h2>
+    <span class="verdict-pill {{ macro.verdict.tone }}">{{ macro.verdict.label }}</span>
+    {% if macro.source_rate is not none %}
+    <div class="status-stat">Наша модель угадывала диапазон: <b>{{ '%.1f%%' | format(macro.source_rate * 100) }}</b></div>
+    <div class="status-stat">Рынок Polymarket угадывал: <b>{{ '%.1f%%' | format(macro.market_rate * 100) }}</b></div>
+    {% else %}
+    <div class="status-stat">Пока нет резолвленных отчётов BLS/BEA.</div>
+    {% endif %}
+    <div class="status-n">
+      Проверено случаев: {{ macro.n }} {% if macro.n < macro_min_n %}(нужно хотя бы {{ macro_min_n }}, чтобы вообще судить){% endif %}
+    </div>
+    <div class="status-bar-track"><div class="status-bar-fill" style="width: {{ [100, (macro.n / macro_min_n * 100) | round(0)] | min }}%;"></div></div>
+    <div class="status-note">
+      Резолвится раз в месяц на метрику (BLS/BEA отчёты) — набор случаев
+      растёт медленно по самой природе данных, не потому что редко смотрим.
+    </div>
+    <a class="status-link" href="/macro">Подробнее по метрикам →</a>
+  </div>
+
+  <div class="block status-card">
+    <h2>{{ icon.render('news') }}Спорт: новости (Ollama)</h2>
+    <span class="verdict-pill {{ news_verdict.tone }}">{{ news_verdict.label }}</span>
+    {% if news_validation.combined_score is not none %}
+    <div class="status-stat">Команды с находкой "ослабляет" ({{ news_validation.weakens.n }} случаев) выигрывали:
+      <b>{{ '%.0f%%' | format(news_validation.weakens.avg_actual_win_rate * 100) if news_validation.weakens.n else '—' }}</b>,
+      рынок ожидал <b>{{ '%.0f%%' | format(news_validation.weakens.avg_market_p * 100) if news_validation.weakens.n else '—' }}</b>
+      — правда, если факт НИЖЕ</div>
+    <div class="status-stat">Команды с находкой "усиливает" ({{ news_validation.strengthens.n }} случаев) выигрывали:
+      <b>{{ '%.0f%%' | format(news_validation.strengthens.avg_actual_win_rate * 100) if news_validation.strengthens.n else '—' }}</b>,
+      рынок ожидал <b>{{ '%.0f%%' | format(news_validation.strengthens.avg_market_p * 100) if news_validation.strengthens.n else '—' }}</b>
+      — правда, если факт ВЫШЕ</div>
+    {% else %}
+    <div class="status-stat">Проверено команд: <b>{{ news_n }}</b>, с находкой: <b>{{ news_flagged }}</b></div>
+    {% endif %}
+    <div class="status-n">
+      Проверено случаев: {{ news_validation.combined_n }} {% if news_validation.combined_n < news_min_n %}(нужно хотя бы {{ news_min_n }}, чтобы вообще судить){% endif %}
+    </div>
+    <div class="status-bar-track"><div class="status-bar-fill" style="width: {{ [100, (news_validation.combined_n / news_min_n * 100) | round(0)] | min }}%;"></div></div>
+    <div class="status-note">
+      Это проверка "была ли новость вообще права" (команда правда сыграла хуже/лучше,
+      чем считал рынок) — не "узнали ли мы раньше рынка", это отдельная проверка
+      на странице "точность".
+    </div>
+    <a class="status-link" href="/news">Что нашли →</a>
+  </div>
+
+</div>
+{% endblock %}

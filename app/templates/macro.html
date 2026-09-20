@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% import "_icons.html" as icon %}
+{% block title %}Макро — polymarket-lab{% endblock %}
+{% block content %}
+<section class="block">
+<h1>{{ icon.render('trending') }}Макро: наша модель vs Polymarket</h1>
+<p class="meta" style="color: var(--muted); font-size: 13px; margin-bottom: 20px;">
+  CPI/безработица/JOLTS/ВВП — резолвятся реальным отчётом BLS/BEA, не ценой
+  самого Polymarket. Наша модель — простая (персистентный YoY для CPI,
+  последнее значение + тренд для безработицы/JOLTS, готовый GDPNow для ВВП),
+  первая версия, посчитана на бесплатных данных FRED. "Модель" на графике —
+  нормальное распределение вокруг точечного прогноза, не толпа/ансамбль.
+</p>
+
+{% if not metrics %}
+  <div class="empty">Пока нет снимков — крон macro_edge.py ещё не запускался.</div>
+{% else %}
+<div class="legend">
+  <span class="legend-item"><span class="legend-dot market"></span>цена Polymarket</span>
+  <span class="legend-item"><span class="legend-dot model"></span>наша модель (FRED)</span>
+</div>
+{% for m in metrics %}
+<div style="margin-bottom: 28px;">
+  <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px;">
+    <strong>{{ m.metric }}</strong>
+    <span style="color: var(--muted); font-size: 12px;">{{ m.target_period }} · модель {{ '%.2f' | format(m.model_mean) }}±{{ '%.2f' | format(m.model_std) }} · макс. расхождение {{ '%.1f%%' | format(m.best_abs_edge * 100) }}</span>
+  </div>
+  <table>
+    <thead>
+      <tr><th>Диапазон</th><th style="width: 50%;">Рынок и модель</th><th>Расхождение</th></tr>
+    </thead>
+    <tbody>
+      {% for b in m.buckets %}
+      <tr>
+        <td>
+          {% if b.lo <= -900 %}до {{ '%.2f' | format(b.hi) }}
+          {% elif b.hi >= 900 %}от {{ '%.2f' | format(b.lo) }}
+          {% else %}{{ '%.2f' | format(b.lo) }} – {{ '%.2f' | format(b.hi) }}
+          {% endif %}
+        </td>
+        <td>
+          <div class="bar-row">
+            <div class="bar-track">
+              <div class="bar-fill market" style="width: {{ (b.market_p * 100) | round(1) }}%;"></div>
+              <div class="bar-fill model" style="width: {{ (b.model_p * 100) | round(1) }}%;"></div>
+            </div>
+          </div>
+        </td>
+        <td style="font-weight: 600;">{{ '%.1f%%' | format(b.edge * 100) }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endfor %}
+{% endif %}
+</section>
+
+{% if macro_results %}
+<section class="block">
+<h1>{{ icon.render('results') }}Результаты</h1>
+<table>
+  <thead>
+    <tr><th>Метрика</th><th>Период</th><th>Наша модель (среднее)</th><th>Факт</th><th>Кто прав</th></tr>
+  </thead>
+  <tbody>
+    {% for r in macro_results %}
+    <tr>
+      <td>{{ r.metric }}</td>
+      <td>{{ r.target_period }}</td>
+      <td>{{ '%.2f' | format(r.model_mean) }}</td>
+      <td style="font-weight: 600;">{{ '%.2f' | format(r.actual) }}</td>
+      <td><span class="verdict-pill {{ r.verdict.tone }}">{{ r.verdict.label }}</span></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</section>
+{% endif %}
+{% endblock %}
