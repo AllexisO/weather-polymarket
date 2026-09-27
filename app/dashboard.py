@@ -158,86 +158,6 @@ def _one_snapshot_per_day(rows):
     return groups
 
 
-def compute_weather_calibration(rows, model_field="model_p"):
-    groups = _one_snapshot_per_day(rows)
-    n = 0
-    model_hits = 0
-    market_hits = 0
-    for grp in groups.values():
-        actual = grp[0]["actual_max"]
-        model_pick = max(grp, key=lambda r: r[model_field])
-        market_pick = max(grp, key=lambda r: r["market_p"])
-        n += 1
-        if model_pick["bucket_lo"] < actual <= model_pick["bucket_hi"]:
-            model_hits += 1
-        if market_pick["bucket_lo"] < actual <= market_pick["bucket_hi"]:
-            market_hits += 1
-    return {
-        "n": n,
-        "model_hit_rate": model_hits / n if n else None,
-        "market_hit_rate": market_hits / n if n else None,
-    }
-
-
-def compute_weather_bias(rows):
-    # Средний промах в градусах (факт минус середина топ-бакета), отдельно
-    # для модели и для рынка. Открытые "служебные" бакеты ("35.5° и выше",
-    # "26.5° и ниже") хранятся как (-999, X) / (X, 999) — их середина не
-    # температура, а мусорное число, поэтому такие топ-пики в промах не
-    # включаем (иначе один такой снимок утаскивает среднее в минус/плюс
-    # сотни градусов, как уже случилось при ручном разборе). Один день —
-    # один случай (самый ранний снимок), см. _one_snapshot_per_day.
-    groups = _one_snapshot_per_day(rows)
-
-    per_city = {}
-    for grp in groups.values():
-        city = grp[0]["city"]
-        unit = grp[0]["unit"]
-        actual = grp[0]["actual_max"]
-        model_pick = max(grp, key=lambda r: r["model_p"])
-        market_pick = max(grp, key=lambda r: r["market_p"])
-        c = per_city.setdefault(
-            city, {"unit": unit, "n": 0, "model_hits": 0, "market_hits": 0, "model_bias": [], "market_bias": []}
-        )
-        c["n"] += 1
-        if model_pick["bucket_lo"] < actual <= model_pick["bucket_hi"]:
-            c["model_hits"] += 1
-        if market_pick["bucket_lo"] < actual <= market_pick["bucket_hi"]:
-            c["market_hits"] += 1
-        if model_pick["bucket_lo"] > -900 and model_pick["bucket_hi"] < 900:
-            c["model_bias"].append(actual - (model_pick["bucket_lo"] + model_pick["bucket_hi"]) / 2)
-        if market_pick["bucket_lo"] > -900 and market_pick["bucket_hi"] < 900:
-            c["market_bias"].append(actual - (market_pick["bucket_lo"] + market_pick["bucket_hi"]) / 2)
-
-    by_city = []
-    model_bias_c, market_bias_c = [], []
-    for city, c in sorted(per_city.items()):
-        to_c = (lambda v: v * 5 / 9) if c["unit"] == "fahrenheit" else (lambda v: v)
-        avg_model = sum(c["model_bias"]) / len(c["model_bias"]) if c["model_bias"] else None
-        avg_market = sum(c["market_bias"]) / len(c["market_bias"]) if c["market_bias"] else None
-        by_city.append(
-            {
-                "city": city,
-                "unit_symbol": "°F" if c["unit"] == "fahrenheit" else "°C",
-                "n": c["n"],
-                "model_hit_rate": c["model_hits"] / c["n"],
-                "market_hit_rate": c["market_hits"] / c["n"],
-                "avg_model_bias": avg_model,
-                "avg_market_bias": avg_market,
-            }
-        )
-        if avg_model is not None:
-            model_bias_c.append(to_c(avg_model))
-        if avg_market is not None:
-            market_bias_c.append(to_c(avg_market))
-
-    return {
-        "by_city": by_city,
-        "overall_model_bias_c": sum(model_bias_c) / len(model_bias_c) if model_bias_c else None,
-        "overall_market_bias_c": sum(market_bias_c) / len(market_bias_c) if market_bias_c else None,
-    }
-
-
 def format_bucket(lo, hi, unit_symbol):
     if lo <= -900:
         return f"до {hi}{unit_symbol}"
@@ -301,136 +221,6 @@ def compute_weather_results(conn):
     return results
 
 
-# Пороги для вердикта на /status — осознанно консервативные, чтобы не
-# выдавать "опережаем" на шуме. n меньше MIN_N — вообще не судим, разница
-# меньше MIN_GAP п.п. — считаем "наравне", даже если один процент выше
-# другого: на такой выборке это ничего не значит.
-VERDICT_MIN_N = 30
-VERDICT_MIN_GAP = 0.05
-
-
-def verdict(source_rate, market_rate, n, min_n=VERDICT_MIN_N):
-    if n is None or n == 0 or source_rate is None or market_rate is None:
-        return {"tone": "none", "label": "нет данных"}
-    if n < min_n:
-        return {"tone": "insufficient", "label": "мало данных"}
-    gap = source_rate - market_rate
-    if abs(gap) < VERDICT_MIN_GAP:
-        return {"tone": "neutral", "label": "наравне с рынком"}
-    if gap > 0:
-        return {"tone": "good", "label": "опережаем рынок"}
-    return {"tone": "bad", "label": "отстаём от рынка"}
-
-
-@app.get("/status", response_class=HTMLResponse)
-def status(request: Request):
-    conn = db()
-
-    weather_card = {"verdict": verdict(None, None, 0), "n": 0, "source_rate": None, "market_rate": None}
-    if table_exists(conn, "weather_station_daily"):
-        rows = conn.execute(
-            """
-            SELECT s.ts_utc, s.city, s.local_date, s.local_hour, s.unit, s.bucket_lo, s.bucket_hi,
-                   s.market_p, s.model_p, o.actual_max
-            FROM snapshots s
-            JOIN weather_station_daily o ON s.city = o.city AND s.local_date = o.local_date
-            WHERE s.ts_utc >= ? AND s.local_hour < 12
-            """,
-            (WEATHER_COORD_FIX_TS,),
-        ).fetchall()
-        stats = compute_weather_calibration(rows)
-        weather_card = {
-            "verdict": verdict(stats["model_hit_rate"], stats["market_hit_rate"], stats["n"]),
-            "n": stats["n"],
-            "source_rate": stats["model_hit_rate"],
-            "market_rate": stats["market_hit_rate"],
-        }
-
-    conn.close()
-    return TEMPLATES.TemplateResponse(
-        "status.html",
-        {
-            "request": request,
-            "weather": weather_card,
-            "min_n": VERDICT_MIN_N,
-        },
-    )
-
-
-@app.get("/calibration", response_class=HTMLResponse)
-def calibration(request: Request):
-    conn = db()
-
-    weather_stats = {"all": None, "early": None}
-    weather_bias = None
-    weather_pre_fix_n = 0
-    if table_exists(conn, "weather_station_daily"):
-        weather_pre_fix_n = conn.execute(
-            """
-            SELECT COUNT(*) AS n FROM snapshots s
-            JOIN weather_station_daily o ON s.city = o.city AND s.local_date = o.local_date
-            WHERE s.ts_utc < ?
-            """,
-            (WEATHER_COORD_FIX_TS,),
-        ).fetchone()["n"]
-        for label, extra_filter in (("all", ""), ("early", "AND s.local_hour < 12")):
-            rows = conn.execute(
-                f"""
-                SELECT s.ts_utc, s.city, s.local_date, s.local_hour, s.unit, s.bucket_lo, s.bucket_hi,
-                       s.market_p, s.model_p, o.actual_max
-                FROM snapshots s
-                JOIN weather_station_daily o ON s.city = o.city AND s.local_date = o.local_date
-                WHERE s.ts_utc >= ? {extra_filter}
-                """,
-                (WEATHER_COORD_FIX_TS,),
-            ).fetchall()
-            weather_stats[label] = compute_weather_calibration(rows)
-            if label == "early":
-                weather_bias = compute_weather_bias(rows)
-
-    wn2_stats = None
-    if table_exists(conn, "weather_station_daily"):
-        rows = conn.execute(
-            """
-            SELECT s.ts_utc, s.city, s.local_date, s.local_hour, s.unit, s.bucket_lo, s.bucket_hi,
-                   s.market_p, s.wn2_model_p, o.actual_max
-            FROM snapshots s
-            JOIN weather_station_daily o ON s.city = o.city AND s.local_date = o.local_date
-            WHERE s.local_hour < 12 AND s.wn2_model_p IS NOT NULL
-            """
-        ).fetchall()
-        if rows:
-            wn2_stats = compute_weather_calibration(rows, model_field="wn2_model_p")
-
-    emos_stats = None
-    if table_exists(conn, "weather_station_daily"):
-        rows = conn.execute(
-            """
-            SELECT s.ts_utc, s.city, s.local_date, s.local_hour, s.unit, s.bucket_lo, s.bucket_hi,
-                   s.market_p, s.emos_model_p, o.actual_max
-            FROM snapshots s
-            JOIN weather_station_daily o ON s.city = o.city AND s.local_date = o.local_date
-            WHERE s.local_hour < 12 AND s.emos_model_p IS NOT NULL
-            """
-        ).fetchall()
-        if rows:
-            emos_stats = compute_weather_calibration(rows, model_field="emos_model_p")
-
-    conn.close()
-    return TEMPLATES.TemplateResponse(
-        "calibration.html",
-        {
-            "request": request,
-            "weather": weather_stats,
-            "weather_bias": weather_bias,
-            "weather_pre_fix_n": weather_pre_fix_n,
-            "wn2_stats": wn2_stats,
-            "emos_stats": emos_stats,
-        },
-    )
-
-
-# Время на странице — кишинёвское (часовой пояс сервера и Alex).
 VIEWER_TZ = ZoneInfo("Europe/Chisinau")
 
 
@@ -510,7 +300,11 @@ WALLET_INFO = {
     "copy": ("Повтор за сильными трейдерами", "Повтор за сильными трейдерами",
              "Повторяет покупки 30 лучших трейдеров погоды за 14 дней — только сделанные накануне дня маркета, не дороже их цены +2¢"),
     "obs": ("Живые замеры", "По живым замерам станции", "Ставка против варианта, который станция уже исключила"),
+    "obs_fmi": ("Живые замеры", "Хельсинки: 10-минутные замеры FMI",
+                "То же, что «по живым замерам», но по 10-минутным данным финской метеослужбы — раньше METAR"),
 }
+# кошельки по живым замерам (paper_obs_trades, колонка wallet) — weather_obs_live.py
+OBS_WALLETS = ("obs", "obs_fmi")
 # 2026-09-25: страница кошелька в стиле банковского приложения — города по-русски,
 # у каждого счёта короткий значок вместо иконки.
 CITY_RU = {
@@ -528,7 +322,7 @@ CITY_RU = {
     "wuhan": "Ухань", "zhengzhou": "Чжэнчжоу",
 }
 WALLET_BADGE = {"ml3": "v3", "ml2": "v2", "ml": "v1", "ml_shift": "v1+", "mm": "MX", "emos": "EM", "main": "GI",
-                "mm_mk": "MX", "emos_mk": "EM", "main_mk": "GI", "ml3_mk": "v3", "ml3_cal": "v3+", "ml3_no": "v3−", "ml3_cal_k": "v3$", "ml4": "v4", "ml4_cal": "v4+", "ml4e": "v4³", "ml4e_cal": "v4³+", "copy": "CP", "obs": "OB"}
+                "mm_mk": "MX", "emos_mk": "EM", "main_mk": "GI", "ml3_mk": "v3", "ml3_cal": "v3+", "ml3_no": "v3−", "ml3_cal_k": "v3$", "ml4": "v4", "ml4_cal": "v4+", "ml4e": "v4³", "ml4e_cal": "v4³+", "copy": "CP", "obs": "OB", "obs_fmi": "FI"}
 WALLET_GROUPS = ["Другие версии обучаемой модели", "Повтор за сильными трейдерами", "Прогноз по формулам (раньше)",
                  "Тот же сигнал, но покупка своей заявкой", "Живые замеры"]
 
@@ -883,7 +677,7 @@ def wallet_updates(conn):
             cur[kind] = dt
 
     for tbl, wcol, bet_ts in (("paper_trades", "wallet", "COALESCE(placed_at, snapshot_ts)"),
-                              ("paper_obs_trades", "'obs'", "placed_at")):
+                              ("paper_obs_trades", "wallet", "placed_at")):
         if table_exists(conn, tbl):
             for r in conn.execute(f"SELECT {wcol}, settled_at, {bet_ts} FROM {tbl} "
                                   f"WHERE status IN ('open', 'resting', 'won', 'lost', 'void')"):
@@ -946,6 +740,162 @@ def data_freshness(conn):
                 pass
         out.append(item)
     return out
+
+
+# ---- /status: здоровье системы (2026-09-27, просьба Alex) ----
+# Скрипты крона — jobs_info.py; каждый запуск пишет обёртка job_wrap.py в job_log
+# (итог, длительность, запросы к Open-Meteo); последний успех — job_runs.
+OPEN_METEO_DAILY = 10000  # бесплатный лимит вызовов в сутки
+ERR_WORDS = ("Traceback", "Error", "ошибка", "ОШИБКА", "ПРЕРВАНО", "locked")
+
+
+def _dt(raw):
+    try:
+        d = datetime.fromisoformat(raw)
+    except (TypeError, ValueError):
+        return None
+    return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
+
+
+def _ago(dt, now):
+    m = int((now - dt).total_seconds() // 60)
+    if m < 1:
+        return "только что"
+    if m < 60:
+        return f"{m} мин назад"
+    if m < 48 * 60:
+        return f"{m // 60} ч {m % 60:02d} мин назад"
+    return f"{m // 1440} дн назад"
+
+
+def _log_error(log):
+    """Последняя строка с ошибкой в конце лога (data/logs/<log>) — подсказка, что сломалось."""
+    if not log:
+        return None
+    try:
+        with open(DB_PATH.parent.parent / "logs" / log, "rb") as f:
+            f.seek(0, 2)
+            f.seek(max(0, f.tell() - 20000))
+            lines = f.read().decode("utf-8", "replace").splitlines()
+    except OSError:
+        return None
+    for line in reversed(lines):
+        if any(w in line for w in ERR_WORDS):
+            return line.strip()[:300]
+    return None
+
+
+def _size(n):
+    return f"{n / 1e9:.1f} ГБ" if n >= 1e9 else f"{n / 1e6:.0f} МБ"
+
+
+def system_health(conn):
+    import shutil
+    from jobs_info import JOBS
+    now = datetime.now(timezone.utc)
+    day_ago = (now - timedelta(days=1)).isoformat()
+    runs = {r["job"]: _dt(r["finished_at"]) for r in conn.execute("SELECT job, finished_at FROM job_runs")} \
+        if table_exists(conn, "job_runs") else {}
+    has_log = table_exists(conn, "job_log")
+    jobs, om_by_job = [], []
+    for key, label, script, sched, max_age, log in JOBS:
+        j = {"key": key, "label": label, "script": script, "sched": sched, "state": "unknown",
+             "ok_ago": None, "ok_when": None, "last": None, "fails": 0, "runs": 0, "err": None, "om": 0, "dur": None}
+        ok = runs.get(key)
+        if ok:
+            j["ok_ago"], j["ok_when"] = _ago(ok, now), _when(ok, now.astimezone(VIEWER_TZ))
+        if has_log:
+            last = conn.execute("SELECT rc, duration_s, finished_at FROM job_log WHERE job = ? "
+                                "ORDER BY finished_at DESC LIMIT 1", (key,)).fetchone()
+            agg = conn.execute("SELECT COUNT(*) n, SUM(rc != 0) f, SUM(om_calls) om, AVG(duration_s) d "
+                               "FROM job_log WHERE job = ? AND finished_at >= ?", (key, day_ago)).fetchone()
+            j["runs"], j["fails"], j["om"] = agg["n"], agg["f"] or 0, agg["om"] or 0
+            j["dur"] = agg["d"]
+            if last:
+                j["last"] = {"rc": last["rc"], "dur": last["duration_s"]}
+        late = ok is None or now - ok > timedelta(minutes=max_age)
+        failed = j["last"] is not None and j["last"]["rc"] != 0
+        if failed:
+            j["state"] = "fail"
+            j["err"] = ("остановлен по пределу времени" if j["last"]["rc"] in (124, 137, 143)
+                        else _log_error(log)) or f"код выхода {j['last']['rc']}"
+        elif ok is None:
+            j["state"] = "unknown"
+        elif late:
+            j["state"] = "late"
+        else:
+            j["state"] = "ok"
+        if j["om"]:
+            om_by_job.append((label, j["om"]))
+        jobs.append(j)
+
+    alerts_now, alerts_week = [], []
+    if table_exists(conn, "alerts"):
+        week = (now - timedelta(days=7)).isoformat()
+        for r in conn.execute("SELECT key, message, first_seen, resolved_at FROM alerts "
+                              "WHERE resolved_at IS NULL OR resolved_at >= ? ORDER BY first_seen DESC", (week,)):
+            a = {"key": r["key"], "msg": r["message"], "since": _when(_dt(r["first_seen"]), now.astimezone(VIEWER_TZ)),
+                 "until": _when(_dt(r["resolved_at"]), now.astimezone(VIEWER_TZ)) if r["resolved_at"] else None}
+            (alerts_now if r["resolved_at"] is None else alerts_week).append(a)
+    lock_file = DB_PATH.parent.parent / "ALERT_DB_LOCKED"
+    watchdog = None
+    try:
+        st = lock_file.stat()
+        watchdog = {"when": _when(datetime.fromtimestamp(st.st_mtime, timezone.utc), now.astimezone(VIEWER_TZ)),
+                    "recent": time.time() - st.st_mtime < 86400, "msg": lock_file.read_text().strip()[:300]}
+        if watchdog["recent"]:
+            alerts_now.insert(0, {"key": "db_locked", "msg": watchdog["msg"], "since": watchdog["when"], "until": None})
+    except OSError:
+        pass
+
+    def fsize(p):
+        try:
+            return p.stat().st_size
+        except OSError:
+            return 0
+    du = shutil.disk_usage(DB_PATH.parent)
+    storage = {"db": _size(fsize(DB_PATH)), "wal": _size(fsize(Path(str(DB_PATH) + "-wal"))),
+               "free": _size(du.free), "free_pct": du.free / du.total * 100}
+
+    stop = (DB_PATH.parent.parent / "STOP").exists()
+    copier = next(j for j in jobs if j["key"] == "weather_copy_live")
+    pre_alert = next((a for a in alerts_now if a["key"] == "preflight"), None)
+    al = next(j for j in jobs if j["key"] == "weather_alerts")
+    preflight = {"ok": pre_alert is None, "msg": pre_alert["msg"] if pre_alert else None,
+                 "when": al["ok_when"] or (runs.get("weather_alerts") and _when(runs["weather_alerts"], now.astimezone(VIEWER_TZ)))}
+    om_total = sum(n for _l, n in om_by_job)
+    om = {"total": om_total, "pct": om_total / OPEN_METEO_DAILY * 100, "limit": OPEN_METEO_DAILY,
+          "by_job": sorted(om_by_job, key=lambda x: -x[1]), "counted": has_log and any(j["runs"] for j in jobs)}
+
+    problems = []
+    for j in jobs:
+        if j["state"] == "fail":
+            problems.append(f"«{j['label']}»: последний запуск с ошибкой")
+        elif j["state"] == "late":
+            problems.append(f"«{j['label']}» опаздывает — последний успех {j['ok_ago'] or 'не было'}")
+    # «скрипт опаздывает» из тревог уже есть в строках выше — не дублируем
+    problems += [a["msg"] for a in alerts_now if not a["key"].startswith("stale:")]
+    if stop:
+        problems.append("Включён стоп: новые ставки не делаются (файл data/STOP)")
+    if storage["free_pct"] < 10:
+        problems.append(f"Мало места на диске: свободно {storage['free']}")
+    if om["pct"] > 90:
+        problems.append(f"Open-Meteo: за сутки {om_total} запросов — близко к лимиту")
+    counts = {s: sum(j["state"] == s for j in jobs) for s in ("ok", "late", "fail", "unknown")}
+    return {"problems": problems, "jobs": jobs, "counts": counts, "alerts_now": alerts_now,
+            "alerts_week": alerts_week, "storage": storage, "watchdog": watchdog, "stop": stop,
+            "copier": copier, "preflight": preflight, "om": om,
+            "checked": now.astimezone(VIEWER_TZ).strftime("%H:%M")}
+
+
+@app.get("/status", response_class=HTMLResponse)
+def status(request: Request):
+    conn = db()
+    try:
+        h = system_health(conn)
+    finally:
+        conn.close()
+    return TEMPLATES.TemplateResponse("status.html", {"request": request, "h": h})
 
 
 def spark(rows, start=100.0, w=160, h=44):
@@ -1028,23 +978,24 @@ def paper(request: Request, w: str = ""):
                                    else "Маркет отменён — вернули половину" if r["status"] == "void"
                                    else f"Было {actual}, а ставили на {bucket}")
                 results.append(item)
-    if table_exists(conn, "paper_obs_trades"):
-        obs = conn.execute("SELECT * FROM paper_obs_trades ORDER BY placed_at DESC").fetchall()
-        label = WALLET_INFO["obs"][1]
+    for okey in OBS_WALLETS if table_exists(conn, "paper_obs_trades") else ():
+        obs = conn.execute("SELECT * FROM paper_obs_trades WHERE wallet = ? ORDER BY placed_at DESC", (okey,)).fetchall()
+        label = WALLET_INFO[okey][1]
+        src = "10-мин замер FMI" if okey == "obs_fmi" else "станция"
         card = _wallet_card(label, obs, nofill=sum(r["status"] == "nofill" for r in obs))
-        card["key"] = "obs"
+        card["key"] = okey
         wallets.append(card)
         for r in obs:
             unit = "°F" if r["unit"] == "fahrenheit" else "°C"
             bucket = paper_bucket(r["bucket_lo"], r["bucket_hi"], r["unit"])
             if r["status"] == "nofill":
-                skips.append({"local_date": r["local_date"], "city": r["city"], "wallet": label, "wkey": "obs",
+                skips.append({"local_date": r["local_date"], "city": r["city"], "wallet": label, "wkey": okey,
                               "kind": "не смогли купить",
-                              "reason": (f"станция уже показала {r['obs_max']:.0f}{unit}, значит {bucket} невозможно; "
+                              "reason": (f"{src} уже показал{'' if okey == 'obs_fmi' else 'а'} {r['obs_max']:.0f}{unit}, значит {bucket} невозможно; "
                                          + (r["reason"] if "reason" in r.keys() and r["reason"] else ""))})
                 continue
-            item = {"local_date": r["local_date"], "city": r["city"], "wallet": label, "wkey": "obs",
-                    "what": f"против {bucket} (станция уже {r['obs_max']:.0f}{unit})",
+            item = {"local_date": r["local_date"], "city": r["city"], "wallet": label, "wkey": okey,
+                    "what": f"против {bucket} ({src} уже {r['obs_max']:.0f}{unit})",
                     "price": r["price"], "stake": r["stake"], "fee": _fee(r), "model_p": None, "market_p": None}
             if r["status"] == "open":
                 item["closes"] = expected_close(r["city"], r["local_date"])
@@ -1063,7 +1014,7 @@ def paper(request: Request, w: str = ""):
                 results.append(item)
     # 2026-09-25: аналитика счёта и данные рынка (идеи «инвест-платформы», просьба Alex)
     settled_by_wallet, settle_events = {}, {}
-    for tbl, wcol in (("paper_trades", "wallet"), ("paper_obs_trades", "'obs'")):
+    for tbl, wcol in (("paper_trades", "wallet"), ("paper_obs_trades", "wallet")):
         if table_exists(conn, tbl):
             for r in conn.execute(f"SELECT {wcol} AS wallet, local_date, stake, fee, payout, settled_at, city, status "
                                   f"FROM {tbl} WHERE status IN ('won','lost','void')"):
@@ -1071,7 +1022,7 @@ def paper(request: Request, w: str = ""):
                 settle_events.setdefault(r["wallet"], []).append(
                     (r["settled_at"] or r["local_date"], _pnl(r), r["city"], r["status"]))
     # 2026-09-26 (просьба Alex): /paper — обзор всех кошельков, /paper?w=<ключ> — страница одного
-    known = set(PAPER_WALLETS) | {"obs"}
+    known = set(PAPER_WALLETS) | set(OBS_WALLETS)
     skills = {k: model_skill(conn, k) for k in known}
     skill = skills.get(w)
     fresh = data_freshness(conn)

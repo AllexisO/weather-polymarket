@@ -357,12 +357,11 @@
     </div>
     <nav aria-label="Разделы">
       <div class="side-group-label">Обзор</div>
-      {{ navlink('/status', 'статус', 'status', path == '/status') }}
+      {{ navlink('/status', 'здоровье системы', 'status', path == '/status') }}
       <div class="side-group-label">Погода</div>
       {{ navlink('/paper', 'кошелёк', 'wallet', path == '/paper') }}
       {{ navlink('/', 'погода', 'weather', path == '/' or path.startswith('/city/')) }}
       <div class="side-group-label">Данные</div>
-      {{ navlink('/calibration', 'точность', 'target', path == '/calibration') }}
       {{ navlink('/training', 'обучение модели', 'sliders', path == '/training') }}
     </nav>
     <div class="side-foot">

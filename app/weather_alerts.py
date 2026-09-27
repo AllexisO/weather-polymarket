@@ -21,19 +21,10 @@ from pathlib import Path
 
 DB_PATH = Path(os.environ.get("POLY_LAB_DB", Path(__file__).parent.parent / "data" / "db" / "polymarket_lab.sqlite3"))
 
-# скрипт -> (подпись, сколько можно не обновляться)
-JOBS = {
-    "weather_edge": ("Цены и прогнозы", timedelta(hours=2, minutes=40)),
-    "weather_poly_resolve": ("Итоги маркетов", timedelta(hours=2, minutes=40)),
-    "weather_paper": ("Ставки и расчёт кошельков", timedelta(hours=2, minutes=40)),
-    "weather_ml_train": ("Ночное обучение модели", timedelta(hours=26)),
-    "weather_ml_skill": ("«Насколько модель права»", timedelta(hours=26)),
-    "weather_trades_history": ("Сбор настоящих сделок", timedelta(hours=26)),
-    "weather_copy": ("Повтор за сильными трейдерами (запасной опрос)", timedelta(minutes=15)),
-    "weather_copy_live": ("Слушатель сделок (повтор за секунды)", timedelta(minutes=5)),
-    "weather_ml_fast": ("Быстрый снимок обучаемых моделей (08:00)", timedelta(minutes=45)),
-    "weather_ens": ("Сбор ансамблей", timedelta(hours=3)),
-}
+# скрипт -> (подпись, сколько можно не обновляться); 2026-09-27: общий список с /status (jobs_info.py)
+from jobs_info import JOBS as _ALL_JOBS
+JOBS = {key: (label, timedelta(minutes=age)) for key, label, _s, _sch, age, _log in _ALL_JOBS
+        if key != "weather_alerts"}  # сам себя не проверяет — это видно на /status
 MAIN_WALLET = "ml3"
 LOSS_ALERT = 50.0  # $ за сутки по закрытым ставкам главной модели (решение Alex, 2026-09-26)
 

@@ -1,71 +1,212 @@
 {% extends "base.html" %}
-{% import "_icons.html" as icon %}
-{% block title %}Статус — weather-lab{% endblock %}
+{% block title %}Здоровье системы — weather-lab{% endblock %}
 {% block content %}
+{#
+  2026-09-27 (просьба Alex): «Статус» переделан в «Здоровье системы» — всё ли работает:
+  скрипты крона, тревоги, база и диск, ставки, лимит Open-Meteo. Данные — system_health() в dashboard.py.
+#}
+{% set STATE = {"ok": ("работает", "ok"), "late": ("опаздывает", "warn"), "fail": ("ошибка", "bad"), "unknown": ("нет данных", "none")} %}
 <style>
-  .money-banner {
-    display: flex;
-    align-items: flex-start;
-    gap: 12px;
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-left: 3px solid var(--highlight);
-    border-radius: 12px;
-    padding: 14px 18px;
-    margin-bottom: 20px;
-    font-size: 13.5px;
-    color: var(--muted);
-    line-height: 1.55;
+  body:has(.bk) .main-col { background: #000000; }
+  body:has(.bk) main { max-width: 1120px; }
+  .bk {
+    --bk-card: #15181e; --bk-raise: #1C2027; --bk-line: #262A31; --bk-text: #E5EAF2; --bk-muted: #93A2BA; --bk-faint: #7C8BA3;
+    --bk-accent: #FF6500; --bk-accent-bg: rgba(255, 101, 0, .14); --bk-pos: #4ADE80; --bk-pos-bg: rgba(34, 197, 94, .13);
+    --bk-neg: #F87171; --bk-neg-bg: rgba(248, 113, 113, .13); --bk-gold: #E9C46A; --bk-gold-bg: rgba(233, 196, 106, .14);
+    --bk-font: "Onest", -apple-system, "Segoe UI", Roboto, sans-serif;
+    color: var(--bk-text); font-family: var(--bk-font); font-size: 15px; line-height: 1.55;
   }
-  .money-banner strong { color: var(--text); }
-  .money-banner .icon { color: var(--highlight); margin-top: 1px; }
-  .status-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-    gap: 14px;
+  .bk .num { font-variant-numeric: tabular-nums; }
+  .bk .muted { color: var(--bk-muted); }
+  .top { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 8px 24px; margin-bottom: 22px; }
+  .top h1 { margin: 0; font-size: 26px; font-weight: 700; letter-spacing: -.02em; }
+  .top p { margin: 4px 0 0; color: var(--bk-muted); font-size: 14px; }
+  .sec { margin: 0 0 32px; }
+  .sec-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 16px; margin-bottom: 12px; }
+  .sec-head h2 { margin: 0; font-size: 19px; font-weight: 600; }
+  .sec-head .aside { font-size: 13.5px; color: var(--bk-muted); }
+  .pane { background: var(--bk-card); border: 1px solid var(--bk-line); border-radius: 16px; padding: 20px 22px; }
+
+  /* итог */
+  .verdict { display: flex; gap: 16px; align-items: flex-start; padding: 20px 22px; border-radius: 16px; margin-bottom: 32px; }
+  .verdict.ok { background: var(--bk-pos-bg); border: 1px solid rgba(74, 222, 128, .35); }
+  .verdict.bad { background: var(--bk-neg-bg); border: 1px solid rgba(248, 113, 113, .45); }
+  .verdict .dot { width: 14px; height: 14px; border-radius: 50%; margin-top: 7px; flex-shrink: 0; }
+  .verdict.ok .dot { background: var(--bk-pos); } .verdict.bad .dot { background: var(--bk-neg); }
+  .verdict h2 { margin: 0; font-size: 20px; font-weight: 700; }
+  .verdict ul { margin: 8px 0 0; padding-left: 18px; font-size: 14.5px; }
+  .verdict li { margin: 2px 0; }
+  .verdict p { margin: 4px 0 0; color: var(--bk-muted); font-size: 14px; }
+
+  /* плашки состояния */
+  .st { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; padding: 3px 10px; border-radius: 999px; white-space: nowrap; }
+  .st::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+  .st.ok { background: var(--bk-pos-bg); color: var(--bk-pos); }
+  .st.warn { background: var(--bk-gold-bg); color: var(--bk-gold); }
+  .st.bad { background: var(--bk-neg-bg); color: var(--bk-neg); }
+  .st.none { background: var(--bk-raise); color: var(--bk-muted); }
+
+  /* сводка */
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-bottom: 32px; }
+  .kpi { background: var(--bk-card); border: 1px solid var(--bk-line); border-radius: 14px; padding: 16px 18px; }
+  .kpi h3 { margin: 0 0 8px; font-size: 13.5px; font-weight: 600; color: var(--bk-muted); }
+  .kpi .v { font-size: 22px; font-weight: 600; line-height: 1.2; }
+  .kpi .s { margin-top: 6px; font-size: 13px; color: var(--bk-muted); }
+  .kpi .s b { color: var(--bk-text); font-weight: 600; }
+  .meter { height: 6px; border-radius: 999px; background: var(--bk-line); overflow: hidden; margin-top: 10px; }
+  .meter i { display: block; height: 100%; border-radius: 999px; background: var(--bk-accent); }
+  .meter i.warn { background: var(--bk-gold); } .meter i.bad { background: var(--bk-neg); }
+
+  /* скрипты */
+  .bk table { width: 100%; border-collapse: collapse; }
+  .bk th { text-align: left; font: 500 12.5px var(--bk-font); color: var(--bk-muted); text-transform: none; letter-spacing: 0;
+    padding: 0 12px 8px 0; border-bottom: 1px solid var(--bk-line); white-space: nowrap; }
+  .bk td { font-family: var(--bk-font); padding: 11px 12px 11px 0; border-bottom: 1px solid var(--bk-line); font-size: 14px; vertical-align: top; }
+  .bk tbody tr:hover { background: transparent; }
+  .bk tr:last-child td { border-bottom: 0; }
+  .jobs .name { font-weight: 600; }
+  .jobs .sub { display: block; font-size: 12.5px; color: var(--bk-muted); font-weight: 400; }
+  .jobs .err { display: block; margin-top: 4px; font-size: 12.5px; color: var(--bk-neg); word-break: break-word; }
+  .jobs .r { text-align: right; white-space: nowrap; }
+
+  /* тревоги */
+  .al { list-style: none; margin: 0; padding: 0; }
+  .al li { display: grid; grid-template-columns: 1fr auto; gap: 2px 14px; padding: 11px 0; border-bottom: 1px solid var(--bk-line); font-size: 14px; }
+  .al li:last-child { border-bottom: 0; }
+  .al .t { grid-column: 2; grid-row: 1 / span 2; font-size: 12.5px; color: var(--bk-muted); white-space: nowrap; text-align: right; }
+  .al.now .m { color: #FCA5A5; }
+  .empty { color: var(--bk-muted); font-size: 14px; padding: 6px 0; }
+  .note { margin-top: 12px; font-size: 13px; color: var(--bk-muted); }
+
+  @media (max-width: 700px) {
+    .jobs thead { display: none; }
+    .jobs, .jobs tbody, .jobs tr, .jobs td { display: block; width: 100%; }
+    .jobs tr { padding: 10px 0; border-bottom: 1px solid var(--bk-line); }
+    .jobs td { border: 0; padding: 2px 0; text-align: left !important; }
+    .jobs td[data-l]::before { content: attr(data-l) ": "; color: var(--bk-muted); font-size: 13px; }
+    .pane { padding: 16px; }
   }
-  .status-card h2 {
-    display: flex;
-    align-items: center;
-    margin: 0 0 12px;
-    font-size: 15px;
-    font-weight: 600;
-  }
-  .status-card h2 .icon { color: var(--accent-strong); margin-right: 9px; }
-  .status-stat { font-size: 13px; color: var(--muted); margin-bottom: 4px; }
-  .status-stat b { color: var(--text); font-weight: 600; }
-  .status-n { font-size: 12px; color: var(--muted); margin-top: 10px; }
-  .status-bar-track { background: var(--track); border-radius: 4px; height: 6px; margin-top: 6px; overflow: hidden; }
-  .status-bar-fill { height: 100%; background: var(--accent); }
-  .status-note { font-size: 12.5px; color: var(--muted); margin-top: 12px; line-height: 1.5; }
-  .status-link { display: inline-block; margin-top: 12px; font-size: 13px; color: var(--accent-strong); text-decoration: none; }
-  .status-link:hover { text-decoration: underline; }
 </style>
 
-<div class="money-banner">
-  {{ icon.render('wallet') }}
-  <span>Реальных денег в игре: <strong>$0</strong>. Всё на этой странице — проверка гипотез на
-  бумаге, ничего не куплено на Polymarket. "Опережаем рынок" здесь значит "наш источник
-  угадывал исход чаще, чем цена Polymarket", а не "заработали".</span>
-</div>
-
-<div class="status-grid">
-
-  <div class="block status-card">
-    <h2>{{ icon.render('weather') }}Погода</h2>
-    <span class="verdict-pill {{ weather.verdict.tone }}">{{ weather.verdict.label }}</span>
-    {% if weather.source_rate is not none %}
-    <div class="status-stat">Наш прогноз угадывал: <b>{{ '%.1f%%' | format(weather.source_rate * 100) }}</b></div>
-    <div class="status-stat">Рынок Polymarket угадывал: <b>{{ '%.1f%%' | format(weather.market_rate * 100) }}</b></div>
-    {% else %}
-    <div class="status-stat">Пока нет проверенных дней с правильными координатами станций.</div>
-    {% endif %}
-    <div class="status-n">
-      Проверено случаев: {{ weather.n }} {% if weather.n < min_n %}(нужно хотя бы {{ min_n }}, чтобы вообще судить){% endif %}
+<div class="bk">
+  <div class="top">
+    <div>
+      <h1>Здоровье системы</h1>
+      <p>Работают ли скрипты, база и ставки. Деньги — на странице <a href="/paper">кошельков</a>, модель — на <a href="/training">обучении</a>.</p>
     </div>
-    <div class="status-bar-track"><div class="status-bar-fill" style="width: {{ [100, (weather.n / min_n * 100) | round(0)] | min }}%;"></div></div>
-    <a class="status-link" href="/calibration">Подробнее по городам →</a>
+    <p class="num">проверено в {{ h.checked }}</p>
   </div>
 
+  {% if h.problems %}
+  <div class="verdict bad" role="alert">
+    <span class="dot" aria-hidden="true"></span>
+    <div>
+      <h2>Есть проблемы: {{ h.problems | length }}</h2>
+      <ul>{% for p in h.problems %}<li>{{ p }}</li>{% endfor %}</ul>
+    </div>
+  </div>
+  {% else %}
+  <div class="verdict ok">
+    <span class="dot" aria-hidden="true"></span>
+    <div>
+      <h2>Всё работает</h2>
+      <p>Все {{ h.counts.ok }} скриптов отработали вовремя, активных тревог нет.</p>
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="kpis">
+    <div class="kpi">
+      <h3>Скрипты</h3>
+      <div class="v num">{{ h.counts.ok }} из {{ h.jobs | length }} в порядке</div>
+      <div class="s">
+        {% if h.counts.fail %}<b>{{ h.counts.fail }}</b> с ошибкой · {% endif %}
+        {% if h.counts.late %}<b>{{ h.counts.late }}</b> опаздывают · {% endif %}
+        {% if h.counts.unknown %}<b>{{ h.counts.unknown }}</b> ещё без отметки{% endif %}
+        {% if not (h.counts.fail or h.counts.late or h.counts.unknown) %}ни ошибок, ни опозданий{% endif %}
+      </div>
+    </div>
+    <div class="kpi">
+      <h3>Ставки</h3>
+      <div class="v">{% if h.stop %}<span class="st bad">стоп включён</span>{% else %}<span class="st ok">делаются</span>{% endif %}</div>
+      <div class="s">Слушатель сделок (copy): <b>{{ h.copier.ok_ago or 'нет данных' }}</b></div>
+      <div class="s">Проверка кошельков:
+        {% if h.preflight.ok %}<b>пройдена</b>{% else %}<span class="st bad">не пройдена</span>{% endif %}
+        {% if h.preflight.when %}<span class="muted">({{ h.preflight.when }})</span>{% endif %}</div>
+    </div>
+    <div class="kpi">
+      <h3>База и диск</h3>
+      <div class="v num">{{ h.storage.db }}</div>
+      <div class="s">журнал записи (WAL): <b class="num">{{ h.storage.wal }}</b></div>
+      <div class="s">свободно на диске: <b class="num">{{ h.storage.free }}</b> ({{ '%.0f' | format(h.storage.free_pct) }}%)</div>
+      <div class="s">сторож базы: {% if h.watchdog and h.watchdog.recent %}<span class="st bad">срабатывал {{ h.watchdog.when }}</span>{% elif h.watchdog %}последний раз {{ h.watchdog.when }}{% else %}ни разу не срабатывал{% endif %}</div>
+      <div class="s">резервные копии: <b>не настроены</b> <span class="muted">(решение за Alex)</span></div>
+    </div>
+    <div class="kpi">
+      <h3>Open-Meteo за сутки</h3>
+      {% if h.om.counted %}
+      <div class="v num">{{ '{:,}'.format(h.om.total).replace(',', ' ') }} <span class="muted" style="font-size:14px;font-weight:500">запросов</span></div>
+      {% set pct = [h.om.pct, 100] | min %}
+      <div class="meter"><i class="{{ 'bad' if pct > 90 else ('warn' if pct > 70 else '') }}" style="width: {{ '%.0f' | format(pct) }}%"></i></div>
+      <div class="s">лимит ~{{ '{:,}'.format(h.om.limit).replace(',', ' ') }} вызовов; ансамбли Open-Meteo считает за несколько вызовов — реальный расход выше</div>
+      {% else %}
+      <div class="v">—</div>
+      <div class="s">счётчик начал работу 27.09 — цифры появятся после первых запусков</div>
+      {% endif %}
+    </div>
+  </div>
+
+  <section class="sec">
+    <div class="sec-head">
+      <h2>Скрипты по крону</h2>
+      <span class="aside">запуски и ошибки — за последние сутки</span>
+    </div>
+    <div class="pane">
+      <table class="jobs">
+        <thead><tr><th>Что</th><th>Когда</th><th>Последний успех</th><th>Состояние</th><th class="r">Запусков / ошибок</th><th class="r">Длится</th></tr></thead>
+        <tbody>
+        {% for j in h.jobs %}
+        {% set s = STATE[j.state] %}
+        <tr>
+          <td><span class="name">{{ j.label }}</span><span class="sub">{{ j.script }}</span>
+            {% if j.err %}<span class="err">{{ j.err }}</span>{% endif %}</td>
+          <td data-l="Когда">{{ j.sched }}</td>
+          <td data-l="Последний успех" class="num">{{ j.ok_ago or '—' }}</td>
+          <td data-l="Состояние"><span class="st {{ s[1] }}">{{ s[0] }}</span></td>
+          <td data-l="Запусков / ошибок" class="r num">{% if j.runs %}{{ j.runs }} / {% if j.fails %}<b style="color:var(--bk-neg)">{{ j.fails }}</b>{% else %}0{% endif %}{% else %}—{% endif %}</td>
+          <td data-l="Длится" class="r num">{% if j.dur is not none %}{% if j.dur < 90 %}{{ '%.0f' | format(j.dur) }} с{% else %}{{ '%.0f' | format(j.dur / 60) }} мин{% endif %}{% else %}—{% endif %}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      <p class="note">«Запусков / ошибок» и «Длится» считаются с 27.09, когда появился учёт каждого запуска. Текст ошибки — последняя строка с ошибкой из лога <code>data/logs/</code>.</p>
+    </div>
+  </section>
+
+  <section class="sec">
+    <div class="sec-head"><h2>Тревоги</h2><span class="aside">проверяются каждые 30 минут</span></div>
+    <div class="pane">
+      {% if h.alerts_now %}
+      <ul class="al now">{% for a in h.alerts_now %}<li><span class="m">{{ a.msg }}</span><span class="t">с {{ a.since }}</span></li>{% endfor %}</ul>
+      {% else %}
+      <p class="empty">Сейчас тревог нет.</p>
+      {% endif %}
+      {% if h.alerts_week %}
+      <h3 style="margin:18px 0 4px;font-size:14px;font-weight:600;color:var(--bk-muted)">Прошли за 7 дней</h3>
+      <ul class="al">{% for a in h.alerts_week %}<li><span>{{ a.msg }}</span><span class="t">{{ a.since }} → {{ a.until }}</span></li>{% endfor %}</ul>
+      {% endif %}
+    </div>
+  </section>
+
+  {% if h.om.by_job %}
+  <section class="sec">
+    <div class="sec-head"><h2>Кто тратит Open-Meteo</h2><span class="aside">запросов за сутки</span></div>
+    <div class="pane">
+      <table><tbody>
+      {% for label, n in h.om.by_job %}<tr><td>{{ label }}</td><td class="r num" style="text-align:right">{{ n }}</td></tr>{% endfor %}
+      </tbody></table>
+    </div>
+  </section>
+  {% endif %}
 </div>
 {% endblock %}

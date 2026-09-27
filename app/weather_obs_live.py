@@ -35,6 +35,14 @@
 С 2026-09-24 исполнение — через polyexec.py (комиссия Polymarket, минимум
 5 долей, задержка 2 с, выплата по цене закрытия доли No, data/STOP).
 
+2026-09-27 (решение Alex): второй кошелёк obs_fmi — та же логика, но по 10-минутным
+замерам финской метеослужбы (FMI, аэропорт Хельсинки-Вантаа, бесплатно, без ключа) —
+только Хельсинки. METAR там выходит раз в полчаса, FMI — каждые 10 мин и за 1-2 мин
+после замера: промежуточный замер может показать превышение раньше METAR. Ретро-проверка
+22-25.09: 12 из 12 таких сигналов METAR подтвердил, но рынок почти всегда уже стоял на
+0-5¢ — кошелёк проверяет это вживую. Максимум FMI округляется до целого (как METAR).
+Ставки обоих кошельков — в paper_obs_trades, колонка wallet.
+
 5-минутные замеры станций США (api.weather.gov) НЕ используем: проверка
 2026-09-23 — Polymarket в 3 из 4 спорных дней засчитал METAR, а не
 5-минутный максимум (Даллас 21.09: 5 мин — 99°F, METAR — 97°F, выиграл
@@ -42,6 +50,7 @@
 """
 
 import json
+import math
 import os
 import re
 import sqlite3
@@ -66,6 +75,8 @@ START_BALANCE = 100.0
 STAKE = 2.0  # 2026-09-25: было $5; при $5 и $100 на 48 городах кошельки упирались в деньги (решение Alex)
 MIN_BID = 0.05  # ниже — прибыль на ставку копеечная, не стоит риска сбойной сводки
 MIN_FILL = 1.0  # меньше доллара исполнения — считаем, что купить было нельзя
+FMI_WFS = "https://opendata.fmi.fi/wfs"
+FMI_STATIONS = {"helsinki": 100968}  # кошелёк obs_fmi: город -> fmisid (Хельсинки-Вантаа, та же площадка, что EFHK)
 
 
 def ensure_schema(conn):
@@ -129,15 +140,40 @@ def ensure_schema(conn):
         conn.execute("ALTER TABLE paper_obs_trades ADD COLUMN book_json TEXT")
         conn.execute("""UPDATE paper_obs_trades SET shares = stake / price, fee = (stake / price) * 0.05 * price * (1 - price)
                         WHERE stake > 0 AND price > 0""")
+    if "wallet" not in cols:
+        # 2026-09-27: несколько кошельков по замерам (obs, obs_fmi) — у каждого свои ставки
+        # на тот же вариант. SQLite не меняет UNIQUE у таблицы — пересоздаём (строк мало).
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute("ALTER TABLE paper_obs_trades RENAME TO paper_obs_trades_old")
+        conn.execute(
+            """
+            CREATE TABLE paper_obs_trades (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                wallet TEXT NOT NULL DEFAULT 'obs',
+                city TEXT NOT NULL, local_date TEXT NOT NULL, unit TEXT, bucket_lo REAL, bucket_hi REAL,
+                obs_max REAL, obs_time_utc TEXT, placed_at TEXT, yes_bid REAL, price REAL, stake REAL,
+                status TEXT NOT NULL DEFAULT 'open', payout REAL, settled_at TEXT, reason TEXT,
+                shares REAL, fee REAL DEFAULT 0, book_json TEXT, ask_depth_usd REAL,
+                UNIQUE (wallet, city, local_date, bucket_lo)
+            )
+            """
+        )
+        old = [r[1] for r in conn.execute("PRAGMA table_info(paper_obs_trades_old)")]
+        keep = ", ".join(c for c in old)
+        conn.execute(f"INSERT INTO paper_obs_trades ({keep}) SELECT {keep} FROM paper_obs_trades_old")
+        conn.execute("DROP TABLE paper_obs_trades_old")
+        conn.commit()
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(paper_obs_trades)")]
     if "ask_depth_usd" not in cols:
         # сколько долларов No продавалось по цене не дороже 1 - MIN_BID в момент сигнала
         conn.execute("ALTER TABLE paper_obs_trades ADD COLUMN ask_depth_usd REAL")
     conn.commit()
 
 
-def cash(conn):
+def cash(conn, wallet="obs"):
     spent, back = conn.execute(
-        "SELECT COALESCE(SUM(stake + COALESCE(fee, 0)), 0), COALESCE(SUM(COALESCE(payout, 0)), 0) FROM paper_obs_trades"
+        "SELECT COALESCE(SUM(stake + COALESCE(fee, 0)), 0), COALESCE(SUM(COALESCE(payout, 0)), 0) "
+        "FROM paper_obs_trades WHERE wallet = ?", (wallet,)
     ).fetchone()
     return START_BALANCE - spent + back
 
@@ -265,66 +301,109 @@ def run():
             by_station.setdefault(icao, []).append({"icaoId": icao, "obsTime": int(t.timestamp()), "temp": temp, "src": "tgftp"})
     conn.commit()
 
+    events_cache = {}
     for city, cfg in OBS_CITIES.items():
         today, best = observed_max_today(by_station.get(cfg["icao"], []), cfg)
-        if best is None:
-            continue
-        obs_max, obs_time = best
-        # Уже решённые сегодня бакеты (купили или стакан был пуст) — не трогаем повторно.
-        seen = {row[0] for row in conn.execute(
-            "SELECT bucket_lo FROM paper_obs_trades WHERE city = ? AND local_date = ?", (city, today.isoformat()))}
-        slug = f"highest-temperature-in-{cfg['poly_slug']}-on-{month_day_year_slug(today)}"
+        if best is not None:
+            bet_dead_buckets(conn, "obs", city, cfg, today, best[0], best[1], now, events_cache,
+                             f"станция уже {best[0]} (сводка {best[1]:%H:%M}Z)")
+    for city, fmisid in FMI_STATIONS.items():
+        cfg = OBS_CITIES[city]
         try:
-            events = requests.get(f"{GAMMA}/events", params={"slug": slug}, timeout=20).json()
-        except requests.RequestException as e:
-            print(f"{city}: ошибка Polymarket — {e}", file=sys.stderr)
+            today, best = fmi_max_today(fmisid, cfg)
+        except (requests.RequestException, ValueError) as e:
+            print(f"obs_fmi: {city} ошибка FMI — {e}", file=sys.stderr)
             continue
-        if not events:
-            continue
-        for m in events[0]["markets"]:
-            rng = parse_bucket(m["question"])
-            if rng is None or rng[1] >= obs_max or m.get("closed") or rng[0] in seen:
-                continue
-            bid = m.get("bestBid")
-            if bid in (None, "") or float(bid) < MIN_BID:
-                continue
-            bid = float(bid)
-            if cash(conn) < STAKE:
-                print("obs: денег нет")
-                break
-            if trading_stopped():
-                print("obs: файл STOP — новые ставки не делаем")
-                break
-            try:
-                ex = simulate_buy(m, json.loads(m["clobTokenIds"])[1], STAKE, 1 - MIN_BID)
-            except (requests.RequestException, ValueError, KeyError) as e:
-                print(f"{city}: ошибка стакана — {e}", file=sys.stderr)
-                continue
-            filled = ex["cost"] >= MIN_FILL
-            reason = None if filled else (
-                f"по данным gamma рынок ещё давал {bid*100:.0f}¢ за уже невозможный вариант, но в живом стакане ставку против: "
-                + (ex["reason"] or f"можно было купить меньше чем на ${MIN_FILL:.0f}"))
-            conn.execute(
-                """
-                INSERT OR IGNORE INTO paper_obs_trades
-                (city, local_date, unit, bucket_lo, bucket_hi, obs_max, obs_time_utc, placed_at, yes_bid,
-                 price, stake, status, reason, shares, fee, book_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (city, today.isoformat(), cfg["unit"], rng[0], rng[1], obs_max, obs_time.isoformat(),
-                 now.isoformat(), bid, ex["avg"], ex["cost"] if filled else 0.0, "open" if filled else "nofill",
-                 reason, ex["shares"] if filled else 0.0, ex["fee"] if filled else 0.0, ex["book"]),
-            )
-            conn.commit()
-            if filled:
-                print(f"obs: {city} {today} станция уже {obs_max} (сводка {obs_time:%H:%M}Z) — бакет "
-                      f"{rng[0]}..{rng[1]} ещё стоит {bid:.2f}; купили {ex['shares']:.1f} долей No по {ex['avg']:.3f} "
-                      f"на ${ex['cost']:.2f} + комиссия ${ex['fee']:.3f}")
-            else:
-                print(f"obs: {city} {today} {reason}")
-    print(f"obs: баланс ${cash(conn):.2f}")
+        if best is not None:
+            bet_dead_buckets(conn, "obs_fmi", city, cfg, today, best[0], best[1], now, events_cache,
+                             f"10-мин замер FMI уже {best[0]} ({best[1]:%H:%M}Z)")
+    for w in ("obs", "obs_fmi"):
+        print(f"{w}: баланс ${cash(conn, w):.2f}")
     conn.close()
 
+
+def fmi_max_today(fmisid, cfg):
+    """Максимум 10-минутных замеров FMI за местный день (°C, до целого — как в METAR): (день, (макс, время))."""
+    tz = ZoneInfo(cfg["tz"])
+    today = datetime.now(tz).date()
+    start = datetime.combine(today, datetime.min.time(), tz).astimezone(timezone.utc)
+    r = requests.get(FMI_WFS, params={
+        "service": "WFS", "version": "2.0.0", "request": "getFeature",
+        "storedquery_id": "fmi::observations::weather::simple", "fmisid": fmisid,
+        "parameters": "t2m", "starttime": start.strftime("%Y-%m-%dT%H:%M:%SZ")}, timeout=20)
+    r.raise_for_status()
+    times = re.findall(r"<BsWfs:Time>([^<]+)", r.text)
+    vals = re.findall(r"<BsWfs:ParameterValue>([^<]+)", r.text)
+    best = None
+    for t, v in zip(times, vals):
+        if v == "NaN":
+            continue
+        dt = datetime.fromisoformat(t.replace("Z", "+00:00"))
+        if dt.astimezone(tz).date() != today:
+            continue
+        rounded = math.floor(float(v) + 0.5)
+        if best is None or rounded > best[0]:
+            best = (rounded, dt)
+    return today, best
+
+
+def bet_dead_buckets(conn, wallet, city, cfg, today, obs_max, obs_time, now, events_cache, why):
+    """Против каждого варианта ниже уже замеренного максимума, пока рынок за него ещё платит ≥ MIN_BID."""
+    # Уже решённые сегодня бакеты этого кошелька (купили или стакан был пуст) — не трогаем повторно.
+    seen = {row[0] for row in conn.execute(
+        "SELECT bucket_lo FROM paper_obs_trades WHERE wallet = ? AND city = ? AND local_date = ?",
+        (wallet, city, today.isoformat()))}
+    slug = f"highest-temperature-in-{cfg['poly_slug']}-on-{month_day_year_slug(today)}"
+    if slug not in events_cache:
+        try:
+            events_cache[slug] = requests.get(f"{GAMMA}/events", params={"slug": slug}, timeout=20).json()
+        except requests.RequestException as e:
+            print(f"{wallet}: {city} ошибка Polymarket — {e}", file=sys.stderr)
+            return
+    events = events_cache[slug]
+    if not events:
+        return
+    for m in events[0]["markets"]:
+        rng = parse_bucket(m["question"])
+        if rng is None or rng[1] >= obs_max or m.get("closed") or rng[0] in seen:
+            continue
+        bid = m.get("bestBid")
+        if bid in (None, "") or float(bid) < MIN_BID:
+            continue
+        bid = float(bid)
+        if cash(conn, wallet) < STAKE:
+            print(f"{wallet}: денег нет")
+            break
+        if trading_stopped():
+            print(f"{wallet}: файл STOP — новые ставки не делаем")
+            break
+        try:
+            ex = simulate_buy(m, json.loads(m["clobTokenIds"])[1], STAKE, 1 - MIN_BID)
+        except (requests.RequestException, ValueError, KeyError) as e:
+            print(f"{wallet}: {city} ошибка стакана — {e}", file=sys.stderr)
+            continue
+        filled = ex["cost"] >= MIN_FILL
+        reason = None if filled else (
+            f"по данным gamma рынок ещё давал {bid*100:.0f}¢ за уже невозможный вариант, но в живом стакане ставку против: "
+            + (ex["reason"] or f"можно было купить меньше чем на ${MIN_FILL:.0f}"))
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO paper_obs_trades
+            (wallet, city, local_date, unit, bucket_lo, bucket_hi, obs_max, obs_time_utc, placed_at, yes_bid,
+             price, stake, status, reason, shares, fee, book_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (wallet, city, today.isoformat(), cfg["unit"], rng[0], rng[1], obs_max, obs_time.isoformat(),
+             now.isoformat(), bid, ex["avg"], ex["cost"] if filled else 0.0, "open" if filled else "nofill",
+             reason, ex["shares"] if filled else 0.0, ex["fee"] if filled else 0.0, ex["book"]),
+        )
+        conn.commit()
+        if filled:
+            print(f"{wallet}: {city} {today} {why} — бакет "
+                  f"{rng[0]}..{rng[1]} ещё стоит {bid:.2f}; купили {ex['shares']:.1f} долей No по {ex['avg']:.3f} "
+                  f"на ${ex['cost']:.2f} + комиссия ${ex['fee']:.3f}")
+        else:
+            print(f"{wallet}: {city} {today} {reason}")
 
 if __name__ == "__main__":
     run()

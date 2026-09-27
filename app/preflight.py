@@ -71,7 +71,7 @@ def run_checks():
 
     # 2в. у каждого кошелька есть полное описание логики (wallet_docs.py, страница кошелька)
     from wallet_docs import WALLET_DOCS
-    nodoc = sorted((set(wallets) | {"copy", "obs"}) - set(WALLET_DOCS))
+    nodoc = sorted((set(wallets) | {"copy", "obs", "obs_fmi"}) - set(WALLET_DOCS))
     res.append((not nodoc, "у каждого кошелька есть описание логики", ", ".join(nodoc) or f"{len(WALLET_DOCS)} описаний"))
 
     # 3. колонки, которые пишут снимки
