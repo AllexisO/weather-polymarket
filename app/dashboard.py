@@ -898,6 +898,30 @@ def status(request: Request):
     return TEMPLATES.TemplateResponse("status.html", {"request": request, "h": h})
 
 
+WEEKDAY_RU = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
+
+
+def week_bars(rows):
+    """2026-09-27 (просьба Alex, по макету Payoneer): итог закрытых ставок по дням маркета — последние
+    7 дней, заканчивая последним днём с закрытыми ставками. rows: (local_date, итог $)."""
+    if not rows:
+        return None
+    by_day = {}
+    for d, v in rows:
+        s = by_day.setdefault(d, [0.0, 0])
+        s[0] += v
+        s[1] += 1
+    end = date.fromisoformat(max(by_day))
+    days = [end - timedelta(days=i) for i in range(6, -1, -1)]
+    vals = [by_day.get(d.isoformat(), [0.0, 0]) for d in days]
+    top = max((abs(v) for v, _n in vals), default=0) or 1.0
+    out = [{"wd": WEEKDAY_RU[d.weekday()], "date": f"{d:%d.%m}", "pnl": v, "n": n,
+            "h": round(100 * abs(v) / top) if n else 0} for d, (v, n) in zip(days, vals)]
+    total = sum(v for v, _n in vals)
+    return {"days": out, "total": total, "n": sum(n for _v, n in vals),
+            "won_days": sum(1 for v, n in vals if n and v > 0.005), "lost_days": sum(1 for v, n in vals if n and v < -0.005)}
+
+
 def spark(rows, start=100.0, w=160, h=44):
     """Мини-график баланса для карточки кошелька: путь SVG или None (меньше 2 точек)."""
     by_day = {}
@@ -1067,7 +1091,8 @@ def paper(request: Request, w: str = ""):
          "scen": scenarios(my_waiting), "skill": skill, "fresh": fresh, "alerts": alerts, "closes": (closes[0], closes[-1]) if closes else None,
          "chart": balance_chart(settle_events.get(sel, []), cur["start"] if cur else PAPER_START_BALANCE), "goal": goal,
          "waiting": my_waiting, "results": pick(results), "skips": pick(skips)[:150],
-         "start": cur["start"] if cur else PAPER_START_BALANCE, "doc": WALLET_DOCS.get(sel) if sel else None},
+         "start": cur["start"] if cur else PAPER_START_BALANCE, "doc": WALLET_DOCS.get(sel) if sel else None,
+         "week": week_bars(settled_by_wallet.get(sel, [])) if sel else None},
     )
 
 
@@ -1106,6 +1131,47 @@ def feature_ru(name):
     return name
 
 
+EXAM_EVEN_PP = 0.5    # старые отчёты без логошибки: разница в шансе меньше 0.5 п.п. — «наравне»
+EXAM_EVEN_LL = 0.015  # логошибка: меньше 0.015 — «наравне» (обычный разброс между переобучениями)
+
+
+def _gap_verdict(ex, who):
+    """Сравнение с рынком: по логошибке (ниже — лучше), в старых отчётах — по среднему шансу."""
+    ll, llm = ex.get(f"ll_{who}"), ex.get("ll_market")
+    if ll is not None and llm is not None:
+        gap = llm - ll
+        even, fmt = EXAM_EVEN_LL, f"{abs(gap):.3f}"
+        hint = f"логошибка {ll:.3f}, у рынка {llm:.3f} (меньше — лучше)"
+    else:
+        gap = ex[f"p_{who}"] - ex["p_market"]
+        even, fmt = EXAM_EVEN_PP, f"{abs(gap):.1f} п.п."
+        hint = f"шанс тому, что случилось: {ex[f'p_{who}']:.1f}%, у рынка {ex['p_market']:.1f}%"
+    if abs(gap) < even:
+        v = {"tone": "even", "label": "наравне с рынком"}
+    elif gap > 0:
+        v = {"tone": "ahead", "label": f"опережаем на {fmt}"}
+    else:
+        v = {"tone": "behind", "label": f"отстаём на {fmt}"}
+    v["hint"] = hint
+    return v
+
+
+def exam_verdict(exam):
+    """2026-09-27 (просьба Alex): итог экзамена — опережаем рынок или отстаём, для модели и отдельной
+    строкой для смеси 35% модели + 65% рынка (на неё ставят кошельки «+ рынок»).
+    Мерило — логошибка: штрафует уверенность в неправильном ответе; средний шанс поощряет
+    самоуверенность, поэтому в отчётах без логошибки (до 27.09) итог по нему — ориентировочный."""
+    if not exam or exam.get("p_model") is None or exam.get("p_market") is None:
+        return None
+    v = _gap_verdict(exam, "model")
+    em, ek = exam.get("err_model"), exam.get("err_market")
+    if em is not None and ek is not None:
+        v["hint"] += f"; ошибка в градусах: модель {em:.2f}°, рынок {ek:.2f}°"
+    if exam.get("p_blend") is not None:
+        v["blend"] = _gap_verdict(exam, "blend")
+    return v
+
+
 @app.get("/training", response_class=HTMLResponse)
 def training(request: Request):
     conn = db()
@@ -1120,6 +1186,7 @@ def training(request: Request):
             d["when"] = datetime.fromisoformat(r["trained_at"]).astimezone(VIEWER_TZ).strftime("%d.%m %H:%M")
             for it in d.get("importance", []):
                 it["ru"] = feature_ru(it["name"])
+            d["verdict"] = exam_verdict(d.get("exam"))
             runs.append(d)
     conn.close()
     last = runs[0] if runs else None
@@ -1131,3 +1198,227 @@ def training(request: Request):
     alerts = active_alerts(conn)
     conn.close()
     return TEMPLATES.TemplateResponse("training.html", {"request": request, "last": last, "runs": runs, "alerts": alerts})
+
+
+# ---- /bets: все ставки всех кошельков — открытые и закрытые отдельно (2026-09-27, просьба Alex) ----
+# Оформление по пяти присланным макетам: пастельные плитки (Payoneer), «движение денег» по дням (Fundcy),
+# «последние» плиткой 2×2 со статусами (Finance Health), «ждут итога» с датой квадратиком (Upcoming Payments),
+# закрытые списком с круглым значком (Analytics / VISA).
+GROUP_TONE = {"Главная модель": "g1", "Другие версии обучаемой модели": "g2", "Прогноз по формулам (раньше)": "g3",
+              "Тот же сигнал, но покупка своей заявкой": "g4", "Повтор за сильными трейдерами": "g5", "Живые замеры": "g5"}
+
+
+def _close_dt(city, local_date):
+    from weather_cities import OBS_CITIES
+    cfg = OBS_CITIES.get(city)
+    if cfg is None:
+        return None
+    d = date.fromisoformat(local_date) + timedelta(days=1)
+    return datetime(d.year, d.month, d.day, tzinfo=ZoneInfo(cfg["tz"])) + timedelta(hours=3)
+
+
+def _wallet_meta(key):
+    info = WALLET_INFO.get(key, ("Другое", PAPER_WALLETS.get(key, key), ""))
+    group = "Главная модель" if key == "ml3" else info[0]
+    return {"key": key, "name": info[1], "badge": WALLET_BADGE.get(key, key[:2].upper()), "tone": GROUP_TONE.get(group, "g2")}
+
+
+def all_bets(conn):
+    rows = []
+    if table_exists(conn, "paper_trades"):
+        rows += [dict(r, _tbl="p") for r in conn.execute(
+            "SELECT * FROM paper_trades WHERE status IN ('open', 'resting', 'won', 'lost', 'void')")]
+    if table_exists(conn, "paper_obs_trades"):
+        rows += [dict(r, _tbl="o") for r in conn.execute(
+            "SELECT * FROM paper_obs_trades WHERE status IN ('open', 'won', 'lost', 'void')")]
+    out = []
+    for r in rows:
+        is_no = r["_tbl"] == "o" or r.get("side") == "no"
+        bucket = paper_bucket(r["bucket_lo"], r["bucket_hi"], r["unit"])
+        cost = (r["stake"] or 0) + _fee(r)
+        sh = (r.get("want_shares") if r["status"] == "resting" else r.get("shares")) or 0.0
+        placed = _dt(r.get("placed_at") or r.get("snapshot_ts"))
+        b = {"w": _wallet_meta(r["wallet"]), "city": r["city"], "city_ru": CITY_RU.get(r["city"], r["city"].replace("_", " ").title()),
+             "local_date": r["local_date"], "what": ("против " if is_no else "на ") + bucket, "price": r["price"],
+             "cost": cost, "shares": sh, "win_amt": sh - cost, "status": r["status"], "placed": placed,
+             "settled": _dt(r.get("settled_at")), "pnl": _pnl(r) if r["status"] in ("won", "lost", "void") else None,
+             "close": _close_dt(r["city"], r["local_date"])}
+        out.append(b)
+    return out
+
+
+@app.get("/bets", response_class=HTMLResponse)
+def bets_page(request: Request, w: str = ""):
+    conn = db()
+    try:
+        bets = all_bets(conn)
+    finally:
+        conn.close()
+    wallets = sorted({(b["w"]["key"], b["w"]["name"]) for b in bets}, key=lambda x: x[1])
+    if w:
+        bets = [b for b in bets if b["w"]["key"] == w]
+    now = datetime.now(timezone.utc)
+    nv = now.astimezone(VIEWER_TZ)
+    day_ago = now - timedelta(days=1)
+    opened = [b for b in bets if b["status"] in ("open", "resting")]
+    for b in opened:
+        c = b["close"]
+        b["close_badge"] = c.astimezone(VIEWER_TZ) if c else None
+        b["close_txt"] = _when(c, nv) if c else "—"
+        b["placed_txt"] = _when(b["placed"], nv) if b["placed"] else "—"
+    opened.sort(key=lambda b: (b["close"] or now + timedelta(days=9), b["w"]["name"]))
+    closed = sorted([b for b in bets if b["settled"]], key=lambda b: b["settled"], reverse=True)
+    for b in closed:
+        b["settled_txt"] = _when(b["settled"], nv)
+    week_ago = now - timedelta(days=7)
+    closed_week = [b for b in closed if b["settled"] >= week_ago]
+    # «только что» — последние события: открытия и закрытия вперемешку
+    ev = [(b["placed"], "open", b) for b in bets if b["placed"]] + [(b["settled"], "closed", b) for b in closed]
+    ev.sort(key=lambda x: x[0], reverse=True)
+    latest = [{"kind": k if k == "open" else ("in" if b["pnl"] > 0.005 else "out"), "b": b, "when": _when(t, nv)} for t, k, b in ev[:4]]
+    # движение денег за 14 дней: поставлено (по дню покупки) и вернулось (по дню расчёта)
+    days = [(nv - timedelta(days=i)).date() for i in range(13, -1, -1)]
+    staked = {d: 0.0 for d in days}
+    back = {d: 0.0 for d in days}
+    for b in bets:
+        if b["placed"]:
+            d = b["placed"].astimezone(VIEWER_TZ).date()
+            if d in staked:
+                staked[d] += b["cost"]
+        if b["settled"]:
+            d = b["settled"].astimezone(VIEWER_TZ).date()
+            if d in back:
+                back[d] += b["pnl"] + b["cost"]
+    top = max([*staked.values(), *back.values(), 0.01])
+    flow = [{"wd": WEEKDAY_RU[d.weekday()], "date": f"{d:%d.%m}", "staked": staked[d], "back": back[d],
+             "hs": round(100 * staked[d] / top), "hb": round(100 * back[d] / top)} for d in days]
+    kpi = {
+        "open24_n": sum(1 for b in bets if b["placed"] and b["placed"] >= day_ago),
+        "open24_usd": sum(b["cost"] for b in bets if b["placed"] and b["placed"] >= day_ago),
+        "closed24_n": sum(1 for b in closed if b["settled"] >= day_ago),
+        "closed24_pnl": sum(b["pnl"] for b in closed if b["settled"] >= day_ago),
+        "wait_n": len(opened), "wait_usd": sum(b["cost"] for b in opened),
+        "flow_staked": sum(staked.values()), "flow_back": sum(back.values()),
+    }
+    return TEMPLATES.TemplateResponse("bets.html", {
+        "request": request, "opened": opened, "closed": closed_week, "latest": latest, "flow": flow, "kpi": kpi,
+        "wallets": wallets, "sel": w, "sel_name": dict(wallets).get(w)})
+
+
+# ---- /events: что делает система — обучение, данные, итоги, тревоги (2026-09-27, просьба Alex) ----
+FREQUENT_JOBS = {"weather_obs_live", "weather_copy", "weather_alerts", "weather_ml_fast", "weather_poly_resolve", "weather_paper"}
+JOB_DONE = {
+    "weather_edge": "Обновлены цены рынка и прогнозы всех моделей",
+    "weather_station_obs": "Загружены замеры станций (METAR) — факт температуры",
+    "weather_multimodel": "Загружены прогнозы 16 погодных моделей",
+    "weather_ml_data": "Загружены прогнозные условия (облака, ветер, влажность)",
+    "weather_ens": "Собраны ансамбли прогнозов",
+    "weather_trades_history": "Собраны настоящие сделки Polymarket за 7 дней",
+    "weather_sharp_rank": "Обновлён рейтинг сильных трейдеров",
+    "weather_price_history": "Загружена история цен",
+    "weather_ml_skill": "Пересчитано «насколько модель права»",
+    "weather_ml_train": "Ночное обучение: скрипт отработал",
+}
+
+
+def system_events(conn, days=3):
+    from jobs_info import JOBS
+    label = {k: l for k, l, *_ in JOBS}
+    now = datetime.now(timezone.utc)
+    since = now - timedelta(days=days)
+    ev = []
+
+    def add(t, kind, title, detail="", link=None):
+        if t and t >= since:
+            ev.append({"t": t, "kind": kind, "title": title, "detail": detail, "link": link})
+
+    if table_exists(conn, "job_log"):
+        for r in conn.execute("SELECT job, started_at, finished_at, rc, duration_s, om_calls FROM job_log WHERE finished_at >= ?",
+                              (since.isoformat(),)):
+            t = _dt(r["finished_at"])
+            dur = f"{r['duration_s']:.0f} с" if r["duration_s"] < 90 else f"{r['duration_s'] / 60:.0f} мин"
+            if r["job"] not in label:
+                continue  # ручные запуски (проверки, пробное обучение) — не события системы
+            if r["rc"] != 0:
+                why = "остановлен по пределу времени" if r["rc"] in (124, 137, 143) else f"код выхода {r['rc']}"
+                add(t, "fail", f"Ошибка: «{label.get(r['job'], r['job'])}»", f"{why} · шёл {dur} · подробности на странице «Здоровье системы»", "/status")
+            elif r["job"] in JOB_DONE and r["job"] not in FREQUENT_JOBS and r["job"] != "weather_ml_train":
+                extra = f" · запросов к Open-Meteo: {r['om_calls']}" if r["om_calls"] else ""
+                add(t, "data", JOB_DONE.get(r["job"], f"Отработал «{label.get(r['job'], r['job'])}»"), f"за {dur}{extra}")
+    if table_exists(conn, "ml_train_log"):
+        for r in conn.execute("SELECT trained_at, ok, details FROM ml_train_log WHERE trained_at >= ?", (since.isoformat(),)):
+            try:
+                d = json.loads(r["details"])
+            except ValueError:
+                continue
+            v = exam_verdict(d.get("exam"))
+            parts = [f"данных: {d['data']['rows']} город-дней" + (f" (+{d['data']['new_rows']})" if d["data"].get("new_rows") else "")]
+            if v:
+                parts.append(f"экзамен: модель — {v['label']}" + (f", смесь — {v['blend']['label']}" if v.get("blend") else ""))
+            if not r["ok"]:
+                parts.append("не все проверки пройдены")
+            add(_dt(r["trained_at"]), "train", "Пробное обучение модели" if d.get("dry_run") else "Модель переобучилась",
+                " · ".join(parts), "/training")
+    if table_exists(conn, "weather_poly_outcomes"):
+        groups = {}
+        for r in conn.execute("SELECT city, resolved_at FROM weather_poly_outcomes WHERE resolved_at >= ?", (since.isoformat(),)):
+            t = _dt(r["resolved_at"])
+            if t:
+                groups.setdefault(t.replace(second=0, microsecond=0), []).append(CITY_RU.get(r["city"], r["city"]))
+        for t, cities in groups.items():
+            n = len(cities)
+            add(t, "result", f"Пришли итоги {n} {'маркета' if n % 10 == 1 and n % 100 != 11 else 'маркетов'}",
+                ", ".join(sorted(cities)[:12]) + (f" и ещё {n - 12}" if n > 12 else ""))
+    # ставки — сводкой по каждому запуску; подробно — на странице «Ставки»
+    bets = all_bets(conn)
+    runs_open, runs_close = {}, {}
+    for b in bets:
+        if b["placed"] and b["placed"] >= since:
+            # по часам: кошелёк copy покупает по одной ставке — иначе лента тонет в «открыто: 1»
+            runs_open.setdefault(b["placed"].replace(minute=0, second=0, microsecond=0), []).append(b)
+        if b["settled"] and b["settled"] >= since:
+            runs_close.setdefault(b["settled"].replace(second=0, microsecond=0), []).append(b)
+    for t, bs in runs_open.items():
+        ws = sorted({b["w"]["name"] for b in bs})
+        last = max(b["placed"] for b in bs)
+        add(last, "bets", f"Открыто ставок: {len(bs)} на ${sum(b['cost'] for b in bs):.2f}",
+            ", ".join(ws[:4]) + (f" и ещё {len(ws) - 4}" if len(ws) > 4 else ""), "/bets")
+    for t, bs in runs_close.items():
+        pnl = sum(b["pnl"] for b in bs)
+        won = sum(1 for b in bs if b["pnl"] > 0.005)
+        add(t, "bets", f"Закрыто ставок: {len(bs)} · угадано {won} · итог {'+' if pnl >= 0 else '−'}${abs(pnl):.2f}",
+            ", ".join(sorted({b["w"]["name"] for b in bs})[:4]), "/bets")
+    if table_exists(conn, "alerts"):
+        for r in conn.execute("SELECT message, first_seen, resolved_at FROM alerts"):
+            add(_dt(r["first_seen"]), "alert", "Тревога", r["message"], "/status")
+            if r["resolved_at"]:
+                add(_dt(r["resolved_at"]), "ok", "Тревога снята", r["message"])
+    f = DB_PATH.parent.parent / "ALERT_DB_LOCKED"
+    try:
+        add(datetime.fromtimestamp(f.stat().st_mtime, timezone.utc), "fail", "Сторож базы: база была занята", f.read_text().strip()[:300], "/status")
+    except OSError:
+        pass
+    ev.sort(key=lambda e: e["t"], reverse=True)
+    nv = now.astimezone(VIEWER_TZ)
+    days_out = []
+    for e in ev:
+        d = e["t"].astimezone(VIEWER_TZ)
+        e["hm"] = f"{d:%H:%M}"
+        key = d.date()
+        head = "Сегодня" if key == nv.date() else ("Вчера" if key == nv.date() - timedelta(days=1) else f"{d:%d.%m}")
+        if not days_out or days_out[-1]["key"] != key:
+            days_out.append({"key": key, "head": head, "rows": []})
+        days_out[-1]["rows"].append(e)
+    counts = {k: sum(1 for e in ev if e["kind"] == k and e["t"] >= now - timedelta(days=1))
+              for k in ("train", "data", "result", "bets", "alert", "fail", "ok")}
+    return days_out, counts
+
+
+@app.get("/events", response_class=HTMLResponse)
+def events_page(request: Request):
+    conn = db()
+    try:
+        days, counts = system_events(conn)
+    finally:
+        conn.close()
+    return TEMPLATES.TemplateResponse("events.html", {"request": request, "days": days, "counts": counts})

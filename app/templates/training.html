@@ -5,14 +5,15 @@
   2026-09-26 (просьба Alex — «хочу видеть и контролировать, что делала модель»):
   отчёт ночного обучения из ml_train_log (weather_ml_report.py). Стиль — как /paper.
 #}
+{% set TONE = {'ahead': 'ok', 'behind': 'bad', 'even': 'dry'} %}
 {% macro dt(s) -%}{{ s[8:10] }}.{{ s[5:7] }}.{{ s[0:4] }}{%- endmacro %}
 <style>
-  body:has(.bk) .main-col { background: #000000; }
+  body:has(.bk) .main-col { background: #0A0A0B; }
   body:has(.bk) main { max-width: 1120px; }
   .bk {
-    --bk-card: #15181e; --bk-raise: #1C2027; --bk-line: #262A31; --bk-text: #E5EAF2; --bk-muted: #93A2BA; --bk-faint: #7C8BA3;
-    --bk-accent: #FF6500; --bk-accent-bg: rgba(255, 101, 0, .14); --bk-pos: #4ADE80; --bk-pos-bg: rgba(34, 197, 94, .13);
-    --bk-neg: #F87171; --bk-gold: #E9C46A;
+    --bk-card: #1C1C1E; --bk-raise: #262628; --bk-line: #2E2E31; --bk-text: #F4F4F5; --bk-muted: #A1A1AA; --bk-faint: #71717A;
+    --bk-accent: #FFD58A; --bk-accent-bg: rgba(255, 213, 138, .14); --bk-pos: #A3E39A; --bk-pos-bg: rgba(163, 227, 154, .13);
+    --bk-neg: #F4A77F; --bk-gold: #FFD58A;
     --bk-font: "Onest", -apple-system, "Segoe UI", Roboto, sans-serif; --bk-num: "Onest", -apple-system, "Segoe UI", Roboto, sans-serif;
     color: var(--bk-text); font-family: var(--bk-font); font-size: 15px; line-height: 1.55;
   }
@@ -28,8 +29,12 @@
   .status .big { font-size: 22px; font-weight: 600; }
   .badge { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; padding: 4px 12px; border-radius: 999px; }
   .badge.ok { background: var(--bk-pos-bg); color: var(--bk-pos); }
-  .badge.warn { background: rgba(233, 196, 106, .14); color: var(--bk-gold); }
+  .badge.warn { background: rgba(255, 213, 138, .14); color: var(--bk-gold); }
   .badge.dry { background: var(--bk-accent-bg); color: var(--bk-accent); }
+  .badge.bad { background: rgba(244, 167, 127, .13); color: var(--bk-neg); }
+  td .badge { white-space: nowrap; }
+  .vrow { display: flex; align-items: center; gap: 8px; margin: 2px 0; white-space: nowrap; font-size: 13px; }
+  .vk { width: 52px; color: var(--bk-muted); font-size: 12.5px; }
   .steps { list-style: none; margin: 0; padding: 0; counter-reset: st; }
   .steps > li { counter-increment: st; position: relative; padding: 0 0 22px 44px; }
   .steps > li:last-child { padding-bottom: 0; }
@@ -50,12 +55,12 @@
   .hb { display: grid; grid-template-columns: 150px 1fr 64px; gap: 10px; align-items: center; margin: 6px 0; font-size: 14px; }
   .hb i { display: block; height: 10px; border-radius: 0 4px 4px 0; }
   .hb b { font-family: var(--bk-num); font-weight: 600; text-align: right; }
-  .c-model { background: #FF6500; } .c-market { background: #8FB3DE; } .c-fc { background: #64748B; }
+  .c-model { background: #FFD58A; } .c-market { background: #D3DDFB; } .c-fc { background: #71717A; }
   .checks { list-style: none; margin: 8px 0 0; padding: 0; }
   .checks li { display: flex; gap: 10px; padding: 6px 0; font-size: 14.5px; }
   .checks .mk { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 13px; font-weight: 700; flex-shrink: 0; }
   .checks .mk.ok { background: var(--bk-pos-bg); color: var(--bk-pos); }
-  .checks .mk.bad { background: rgba(233, 196, 106, .16); color: var(--bk-gold); }
+  .checks .mk.bad { background: rgba(255, 213, 138, .16); color: var(--bk-gold); }
   .checks small { display: block; color: var(--bk-muted); font-size: 13px; }
   .imp .hb { grid-template-columns: 260px 1fr 56px; }
   .imp .hb i { background: var(--bk-accent); }
@@ -68,8 +73,8 @@
     .imp .hb { grid-template-columns: 1fr 70px 48px; }
     .pane { padding: 18px 16px; }
   }
-  .alerts { margin: 0 0 22px; padding: 14px 18px; border-radius: 14px; border: 1px solid rgba(248, 113, 113, .5); background: rgba(248, 113, 113, .1); }
-  .alerts b { color: #FCA5A5; } .alerts ul { margin: 6px 0 0; padding-left: 18px; font-size: 14px; } .alerts li span { color: var(--bk-muted); }
+  .alerts { margin: 0 0 22px; padding: 14px 18px; border-radius: 14px; border: 1px solid rgba(244, 167, 127, .5); background: rgba(244, 167, 127, .1); }
+  .alerts b { color: #F8C2A4; } .alerts ul { margin: 6px 0 0; padding-left: 18px; font-size: 14px; } .alerts li span { color: var(--bk-muted); }
 </style>
 
 <div class="bk">
@@ -160,21 +165,23 @@
     <h2>История обучений</h2>
     <div class="pane scroll">
       <table>
-        <thead><tr><th>Когда</th><th>Длилось</th><th>Данных</th><th>Экзамен: шанс модель / рынок</th><th>Ошибка модель / рынок</th><th>Проверки</th></tr></thead>
+        <thead><tr><th>Когда</th><th>Длилось</th><th>Данных</th><th>Экзамен: шанс модель / рынок</th><th>Ошибка модель / рынок</th><th>Итог</th><th>Проверки</th></tr></thead>
         <tbody>
           {% for r in runs %}
           <tr>
             <td class="num">{{ r.when }}{% if r.dry_run %} <span class="muted">(пробный)</span>{% endif %}</td>
             <td class="num">{{ '%d' | format(r.duration_s // 60) }} мин</td>
             <td class="num">{{ r.data.rows }}{% if r.data.new_rows %} <span class="muted">(+{{ r.data.new_rows }})</span>{% endif %}</td>
-            <td class="num">{% if r.exam %}{{ '%.1f' | format(r.exam.p_model or 0) }}% / {{ '%.1f' | format(r.exam.p_market or 0) }}%{% else %}—{% endif %}</td>
+            <td class="num">{% if r.exam %}{{ '%.1f' | format(r.exam.p_model or 0) }}% / {{ '%.1f' | format(r.exam.p_market or 0) }}%{% if r.exam.p_blend is defined and r.exam.p_blend is not none %}<span class="muted" style="display:block;font-size:12.5px">смесь {{ '%.1f' | format(r.exam.p_blend) }}%</span>{% endif %}{% else %}—{% endif %}</td>
             <td class="num">{% if r.exam %}{{ '%.2f' | format(r.exam.err_model) }}° / {{ '%.2f' | format(r.exam.err_market) if r.exam.err_market is not none else '—' }}°{% else %}—{% endif %}</td>
+            <td>{% if r.verdict %}<div class="vrow"><span class="vk">модель</span><span class="badge {{ TONE[r.verdict.tone] }}" title="{{ r.verdict.hint }}">{{ r.verdict.label }}</span></div>
+              <div class="vrow"><span class="vk">смесь</span>{% if r.verdict.blend %}<span class="badge {{ TONE[r.verdict.blend.tone] }}" title="{{ r.verdict.blend.hint }}">{{ r.verdict.blend.label }}</span>{% else %}<span class="muted">— нет в этом отчёте</span>{% endif %}</div>{% else %}—{% endif %}</td>
             <td>{% if r.ok %}<span class="badge ok">✓</span>{% else %}<span class="badge warn">⚠</span>{% endif %}</td>
           </tr>
           {% endfor %}
         </tbody>
       </table>
-      <p class="foot">Со временем здесь будет видно, растёт ли точность модели по мере накопления данных.</p>
+      <p class="foot">«Итог» — по логошибке (штраф за уверенность в неправильном ответе; меньше — лучше) против рынка на тех же экзаменационных днях; разница меньше 0.015 — «наравне». В отчётах до 27.09 логошибки нет — там итог по среднему шансу, ориентировочно. «Смесь» — 35% модели + 65% рынка, на неё ставят кошельки «+ рынок»; считается с 27.09. Наведите на итог — там и ошибка в градусах. Со временем здесь будет видно, растёт ли точность модели по мере накопления данных.</p>
     </div>
   </section>
   {% endif %}

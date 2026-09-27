@@ -36,7 +36,10 @@ def _exam(conn, dfm):
     models = mq.train_q(tr)
     qs_all = mq.predict_q(models, te[ml.FEATURES], te["fc_mean"].values)
     win = {(r[0], r[1]): r[2] for r in conn.execute("SELECT city, local_date, win_lo FROM weather_poly_outcomes")}
-    pm = pk = 0.0
+    # 2026-09-27 (просьба Alex): и смесь 35% модели + 65% рынка — то, на что ставят кошельки *_cal
+    from weather_ml_live import blend_with_market
+    pm = pk = pb = 0.0
+    lm = lk = lb = 0.0  # логошибка: −ln(шанс, данный тому, что случилось) — честное мерило, штрафует самоуверенность
     n_p = 0
     err_model, err_fc, err_mkt = [], [], []
     i50 = mq.QUANTILES.index(0.5)
@@ -53,9 +56,18 @@ def _exam(conn, dfm):
         P = {b: mq.bucket_prob(list(qs), r["unit"], b[0], b[1]) for b in pr}
         pm += P[wb] / (sum(P.values()) or 1.0)
         pk += pr[wb] / (sum(pr.values()) or 1.0)
+        keys = list(pr)
+        mix = blend_with_market([P[b] / (sum(P.values()) or 1.0) for b in keys], [pr[b] for b in keys])
+        pb += mix[keys.index(wb)]
+        lm -= math.log(max(P[wb] / (sum(P.values()) or 1.0), 1e-4))
+        lk -= math.log(max(pr[wb] / (sum(pr.values()) or 1.0), 1e-4))
+        lb -= math.log(max(mix[keys.index(wb)], 1e-4))
         n_p += 1
     return {"from": cut, "to": last.isoformat(), "n": len(te), "n_train": len(tr), "n_prob": n_p,
             "p_model": 100 * pm / n_p if n_p else None, "p_market": 100 * pk / n_p if n_p else None,
+            "p_blend": 100 * pb / n_p if n_p else None,
+            "ll_model": lm / n_p if n_p else None, "ll_market": lk / n_p if n_p else None,
+            "ll_blend": lb / n_p if n_p else None,
             "err_model": float(np.mean(err_model)), "err_fc": float(np.mean(err_fc)),
             "err_market": float(np.mean(err_mkt)) if err_mkt else None}
 
@@ -120,7 +132,7 @@ def report(conn, started, df1, dfm, sigmas, qmodels_mkt):
     conn.commit()
     if exam:
         print(f"экзамен {exam['from']}..{exam['to']}: шанс правильному ответу модель "
-              f"{exam['p_model'] or 0:.1f}% / рынок {exam['p_market'] or 0:.1f}%; ошибка {exam['err_model']:.2f}°C "
+              f"{exam['p_model'] or 0:.1f}% / рынок {exam['p_market'] or 0:.1f}% / смесь {exam.get('p_blend') or 0:.1f}%; ошибка {exam['err_model']:.2f}°C "
               f"(среднее моделей {exam['err_fc']:.2f}°C)")
     return details
 

@@ -1,0 +1,205 @@
+{% extends "base.html" %}
+{% block title %}Ставки — weather-lab{% endblock %}
+{% block content %}
+{#
+  2026-09-27 (просьба Alex): все ставки всех кошельков — открытые и закрытые отдельно.
+  Оформление по пяти макетам: пастельные плитки (Payoneer), «движение денег» (Fundcy),
+  «только что» плиткой 2×2 со статусами (Finance Health), «ждут итога» с датой квадратиком
+  (Upcoming Payments), закрытые списком с круглым значком (Analytics / VISA). Данные — bets_page() в dashboard.py.
+#}
+{% set MON = ['ЯНВ', 'ФЕВ', 'МАР', 'АПР', 'МАЙ', 'ИЮН', 'ИЮЛ', 'АВГ', 'СЕН', 'ОКТ', 'НОЯ', 'ДЕК'] %}
+{% macro money(v) -%}{{ '−' if v < -0.005 else ('+' if v > 0.005 else '') }}${{ '%.2f' | format(v | abs) }}{%- endmacro %}
+{% macro cash_big(v) -%}{% set t = '%.2f' | format(v) %}${{ t[:-3] }}<span class="cents">{{ t[-3:] }}</span>{%- endmacro %}
+{% macro chip(kind, text) -%}<span class="chip {{ kind }}"><svg viewBox="0 0 24 24" aria-hidden="true">{% if kind == 'in' %}<path d="M17 7 7 17M7 9v8h8"/>{% elif kind == 'out' %}<path d="M7 17 17 7M9 7h8v8"/>{% elif kind == 'open' %}<path d="M12 5v14M5 12h14"/>{% else %}<circle cx="12" cy="12" r="8"/><path d="M12 8v4l2.5 1.5"/>{% endif %}</svg>{{ text }}</span>{%- endmacro %}
+{% macro wbadge(w) -%}<span class="wb {{ w.tone }}" title="{{ w.name }}" aria-hidden="true">{{ w.badge }}</span>{%- endmacro %}
+<style>
+  body:has(.bk) .main-col { background: #0A0A0B; }
+  body:has(.bk) main { max-width: 1180px; }
+  .bk {
+    --bk-card: #1C1C1E; --bk-raise: #262628; --bk-line: #2E2E31; --bk-text: #F4F4F5; --bk-muted: #A1A1AA; --bk-faint: #71717A;
+    --bk-accent: #FFD58A; --bk-pos: #A3E39A; --bk-pos-bg: rgba(163, 227, 154, .14); --bk-neg: #F4A77F; --bk-neg-bg: rgba(244, 167, 127, .14);
+    --bk-font: "Onest", -apple-system, "Segoe UI", Roboto, sans-serif;
+    --lav: #D3DDFB; --amb: #FFD58A; --mint: #C7F4E2; --ink: #101012;
+    color: var(--bk-text); font-family: var(--bk-font); font-size: 15px; line-height: 1.55;
+  }
+  .bk .num { font-variant-numeric: tabular-nums; }
+  .bk .pos { color: var(--bk-pos); } .bk .neg { color: var(--bk-neg); } .bk .muted { color: var(--bk-muted); }
+  .bk a { color: var(--bk-accent); text-underline-offset: 3px; }
+  .top { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 12px 24px; margin-bottom: 24px; }
+  .top h1 { margin: 0; font-size: 26px; font-weight: 700; letter-spacing: -.02em; }
+  .top p { margin: 4px 0 0; color: var(--bk-muted); font-size: 14px; max-width: 640px; }
+  .picker { display: flex; flex-direction: column; gap: 6px; min-width: 280px; }
+  .picker label { font-size: 12.5px; color: var(--bk-muted); }
+  .picker select { appearance: none; min-height: 44px; padding: 0 40px 0 14px; border-radius: 12px; border: 1px solid var(--bk-line); color: var(--bk-text);
+    background: var(--bk-card) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='%23A1A1AA' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E") no-repeat right 12px center;
+    font: 600 14.5px var(--bk-font); cursor: pointer; }
+  .sec { margin: 0 0 32px; }
+  .sec-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 16px; margin-bottom: 12px; }
+  .sec-head h2 { margin: 0; font-size: 19px; font-weight: 600; }
+  .sec-head .aside { font-size: 13.5px; color: var(--bk-muted); }
+  .pane { background: var(--bk-card); border: 1px solid var(--bk-line); border-radius: 18px; padding: 20px 22px; }
+  .empty { color: var(--bk-muted); font-size: 14px; padding: 18px 0; text-align: center; }
+  .cents { color: var(--bk-faint); font-weight: 500; }
+
+  /* пастельные плитки (Payoneer) */
+  .tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-bottom: 32px; }
+  .tile { border-radius: 18px; padding: 16px 18px 18px; color: var(--ink); }
+  .tile .h { font-size: 13.5px; font-weight: 500; opacity: .72; }
+  .tile .v { font-size: 30px; font-weight: 600; letter-spacing: -.02em; margin-top: 12px; line-height: 1.1; }
+  .tile .s { font-size: 13px; margin-top: 4px; opacity: .8; }
+  .tile .s b.p { color: #1F7A3A; } .tile .s b.n { color: #A8331A; }
+  .t1 { background: var(--lav); } .t2 { background: var(--amb); } .t3 { background: var(--mint); }
+
+  /* «только что» плиткой 2×2 (Finance Health) + движение денег (Fundcy) */
+  .row2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: 16px; margin-bottom: 32px; }
+  .latest { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .lt { border: 1px solid var(--bk-line); border-radius: 14px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  .lt-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  .lt-top b { font-weight: 600; font-size: 14.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .lt-top span { font-variant-numeric: tabular-nums; font-size: 14px; white-space: nowrap; }
+  .lt-sub { font-size: 12.5px; color: var(--bk-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .flow-h { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 18px; }
+  .flow-h .big { font-size: 34px; font-weight: 600; letter-spacing: -.02em; }
+  .legend { display: flex; gap: 14px; font-size: 12.5px; color: var(--bk-muted); margin: 6px 0 10px; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+  .flow { display: grid; grid-template-columns: repeat(14, minmax(0, 1fr)); gap: 6px; align-items: end; height: 150px; }
+  .fd { display: flex; gap: 2px; align-items: flex-end; height: 100%; position: relative; }
+  .fd i { flex: 1; border-radius: 5px 5px 2px 2px; min-height: 2px; }
+  .fd i.st { background: var(--amb); } .fd i.bk2 { background: var(--bk-pos); }
+  .fl { display: grid; grid-template-columns: repeat(14, minmax(0, 1fr)); gap: 6px; margin-top: 6px; font-size: 11px; color: var(--bk-muted); text-align: center; }
+  .fl b { display: block; color: var(--bk-text); font-weight: 600; }
+
+  /* метки статуса (Finance Health) */
+  .chip { display: inline-flex; align-items: center; gap: 5px; padding: 2px 10px 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; align-self: flex-start; }
+  .chip svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+  .chip.in { background: var(--bk-pos-bg); color: var(--bk-pos); } .chip.out { background: var(--bk-neg-bg); color: var(--bk-neg); }
+  .chip.open { background: rgba(255, 213, 138, .14); color: var(--bk-accent); } .chip.wait { background: var(--bk-raise); color: var(--bk-muted); }
+
+  /* круглый значок кошелька (Upcoming Payments / VISA) */
+  .wb { display: inline-grid; place-items: center; width: 38px; height: 38px; border-radius: 50%; font-size: 12px; font-weight: 700; color: var(--ink); flex-shrink: 0; }
+  .wb.g1 { background: var(--amb); } .wb.g2 { background: var(--lav); } .wb.g3 { background: #E4E4E7; } .wb.g4 { background: var(--mint); } .wb.g5 { background: #F4C7B0; }
+
+  /* ждут итога (Upcoming Payments) и закрытые (Analytics / VISA) */
+  .cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+  .list { list-style: none; margin: 0; padding: 0; max-height: 720px; overflow-y: auto; }
+  .list li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--bk-line); }
+  .list li:last-child { border-bottom: 0; }
+  .db { display: flex; flex-direction: column; align-items: center; justify-content: center; width: 50px; height: 52px; border-radius: 12px;
+    background: var(--bk-raise); border: 1px solid var(--bk-line); font-size: 18px; font-weight: 600; line-height: 1.05; }
+  .db small { font-size: 10.5px; font-weight: 600; letter-spacing: .06em; color: var(--bk-muted); margin-bottom: 2px; }
+  .it b { font-weight: 600; }
+  .it .sub { display: block; font-size: 12.5px; color: var(--bk-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .it .sub.wrap { white-space: normal; }
+  .it .sub .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
+  .right { display: flex; align-items: center; gap: 10px; }
+  .pill { border: 1px solid var(--bk-line); border-radius: 10px; padding: 5px 10px; font-weight: 600; font-size: 14px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .amt { text-align: right; }
+  .amt b { display: block; font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .amt .chip { margin-top: 4px; }
+  .g1c { background: var(--amb); } .g2c { background: var(--lav); } .g3c { background: #E4E4E7; } .g4c { background: var(--mint); } .g5c { background: #F4C7B0; }
+
+  @media (max-width: 900px) {
+    .row2, .cols { grid-template-columns: 1fr; }
+    .picker { min-width: 0; width: 100%; }
+  }
+  @media (max-width: 600px) {
+    .tiles { grid-template-columns: 1fr 1fr; } .tiles .tile:last-child { grid-column: 1 / -1; }
+    .tile .v { font-size: 24px; }
+    .flow, .fl { gap: 3px; } .fl { font-size: 9.5px; }
+    .pane { padding: 16px; }
+    .wb { width: 32px; height: 32px; font-size: 11px; }
+    .right .wb { display: none; }
+  }
+</style>
+
+<div class="bk">
+  <div class="top">
+    <div>
+      <h1>Ставки</h1>
+      <p>Все ставки {{ 'кошелька «' ~ sel_name ~ '»' if sel_name else 'всех кошельков' }}: какие ждут итога и какие уже закрылись. Деньги виртуальные.</p>
+    </div>
+    <form class="picker" method="get" action="/bets">
+      <label for="w">Кошелёк</label>
+      <select id="w" name="w" onchange="this.form.submit()">
+        <option value="">Все кошельки</option>
+        {% for k, n in wallets %}<option value="{{ k }}"{% if k == sel %} selected{% endif %}>{{ n }}</option>{% endfor %}
+      </select>
+      <noscript><button type="submit">Показать</button></noscript>
+    </form>
+  </div>
+
+  <div class="tiles">
+    <div class="tile t1"><div class="h">Открыто за сутки</div><div class="v num">{{ kpi.open24_n }}</div><div class="s">поставлено <b>${{ '%.2f' | format(kpi.open24_usd) }}</b></div></div>
+    <div class="tile t2"><div class="h">Ждут итога</div><div class="v num">{{ kpi.wait_n }}</div><div class="s">в ставках <b>${{ '%.2f' | format(kpi.wait_usd) }}</b></div></div>
+    <div class="tile t3"><div class="h">Закрыто за сутки</div><div class="v num">{{ kpi.closed24_n }}</div><div class="s">итог <b class="{{ 'p' if kpi.closed24_pnl > 0.005 else ('n' if kpi.closed24_pnl < -0.005 else '') }}">{{ money(kpi.closed24_pnl) }}</b></div></div>
+  </div>
+
+  <div class="row2">
+    <section class="pane" aria-labelledby="s-latest">
+      <div class="sec-head"><h2 id="s-latest">Только что</h2><span class="aside">последние 4 события</span></div>
+      {% if latest %}
+      <div class="latest">
+        {% for e in latest %}
+        <div class="lt">
+          <div class="lt-top"><b>{{ e.b.city_ru }}</b><span class="{{ 'pos' if e.kind == 'in' else ('neg' if e.kind == 'out' else '') }}">{{ money(e.b.pnl) if e.b.pnl is not none and e.kind != 'open' else '$' ~ ('%.2f' | format(e.b.cost)) }}</span></div>
+          <span class="lt-sub">{{ e.b.what }} · {{ e.b.w.name }}</span>
+          {{ chip(e.kind, 'открыта ' ~ e.when if e.kind == 'open' else ('угадали · ' ~ e.when if e.kind == 'in' else 'не угадали · ' ~ e.when)) }}
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}<div class="empty">Ставок пока нет.</div>{% endif %}
+    </section>
+
+    <section class="pane" aria-labelledby="s-flow">
+      <div class="sec-head"><h2 id="s-flow">Движение денег</h2><span class="aside">14 дней</span></div>
+      <div class="flow-h"><span class="big num">{{ cash_big(kpi.flow_staked) }}</span><span class="muted">поставлено · вернулось <b class="num" style="color:var(--bk-text)">${{ '%.2f' | format(kpi.flow_back) }}</b></span></div>
+      <div class="legend"><span><i style="background:var(--amb)"></i>поставили</span><span><i style="background:var(--bk-pos)"></i>вернулось по итогам</span></div>
+      <div class="flow" role="img" aria-label="Поставлено и вернулось по дням за 14 дней">
+        {% for d in flow %}<div class="fd" title="{{ d.date }}: поставили ${{ '%.2f' | format(d.staked) }}, вернулось ${{ '%.2f' | format(d.back) }}"><i class="st" style="height: {{ d.hs }}%"></i><i class="bk2" style="height: {{ d.hb }}%"></i></div>{% endfor %}
+      </div>
+      <div class="fl">{% for d in flow %}<span><b>{{ d.wd }}</b>{{ d.date[:2] }}</span>{% endfor %}</div>
+    </section>
+  </div>
+
+  <div class="cols">
+    <section class="sec" aria-labelledby="s-open">
+      <div class="sec-head"><h2 id="s-open">Ждут итога</h2><span class="aside">{{ opened | length }} · сначала те, что закроются раньше</span></div>
+      <div class="pane">
+        {% if opened %}
+        <ul class="list">
+          {% for b in opened %}
+          <li>
+            {% if b.close_badge %}<span class="db" aria-hidden="true"><small>{{ MON[b.close_badge.month - 1] }}</small>{{ b.close_badge.day }}</span>{% else %}<span class="db">—</span>{% endif %}
+            <span class="it"><b>{{ b.city_ru }}</b> · {{ b.what }}
+              <span class="sub"><i class="dot {{ b.w.tone }}c"></i>{{ b.w.name }}</span>
+              <span class="sub wrap">итог ~{{ b.close_txt }} · открыта {{ b.placed_txt }}{% if b.status == 'resting' %} · заявка ждёт продавца{% endif %}</span></span>
+            <span class="right"><span class="pill" title="Поставили; если угадаем — получим ${{ '%.2f' | format(b.shares) }}">${{ '%.2f' | format(b.cost) }}</span>{{ wbadge(b.w) }}</span>
+          </li>
+          {% endfor %}
+        </ul>
+        {% else %}<div class="empty">Открытых ставок нет.</div>{% endif %}
+      </div>
+    </section>
+
+    <section class="sec" aria-labelledby="s-closed">
+      <div class="sec-head"><h2 id="s-closed">Закрытые</h2><span class="aside">{{ closed | length }} за 7 дней · новые сверху</span></div>
+      <div class="pane">
+        {% if closed %}
+        <ul class="list">
+          {% for b in closed %}
+          <li>
+            {{ wbadge(b.w) }}
+            <span class="it"><b>{{ b.city_ru }}</b> · {{ b.what }}
+              <span class="sub">{{ b.w.name }}</span>
+              <span class="sub">маркет {{ b.local_date[8:10] }}.{{ b.local_date[5:7] }} · закрыта {{ b.settled_txt }}</span></span>
+            <span class="amt"><b class="{{ 'pos' if b.pnl > 0.005 else ('neg' if b.pnl < -0.005 else '') }}">{{ money(b.pnl) }}</b>
+              {% if b.status == 'void' %}{{ chip('wait', 'отменён') }}{% elif b.pnl > 0.005 %}{{ chip('in', 'угадали') }}{% else %}{{ chip('out', 'не угадали') }}{% endif %}</span>
+          </li>
+          {% endfor %}
+        </ul>
+        {% else %}<div class="empty">За неделю закрытых ставок нет.</div>{% endif %}
+      </div>
+    </section>
+  </div>
+</div>
+{% endblock %}

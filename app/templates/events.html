@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% block title %}События — weather-lab{% endblock %}
+{% block content %}
+{#
+  2026-09-27 (просьба Alex — «хочу видеть, что происходит»): лента событий системы за 3 дня —
+  обучение, загрузка данных, итоги маркетов, ставки сводкой, тревоги, ошибки. Данные — system_events() в dashboard.py.
+  Частые скрипты (каждые 2-30 мин) показываются только при ошибке, иначе лента тонет в них.
+#}
+{% set KIND = {
+  'train': ('Обучение', 'k-train'), 'data': ('Данные', 'k-data'), 'result': ('Итоги маркетов', 'k-result'),
+  'bets': ('Ставки', 'k-bets'), 'alert': ('Тревоги', 'k-alert'), 'ok': ('Тревога снята', 'k-ok'), 'fail': ('Ошибки', 'k-fail')} %}
+{% macro icon_for(kind) -%}<svg viewBox="0 0 24 24" aria-hidden="true">{% if kind == 'train' %}<path d="M12 3 3 8l9 5 9-5-9-5Z"/><path d="M7 10.5V15c0 1.5 2.2 3 5 3s5-1.5 5-3v-4.5"/>{% elif kind == 'data' %}<path d="M12 4v11M7 10l5 5 5-5"/><path d="M5 20h14"/>{% elif kind == 'result' %}<path d="M5 12.5 10 17 19 7"/>{% elif kind == 'bets' %}<path d="M4 7h16v10H4z"/><path d="M4 11h16"/>{% elif kind == 'alert' or kind == 'fail' %}<path d="M12 4 2.8 19h18.4L12 4Z"/><path d="M12 10v4M12 17v.5"/>{% else %}<circle cx="12" cy="12" r="8"/><path d="m8.5 12 2.5 2.5 4.5-5"/>{% endif %}</svg>{%- endmacro %}
+<style>
+  body:has(.bk) .main-col { background: #0A0A0B; }
+  body:has(.bk) main { max-width: 980px; }
+  .bk {
+    --bk-card: #1C1C1E; --bk-raise: #262628; --bk-line: #2E2E31; --bk-text: #F4F4F5; --bk-muted: #A1A1AA; --bk-faint: #71717A;
+    --bk-accent: #FFD58A; --bk-pos: #A3E39A; --bk-neg: #F4A77F;
+    --bk-font: "Onest", -apple-system, "Segoe UI", Roboto, sans-serif;
+    color: var(--bk-text); font-family: var(--bk-font); font-size: 15px; line-height: 1.55;
+  }
+  .bk a { color: var(--bk-accent); text-underline-offset: 3px; }
+  .top { margin-bottom: 20px; }
+  .top h1 { margin: 0; font-size: 26px; font-weight: 700; letter-spacing: -.02em; }
+  .top p { margin: 4px 0 0; color: var(--bk-muted); font-size: 14px; max-width: 680px; }
+  /* цвет события: иконка в кружке */
+  .k-train { --c: #D3DDFB; } .k-data { --c: #C7F4E2; } .k-result { --c: #A3E39A; } .k-bets { --c: #FFD58A; }
+  .k-alert { --c: #F4A77F; } .k-fail { --c: #F4A77F; } .k-ok { --c: #A3E39A; }
+  .filters { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 24px; }
+  .filters button { display: inline-flex; align-items: center; gap: 7px; padding: 7px 13px; border-radius: 999px; border: 1px solid var(--bk-line);
+    background: var(--bk-card); color: var(--bk-muted); font: 500 13.5px var(--bk-font); cursor: pointer; min-height: 36px; }
+  .filters button b { color: var(--bk-text); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .filters button i { width: 8px; height: 8px; border-radius: 50%; background: var(--c, var(--bk-muted)); }
+  .filters button[aria-pressed="true"] { background: #F4F4F5; color: #0A0A0B; border-color: #F4F4F5; }
+  .filters button[aria-pressed="true"] b { color: #0A0A0B; }
+  .filters button:focus-visible { outline: 2px solid var(--bk-accent); outline-offset: 2px; }
+  .day { margin-bottom: 26px; }
+  .day h2 { margin: 0 0 8px; font-size: 13px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--bk-muted); }
+  .feed { list-style: none; margin: 0; padding: 6px 20px; background: var(--bk-card); border: 1px solid var(--bk-line); border-radius: 18px; }
+  .feed li { display: grid; grid-template-columns: 48px 36px minmax(0, 1fr); gap: 12px; align-items: start; padding: 13px 0; border-bottom: 1px solid var(--bk-line); }
+  .feed li:last-child { border-bottom: 0; }
+  .hm { font-size: 13.5px; color: var(--bk-muted); font-variant-numeric: tabular-nums; padding-top: 7px; }
+  .ic { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; background: color-mix(in srgb, var(--c) 16%, transparent); color: var(--c); }
+  .ic svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .tx b { font-weight: 600; }
+  .tx .d { display: block; font-size: 13px; color: var(--bk-muted); margin-top: 2px; word-break: break-word; }
+  .tx .d a { margin-left: 4px; }
+  .k-fail .tx b, .k-alert .tx b { color: var(--bk-neg); }
+  .empty { color: var(--bk-muted); padding: 28px 0; text-align: center; }
+  .foot { font-size: 13px; color: var(--bk-muted); }
+  @media (max-width: 600px) {
+    .feed { padding: 4px 14px; }
+    .feed li { grid-template-columns: 30px minmax(0, 1fr); }
+    .hm { grid-column: 2; padding: 0; order: 2; font-size: 12px; }
+    .ic { width: 30px; height: 30px; grid-row: span 2; }
+    .tx { grid-column: 2; }
+  }
+</style>
+
+<div class="bk">
+  <div class="top">
+    <h1>События</h1>
+    <p>Что делает система за последние 3 дня: обучение модели, загрузка данных, итоги маркетов, ставки, тревоги и ошибки. Все ставки по отдельности — на странице <a href="/bets">«Ставки»</a>.</p>
+  </div>
+
+  <div class="filters" role="group" aria-label="Показать события">
+    <button type="button" data-f="all" aria-pressed="true">Все</button>
+    {% for k in ['train', 'data', 'result', 'bets', 'alert', 'fail'] %}
+    <button type="button" data-f="{{ k }}" class="{{ KIND[k][1] }}" aria-pressed="false"><i aria-hidden="true"></i>{{ KIND[k][0] }} <b title="за сутки">{{ counts[k] + (counts['ok'] if k == 'alert' else 0) }}</b></button>
+    {% endfor %}
+  </div>
+
+  {% if days %}
+  {% for d in days %}
+  <section class="day" aria-label="{{ d.head }}">
+    <h2>{{ d.head }}</h2>
+    <ul class="feed">
+      {% for e in d.rows %}
+      <li class="{{ KIND[e.kind][1] }}" data-k="{{ 'alert' if e.kind == 'ok' else e.kind }}">
+        <span class="hm">{{ e.hm }}</span>
+        <span class="ic">{{ icon_for(e.kind) }}</span>
+        <span class="tx"><b>{{ e.title }}</b>{% if e.detail or e.link %}<span class="d">{{ e.detail }}{% if e.link %}<a href="{{ e.link }}">подробнее →</a>{% endif %}</span>{% endif %}</span>
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endfor %}
+  <p class="foot">Числа на кнопках — за последние сутки. Частые скрипты (живые замеры, запасной опрос сделок, проверки, быстрый снимок, итоги и расчёт кошельков) в ленту не пишутся, пока не упадут — их результат виден как «пришли итоги» и «открыто / закрыто ставок». Подробный учёт запусков ведётся с 27.09.</p>
+  {% else %}
+  <div class="empty">За 3 дня событий нет.</div>
+  {% endif %}
+</div>
+<script>
+(function () {
+  var btns = document.querySelectorAll('.filters button');
+  btns.forEach(function (b) {
+    b.addEventListener('click', function () {
+      var f = b.dataset.f;
+      btns.forEach(function (x) { x.setAttribute('aria-pressed', x === b ? 'true' : 'false'); });
+      document.querySelectorAll('.feed li').forEach(function (li) { li.hidden = f !== 'all' && li.dataset.k !== f; });
+      document.querySelectorAll('.day').forEach(function (d) { d.hidden = !d.querySelector('li:not([hidden])'); });
+    });
+  });
+})();
+</script>
+{% endblock %}

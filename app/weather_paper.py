@@ -33,7 +33,7 @@ weather_edge.py и weather_poly_resolve.py.
 import json
 import os
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import requests
@@ -443,13 +443,15 @@ def place(conn, now, only=None):
                     """
                     INSERT OR IGNORE INTO paper_trades
                     (wallet, city, local_date, snapshot_ts, unit, bucket_lo, bucket_hi, model_p, market_p, price, stake,
-                     status, reason, shares, fee, book_json, side)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     status, reason, shares, fee, book_json, side, placed_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (wallet, city, d["local_date"], d["ts"], b["unit"], b["bucket_lo"], b["bucket_hi"],
                      b[field], b["market_p"], ex["avg"], ex["cost"] if filled else 0.0,
                      "open" if filled else "nofill", reason, ex["shares"] if filled else 0.0,
-                     ex["fee"] if filled else 0.0, ex["book"], "no" if no_side else "yes"),
+                     ex["fee"] if filled else 0.0, ex["book"], "no" if no_side else "yes",
+                     # 2026-09-27: время покупки — для ленты ставок (/bets)
+                     datetime.now(timezone.utc).isoformat()),
                 )
                 conn.commit()
                 placed += filled

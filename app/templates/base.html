@@ -10,24 +10,24 @@
 <link href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700&display=swap" rel="stylesheet">
 {% import "_icons.html" as icon %}
 <style>
-  /* 2026-09-27 (просьба Alex): палитра #FF6500 / #1E3E62 / #0B192C / #000000 */
+  /* 2026-09-27 (просьба Alex): палитра #FFD58A / #2E2E31 / #1C1C1E / #0A0A0B */
   :root {
-    --bg: #000000;
-    --bg-raised: #060E1A;
-    --panel: #0B192C;
-    --track: #122A47;
-    --border: #1E3E62;
-    --border-soft: #152D4A;
-    --text: #eaeef5;
-    --muted: #8d99b3;
-    --accent: #FF6500;
-    --accent-strong: #FF8A3D;
-    --highlight: #f0a83c;
-    --pos: #33c17c;
-    --neg: #ff6b6b;
-    --pos-bg: rgba(51, 193, 124, 0.14);
-    --neg-bg: rgba(255, 107, 107, 0.14);
-    --accent-bg: rgba(255, 101, 0, 0.14);
+    --bg: #0A0A0B;
+    --bg-raised: #111113;
+    --panel: #1C1C1E;
+    --track: #262628;
+    --border: #2E2E31;
+    --border-soft: #242427;
+    --text: #F4F4F5;
+    --muted: #A1A1AA;
+    --accent: #FFD58A;
+    --accent-strong: #FFE3AE;
+    --highlight: #FFD58A;
+    --pos: #A3E39A;
+    --neg: #F4A77F;
+    --pos-bg: rgba(163, 227, 154, 0.14);
+    --neg-bg: rgba(244, 167, 127, 0.14);
+    --accent-bg: rgba(255, 213, 138, 0.14);
     --sidebar-w: 240px;
     --font-ui: "Onest", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     --font-mono: "Onest", -apple-system, "Segoe UI", Roboto, sans-serif;  /* 2026-09-27 (просьба Alex): и цифры — Onest; ровные столбцы — через tabular-nums */
@@ -53,7 +53,7 @@
     left: 12px;
     top: -60px;
     background: var(--accent);
-    color: #000000;
+    color: #0A0A0B;
     padding: 10px 16px;
     border-radius: 0 0 8px 8px;
     font-size: 13px;
@@ -194,7 +194,7 @@
     .nav-scrim {
       display: none;
       position: fixed; inset: 0;
-      background: rgba(4, 7, 13, 0.6);
+      background: rgba(0, 0, 0, 0.6);
       z-index: 40;
     }
     .nav-toggle-input:checked ~ .nav-scrim { display: block; }
@@ -358,8 +358,10 @@
     <nav aria-label="Разделы">
       <div class="side-group-label">Обзор</div>
       {{ navlink('/status', 'здоровье системы', 'status', path == '/status') }}
+      {{ navlink('/events', 'события', 'news', path == '/events') }}
       <div class="side-group-label">Погода</div>
       {{ navlink('/paper', 'кошелёк', 'wallet', path == '/paper') }}
+      {{ navlink('/bets', 'ставки', 'trending', path == '/bets') }}
       {{ navlink('/', 'погода', 'weather', path == '/' or path.startswith('/city/')) }}
       <div class="side-group-label">Данные</div>
       {{ navlink('/training', 'обучение модели', 'sliders', path == '/training') }}

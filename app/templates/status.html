@@ -7,12 +7,12 @@
 #}
 {% set STATE = {"ok": ("работает", "ok"), "late": ("опаздывает", "warn"), "fail": ("ошибка", "bad"), "unknown": ("нет данных", "none")} %}
 <style>
-  body:has(.bk) .main-col { background: #000000; }
+  body:has(.bk) .main-col { background: #0A0A0B; }
   body:has(.bk) main { max-width: 1120px; }
   .bk {
-    --bk-card: #15181e; --bk-raise: #1C2027; --bk-line: #262A31; --bk-text: #E5EAF2; --bk-muted: #93A2BA; --bk-faint: #7C8BA3;
-    --bk-accent: #FF6500; --bk-accent-bg: rgba(255, 101, 0, .14); --bk-pos: #4ADE80; --bk-pos-bg: rgba(34, 197, 94, .13);
-    --bk-neg: #F87171; --bk-neg-bg: rgba(248, 113, 113, .13); --bk-gold: #E9C46A; --bk-gold-bg: rgba(233, 196, 106, .14);
+    --bk-card: #1C1C1E; --bk-raise: #262628; --bk-line: #2E2E31; --bk-text: #F4F4F5; --bk-muted: #A1A1AA; --bk-faint: #71717A;
+    --bk-accent: #FFD58A; --bk-accent-bg: rgba(255, 213, 138, .14); --bk-pos: #A3E39A; --bk-pos-bg: rgba(163, 227, 154, .13);
+    --bk-neg: #F4A77F; --bk-neg-bg: rgba(244, 167, 127, .13); --bk-gold: #FFD58A; --bk-gold-bg: rgba(255, 213, 138, .14);
     --bk-font: "Onest", -apple-system, "Segoe UI", Roboto, sans-serif;
     color: var(--bk-text); font-family: var(--bk-font); font-size: 15px; line-height: 1.55;
   }
@@ -29,8 +29,8 @@
 
   /* итог */
   .verdict { display: flex; gap: 16px; align-items: flex-start; padding: 20px 22px; border-radius: 16px; margin-bottom: 32px; }
-  .verdict.ok { background: var(--bk-pos-bg); border: 1px solid rgba(74, 222, 128, .35); }
-  .verdict.bad { background: var(--bk-neg-bg); border: 1px solid rgba(248, 113, 113, .45); }
+  .verdict.ok { background: var(--bk-pos-bg); border: 1px solid rgba(163, 227, 154, .35); }
+  .verdict.bad { background: var(--bk-neg-bg); border: 1px solid rgba(244, 167, 127, .45); }
   .verdict .dot { width: 14px; height: 14px; border-radius: 50%; margin-top: 7px; flex-shrink: 0; }
   .verdict.ok .dot { background: var(--bk-pos); } .verdict.bad .dot { background: var(--bk-neg); }
   .verdict h2 { margin: 0; font-size: 20px; font-weight: 700; }
@@ -74,7 +74,7 @@
   .al li { display: grid; grid-template-columns: 1fr auto; gap: 2px 14px; padding: 11px 0; border-bottom: 1px solid var(--bk-line); font-size: 14px; }
   .al li:last-child { border-bottom: 0; }
   .al .t { grid-column: 2; grid-row: 1 / span 2; font-size: 12.5px; color: var(--bk-muted); white-space: nowrap; text-align: right; }
-  .al.now .m { color: #FCA5A5; }
+  .al.now .m { color: #F8C2A4; }
   .empty { color: var(--bk-muted); font-size: 14px; padding: 6px 0; }
   .note { margin-top: 12px; font-size: 13px; color: var(--bk-muted); }
 

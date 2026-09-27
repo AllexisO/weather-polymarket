@@ -25,25 +25,36 @@
     data-tip-x="{{ col.x }}" data-tip-val="неделя с {{ col.label }}" data-tip-title="{% for n, v in col.vals %}{{ n }} {{ v }}{% if not loop.last %} · {% endif %}{% endfor %}" data-tip-sub=""/>{% endfor %}
 </svg>
 {%- endmacro %}
+{# 2026-09-27 (просьба Alex, идеи из макетов): крупная сумма с бледными центами (Fundcy) #}
+{% macro cash_big(v) -%}{% set t = '%.2f' | format(v) %}<b class="num mb" data-v="{{ t }}">${{ t[:-3] }}<span class="cents">{{ t[-3:] }}</span></b>{%- endmacro %}
+{# дата квадратиком — «СЕН / 28» (Upcoming Payments) #}
+{% set MON = ['ЯНВ', 'ФЕВ', 'МАР', 'АПР', 'МАЙ', 'ИЮН', 'ИЮЛ', 'АВГ', 'СЕН', 'ОКТ', 'НОЯ', 'ДЕК'] %}
+{% macro dbadge(d) -%}<span class="dbadge" aria-hidden="true"><small>{{ MON[d[5:7] | int - 1] }}</small>{{ d[8:10] | int }}</span>{%- endmacro %}
+{# метка статуса с иконкой (Money In / Money Out / Pending) #}
+{% macro chip(kind, text) -%}<span class="chip {{ kind }}"><svg viewBox="0 0 24 24" aria-hidden="true">{% if kind == 'in' %}<path d="M17 7 7 17M7 9v8h8"/>{% elif kind == 'out' %}<path d="M7 17 17 7M9 7h8v8"/>{% else %}<circle cx="12" cy="12" r="8"/><path d="M12 8v4l2.5 1.5"/>{% endif %}</svg>{{ text }}</span>{%- endmacro %}
+{# полоска из делений — «лимит» (Daily Transaction Limit): n из need, SEG делений #}
+{% macro segbar(n, need, label) -%}{% set SEG = 30 %}{% set on = ((n / need * SEG) | round(0, 'ceil') | int) if n else 0 %}
+<div class="segbar" role="progressbar" aria-label="{{ label }}" aria-valuemin="0" aria-valuemax="{{ need }}" aria-valuenow="{{ n }}">{% for i in range(SEG) %}<i class="{{ 'on' if i < on else '' }}" style="--k: {{ i }}"></i>{% endfor %}</div>
+{%- endmacro %}
 {% set all_groups = ([("Главная модель", [main])] if main else []) + groups %}
 
 <style>
-  body:has(.bk) .main-col { background: #000000; }
+  body:has(.bk) .main-col { background: #0A0A0B; }
   body:has(.bk) main { max-width: 1120px; }
   .bk {
-    --bk-card: #15181e;
-    --bk-raise: #1C2027;
-    --bk-line: #262A31;
-    --bk-text: #E5EAF2;
-    --bk-muted: #93A2BA;
-    --bk-faint: #7C8BA3;
-    --bk-accent: #FF6500;
-    --bk-accent-bg: rgba(255, 101, 0, .14);
-    --bk-pos: #4ADE80;
-    --bk-pos-bg: rgba(34, 197, 94, .13);
-    --bk-neg: #F87171;
-    --bk-neg-bg: rgba(248, 113, 113, .13);
-    --bk-gold: #E9C46A;
+    --bk-card: #1C1C1E;
+    --bk-raise: #262628;
+    --bk-line: #2E2E31;
+    --bk-text: #F4F4F5;
+    --bk-muted: #A1A1AA;
+    --bk-faint: #71717A;
+    --bk-accent: #FFD58A;
+    --bk-accent-bg: rgba(255, 213, 138, .14);
+    --bk-pos: #A3E39A;
+    --bk-pos-bg: rgba(163, 227, 154, .13);
+    --bk-neg: #F4A77F;
+    --bk-neg-bg: rgba(244, 167, 127, .13);
+    --bk-gold: #FFD58A;
     --bk-font: "Onest", -apple-system, "Segoe UI", Roboto, sans-serif;
     --bk-num: "Onest", -apple-system, "Segoe UI", Roboto, sans-serif;
     color: var(--bk-text); font-family: var(--bk-font); font-size: 15px; line-height: 1.55;
@@ -77,7 +88,7 @@
   .bk a.fr { text-decoration: none; } .bk a.fr:hover { border-color: var(--bk-accent); } .fr u { color: var(--bk-accent); text-decoration: none; }
   .fr i { width: 7px; height: 7px; border-radius: 50%; background: var(--bk-pos); flex-shrink: 0; }
   .fr.none i { background: var(--bk-faint); }
-  .fr.stale { border-color: rgba(233, 196, 106, .45); }
+  .fr.stale { border-color: rgba(255, 213, 138, .45); }
   .fr.stale i { background: var(--bk-gold); }
   .fr.stale em { font-style: normal; color: var(--bk-gold); font-weight: 600; }
 
@@ -92,7 +103,7 @@
   .acct { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 24px 32px; align-items: start; }
   .acct-name { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; font-size: 16px; font-weight: 600; }
   .tag { font-size: 11.5px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; padding: 3px 9px; border-radius: 999px;
-    background: rgba(233, 196, 106, .12); color: var(--bk-gold); }
+    background: var(--bk-gold); color: #0A0A0B; }
   .acct-desc { color: var(--bk-muted); font-size: 14px; margin: 4px 0 18px; max-width: 620px; }
   .big { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; }
   .big b { font-size: 44px; font-weight: 600; line-height: 1.05; letter-spacing: -.02em; }
@@ -106,7 +117,7 @@
   .goal p { margin: 0; font-size: 13px; color: var(--bk-muted); }
   .goal .n { font-size: 26px; font-weight: 600; margin: 10px 0 8px; }
   .goal .n small { font-size: 14px; color: var(--bk-muted); font-weight: 500; font-family: var(--bk-font); }
-  .meter { height: 6px; border-radius: 999px; background: #262A31; overflow: hidden; }
+  .meter { height: 6px; border-radius: 999px; background: #2E2E31; overflow: hidden; }
   .meter i { display: block; height: 100%; min-width: 6px; border-radius: 999px; background: var(--bk-accent); }
 
   /* 2. открытые ставки */
@@ -120,7 +131,7 @@
   .scen td { padding: 11px 12px 11px 0; vertical-align: middle; font-size: 15px; }
   .scen tr:last-child td { border-bottom: 0; }
   .scen td:first-child, .scen th:first-child { padding-left: 14px; }
-  .scen tr.likely td { background: rgba(255, 101, 0, .07); }
+  .scen tr.likely td { background: rgba(255, 213, 138, .07); }
   .scen tr.likely td:first-child { box-shadow: inset 3px 0 0 var(--bk-accent); }
   .scen .k { font-weight: 600; white-space: nowrap; width: 110px; }
   .scen .res { font-family: var(--bk-num); font-size: 16px; font-weight: 600; }
@@ -147,19 +158,19 @@
   .chart svg.viz { width: 100%; height: auto; display: block; overflow: visible; }
   .viz .grid line { stroke: var(--bk-line); stroke-width: 1; }
   .viz text { fill: var(--bk-muted); font-size: 12px; font-family: var(--bk-num); }
-  .viz .line { stroke: #FF6500; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; fill: none; }
-  .viz .area { fill: #FF6500; fill-opacity: .1; }
-  .viz .pt { fill: #93A2BA; stroke: var(--bk-card); stroke-width: 2; }
-  .viz .pt.up { fill: #4ADE80; } .viz .pt.down { fill: #F87171; }
-  .viz .dot { fill: #FF6500; stroke: var(--bk-card); stroke-width: 2; }
-  .viz .ref { stroke: #3A3F48; stroke-width: 1; }
+  .viz .line { stroke: #FFD58A; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; fill: none; }
+  .viz .area { fill: #FFD58A; fill-opacity: .1; }
+  .viz .pt { fill: #A1A1AA; stroke: var(--bk-card); stroke-width: 2; }
+  .viz .pt.up { fill: #A3E39A; } .viz .pt.down { fill: #F4A77F; }
+  .viz .dot { fill: #FFD58A; stroke: var(--bk-card); stroke-width: 2; }
+  .viz .ref { stroke: #3F3F46; stroke-width: 1; }
   .viz .hit { fill: transparent; }
   .viz .cross { stroke: var(--bk-muted); stroke-width: 1; opacity: 0; }
-  .viz-tip { position: absolute; pointer-events: none; z-index: 5; background: #000000; border: 1px solid #262A31; border-radius: 10px;
+  .viz-tip { position: absolute; pointer-events: none; z-index: 5; background: #0A0A0B; border: 1px solid #2E2E31; border-radius: 10px;
     padding: 8px 12px; font-size: 13px; line-height: 1.4; color: var(--bk-muted); opacity: 0; width: max-content; max-width: min(320px, calc(100% - 16px)); }
   /* выбранную точку показывает вертикальная линия и подсказка — белая рамка фокуса на графике не нужна */
   .bk .viz .hit:focus, .bk .viz .hit:focus-visible { outline: none; }
-  .viz-tip b { display: block; font-family: var(--bk-num); font-size: 15px; color: #F8FAFC; }
+  .viz-tip b { display: block; font-family: var(--bk-num); font-size: 15px; color: #FFFFFF; }
   .label { font-size: 13.5px; color: var(--bk-muted); margin-bottom: 8px; }
   .res-list { list-style: none; margin: 0; padding: 0; max-height: 440px; overflow-y: auto; }
   .res-list li { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; padding: 11px 0; border-bottom: 1px solid var(--bk-line); }
@@ -181,11 +192,11 @@
   .kpi .v b { font-family: var(--bk-num); font-weight: 600; }
   .kpi .verdict { margin-top: 8px; font-size: 14px; }
   .key { display: inline-block; width: 14px; height: 3px; border-radius: 2px; vertical-align: 4px; margin-right: 6px; }
-  .key.s-model { background: #FF6500; } .key.s-market { background: #8FB3DE; } .key.s-real { background: #199E70; }
+  .key.s-model { background: #FFD58A; } .key.s-market { background: #D3DDFB; } .key.s-real { background: #A3E39A; }
   .viz .ln { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
-  .viz .ln.s-model { stroke: #FF6500; } .viz .ln.s-market { stroke: #8FB3DE; } .viz .ln.s-real { stroke: #199E70; stroke-width: 2.5; }
+  .viz .ln.s-model { stroke: #FFD58A; } .viz .ln.s-market { stroke: #D3DDFB; } .viz .ln.s-real { stroke: #A3E39A; stroke-width: 2.5; }
   .viz .end { stroke: var(--bk-card); stroke-width: 2; }
-  .viz .end.s-model { fill: #FF6500; } .viz .end.s-market { fill: #8FB3DE; } .viz .end.s-real { fill: #199E70; }
+  .viz .end.s-model { fill: #FFD58A; } .viz .end.s-market { fill: #D3DDFB; } .viz .end.s-real { fill: #A3E39A; }
   .viz text.lab { fill: var(--bk-text); font-family: var(--bk-font); font-size: 12.5px; }
   .viz .live { stroke: var(--bk-gold); stroke-width: 1; }
   .skill-charts { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
@@ -194,7 +205,7 @@
 
   /* 4. сравнение */
   /* группа кошельков — отдельный блок с заголовком, чтобы на телефоне группы не сливались */
-  .grp-box { margin-top: 32px; padding: 18px; border-radius: 16px; background: #0c0e12; }
+  .grp-box { margin-top: 32px; padding: 18px; border-radius: 16px; background: #121214; }
   .grp-box.first { margin-top: 0; }
   .grp { display: flex; align-items: center; gap: 12px; margin: 0 0 14px; padding-bottom: 12px; border-bottom: 1px solid var(--bk-line); }
   .grp::before { content: ""; width: 4px; align-self: stretch; min-height: 22px; border-radius: 2px; background: var(--bk-accent); flex-shrink: 0; }
@@ -204,7 +215,7 @@
   .wal-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px; }
   .bk a.wal { display: block; padding: 14px 16px; border-radius: 12px; border: 0; background: var(--bk-card);
     color: var(--bk-text); text-decoration: none; }
-  .bk a.wal:hover { border-color: rgba(255, 101, 0, .6); color: var(--bk-text); }
+  .bk a.wal:hover { border-color: rgba(255, 213, 138, .6); color: var(--bk-text); }
   .bk a.wal.sel { border-color: var(--bk-accent); box-shadow: inset 0 0 0 1px var(--bk-accent); }
   .wal-top { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
   .wal-name { font-weight: 600; font-size: 14.5px; line-height: 1.3; }
@@ -222,7 +233,7 @@
   /* обзор */
   .back { display: inline-flex; align-items: center; min-height: 32px; font-size: 14px; font-weight: 600; text-decoration: none; margin-bottom: 4px; }
   .bk a.feat { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 24px 32px; padding: 24px; margin-bottom: 30px; border-radius: 18px;
-    border: 1px solid rgba(255, 101, 0, .4); background: linear-gradient(135deg, #1E3E62, #0B192C 60%); color: var(--bk-text); text-decoration: none; }
+    border: 1px solid rgba(255, 213, 138, .4); background: linear-gradient(135deg, #2E2E31, #1C1C1E 60%); color: var(--bk-text); text-decoration: none; }
   .bk a.feat:hover { border-color: var(--bk-gold); color: var(--bk-text); }
   .feat-name { font-size: 20px; font-weight: 700; margin: 10px 0 2px; }
   .feat-desc { color: var(--bk-muted); font-size: 14px; margin-bottom: 16px; max-width: 640px; }
@@ -231,7 +242,7 @@
   .feat-stats b { color: var(--bk-text); font-weight: 600; }
   .feat-r { display: flex; flex-direction: column; gap: 14px; justify-content: space-between; }
   .open-btn { align-self: flex-start; display: inline-flex; align-items: center; min-height: 44px; padding: 0 18px; border-radius: 12px;
-    background: #FF6500; color: #000000; font-weight: 600; font-size: 14px; }
+    background: #FFFFFF; color: #0A0A0B; font-weight: 600; font-size: 14px; }
   .wal-mid { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 10px; min-height: 44px; }
   .spark { flex: 1 1 auto; min-width: 0; max-width: 170px; height: 44px; overflow: visible; }
   .spark line { stroke: var(--bk-line); stroke-width: 1; }
@@ -317,13 +328,70 @@
     @keyframes beat { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.45); } }
     /* зелёные огоньки «данные свежие» мигают, как индикатор онлайна */
     .fr:not(.none):not(.stale) i { animation: live 2s ease-in-out infinite; }
-    @keyframes live { 0%, 100% { box-shadow: 0 0 0 0 rgba(74, 222, 128, .55); } 60% { box-shadow: 0 0 0 6px rgba(74, 222, 128, 0); } }
+    @keyframes live { 0%, 100% { box-shadow: 0 0 0 0 rgba(163, 227, 154, .55); } 60% { box-shadow: 0 0 0 6px rgba(163, 227, 154, 0); } }
     /* полоска «до решения о реальных деньгах» заполняется */
     .meter i { transform-origin: left; animation: grow 1.2s cubic-bezier(.2, .7, .2, 1) .4s both; }
     @keyframes grow { from { transform: scaleX(0); } }
   }
-  .alerts { margin: 0 0 22px; padding: 14px 18px; border-radius: 14px; border: 1px solid rgba(248, 113, 113, .5); background: rgba(248, 113, 113, .1); }
-  .alerts b { color: #FCA5A5; } .alerts ul { margin: 6px 0 0; padding-left: 18px; font-size: 14px; } .alerts li span { color: var(--bk-muted); }
+  /* 2026-09-27: идеи из макетов (просьба Alex) */
+  /* бледные центы у крупных сумм (Fundcy) */
+  .mb .cents { color: var(--bk-faint); font-weight: 500; }
+  .big .mb .cents { font-size: inherit; }
+  .big > span b { font-size: 15px; line-height: inherit; }
+  /* пастельные плитки с крупной цифрой (Payoneer) — вместо серой строки под балансом */
+  .tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 22px; }
+  .tile { border-radius: 16px; padding: 14px 16px 16px; color: #101012; }
+  .tile span { display: block; font-size: 13px; font-weight: 500; opacity: .72; }
+  .tile b { display: block; font-size: 24px; font-weight: 600; margin-top: 10px; letter-spacing: -.01em; }
+  .tile.t1 { background: #D3DDFB; } .tile.t2 { background: #FFD58A; } .tile.t3 { background: #C7F4E2; }
+  .tile b.pos { color: #1F7A3A; } .tile b.neg { color: #A8331A; }
+  /* полоска из делений (Daily Transaction Limit) */
+  .segbar { display: flex; gap: 3px; height: 30px; margin: 12px 0 4px; }
+  .segbar i { flex: 1; border-radius: 3px; background: var(--bk-line); }
+  .segbar i.on { background: var(--bk-pos); opacity: calc(1 - var(--k) * .012); }
+  /* метки статуса с иконкой (Money In / Money Out / Pending) */
+  .chip { display: inline-flex; align-items: center; gap: 5px; padding: 2px 10px 2px 8px; border-radius: 999px; font-size: 12.5px; font-weight: 600; white-space: nowrap; vertical-align: 1px; }
+  .chip svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+  .chip.in { background: var(--bk-pos-bg); color: var(--bk-pos); }
+  .chip.out { background: var(--bk-neg-bg); color: var(--bk-neg); }
+  .chip.wait { background: var(--bk-raise); color: var(--bk-muted); }
+  /* дата квадратиком (Upcoming Payments) */
+  .dbadge { display: inline-flex; flex-direction: column; align-items: center; justify-content: center; width: 46px; height: 48px;
+    border-radius: 11px; background: var(--bk-raise); border: 1px solid var(--bk-line); font-size: 17px; font-weight: 600; line-height: 1.05; flex-shrink: 0; }
+  .dbadge small { font-size: 10.5px; font-weight: 600; letter-spacing: .06em; color: var(--bk-muted); margin-bottom: 2px; }
+  .with-date { display: flex; gap: 12px; align-items: flex-start; }
+  .res-list li { grid-template-columns: auto 1fr auto; }
+  .res-list .dbadge { grid-row: 1 / span 2; grid-column: 1; align-self: center; }
+  .res-list .t, .res-list .w { grid-column: 2; }
+  .res-list .a { grid-column: 3; }
+  @media (max-width: 600px) {
+    .tiles { grid-template-columns: 1fr 1fr; }
+    .tiles .tile:last-child { grid-column: 1 / -1; }
+    .tile b { font-size: 20px; }
+    .segbar { height: 24px; gap: 2px; }
+  }
+  /* итог по дням (макет Payoneer): плюс вверх от нулевой линии, минус вниз */
+  .week { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 10px; padding-bottom: 16px; }
+  .wk { display: grid; grid-template-rows: 90px 90px auto; }
+  .wk-up, .wk-dn { position: relative; display: flex; flex-direction: column; align-items: center; }
+  .wk-up { justify-content: flex-end; border-bottom: 1px dashed var(--bk-line); }
+  .wk-dn { justify-content: flex-start; }
+  .wk i { display: block; width: min(46px, 70%); background: var(--bk-line); }
+  .wk.pos .wk-up i { background: var(--bk-pos); border-radius: 8px 8px 0 0; }
+  .wk.neg .wk-dn i { background: var(--bk-neg); border-radius: 0 0 8px 8px; }
+  .wk-v { font-size: 12.5px; font-weight: 600; white-space: nowrap; padding: 3px 0; }
+  .wk.pos .wk-v { color: var(--bk-pos); } .wk.neg .wk-v { color: var(--bk-neg); }
+  .wk:not(.pos):not(.neg) .wk-v { color: var(--bk-muted); }
+  .wk-l { text-align: center; font-size: 12px; color: var(--bk-muted); margin-top: 8px; line-height: 1.3; }
+  .wk-l b { display: block; color: var(--bk-text); font-weight: 600; font-size: 13px; }
+  .wk.none .wk-l { opacity: .55; }
+  @media (max-width: 600px) {
+    .week { gap: 4px; padding: 16px 10px; }
+    .wk { grid-template-rows: 70px 70px auto; }
+    .wk-v { font-size: 10.5px; }
+  }
+  .alerts { margin: 0 0 22px; padding: 14px 18px; border-radius: 14px; border: 1px solid rgba(244, 167, 127, .5); background: rgba(244, 167, 127, .1); }
+  .alerts b { color: #F8C2A4; } .alerts ul { margin: 6px 0 0; padding-left: 18px; font-size: 14px; } .alerts li span { color: var(--bk-muted); }
 </style>
 
 <div class="bk">
@@ -371,12 +439,12 @@
     <div class="pane acct">
       <div>
         {% if main and cur.key == main.key %}<div class="acct-name" style="margin-bottom: 14px;"><span class="tag">главная модель</span></div>{% endif %}
-        <div class="big"><b class="num">${{ '%.2f' | format(cur.balance) }}</b><span>на счёте · старт ${{ '%.0f' | format(start) }}{% if cur.roi is not none %} · доходность <b class="num {{ 'pos' if cur.roi > 0.05 else ('neg' if cur.roi < -0.05 else '') }}">{{ '%+.1f' | format(cur.roi) }}%</b> от поставленного{% endif %}</span></div>
+        <div class="big">{{ cash_big(cur.balance) }}<span>на счёте · старт ${{ '%.0f' | format(start) }}{% if cur.roi is not none %} · доходность <b class="num {{ 'pos' if cur.roi > 0.05 else ('neg' if cur.roi < -0.05 else '') }}">{{ '%+.1f' | format(cur.roi) }}%</b> от поставленного{% endif %}</span></div>
         {% if cur.upd %}<div class="upd" title="{{ cur.upd.what | capitalize }} · последняя закрытая: {{ cur.upd.settled or 'ещё не было' }} · последняя новая: {{ cur.upd.bet or 'ещё не было' }}"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span class="num">{{ cur.upd.when }}</span></div>{% endif %}
-        <div class="split">
-          <div><span>Свободно</span><b class="num">${{ '%.2f' | format(cur.cash) }}</b></div>
-          <div><span>В открытых ставках</span><b class="num">${{ '%.2f' | format(cur.in_play) }}</b></div>
-          <div><span>Итог закрытых ставок</span><b class="num {{ 'pos' if cur.pnl > 0.005 else ('neg' if cur.pnl < -0.005 else '') }}">{{ money(cur.pnl) }}</b></div>
+        <div class="tiles">
+          <div class="tile t1"><span>Свободно</span><b class="num">${{ '%.2f' | format(cur.cash) }}</b></div>
+          <div class="tile t2"><span>В открытых ставках</span><b class="num">${{ '%.2f' | format(cur.in_play) }}</b></div>
+          <div class="tile t3"><span>Итог закрытых ставок</span><b class="num {{ 'pos' if cur.pnl > 0.005 else ('neg' if cur.pnl < -0.005 else '') }}">{{ money(cur.pnl) }}</b></div>
         </div>
       </div>
       {% if main and cur.key == main.key %}
@@ -384,7 +452,7 @@
         <h3>До решения о реальных деньгах</h3>
         <p>Нужно {{ goal.need }} закрытых ставок главной модели — меньше может оказаться случайностью.</p>
         <div class="n num">{{ goal.n }} <small>из {{ goal.need }}</small></div>
-        <div class="meter" role="progressbar" aria-label="Закрытых ставок" aria-valuemin="0" aria-valuemax="{{ goal.need }}" aria-valuenow="{{ goal.n }}"><i style="width: {{ goal.pct }}%"></i></div>
+        {{ segbar(goal.n, goal.need, "Закрытых ставок") }}
         <p style="margin-top: 10px;">Угадано {{ cur.won }} из {{ cur.n }}{% if cur.winrate is not none %} ({{ cur.winrate }}%){% endif %}.</p>
       </div>
       {% else %}
@@ -397,23 +465,23 @@
     </div>
   </section>
 
-  <!-- 1б. Логика кошелька (2026-09-27, просьба Alex: полное описание — данные, формулы, всё) -->
-  {% if doc %}
-  <section class="sec" aria-labelledby="s-doc">
-    <details class="fold doc">
-      <summary><h2 id="s-doc">Как работает этот кошелёк</h2><span class="aside">данные, модель, формулы, покупка, итог</span></summary>
-      <div class="in doc-grid">
-        {% for title, lines in doc %}
-        <div class="pane doc-part">
-          <h3>{{ title }}</h3>
-          {% set bullets = lines | select('string') | list %}
-          {% for ln in lines %}{% if ln.startswith('•') %}<p class="pt">{{ ln[1:] | trim }}</p>{% else %}<p>{{ ln }}</p>{% endif %}{% endfor %}
-        </div>
-        {% endfor %}
+  <!-- 1а. Итог по дням (2026-09-27, просьба Alex, по макету Payoneer) -->
+  {% if week %}
+  <section class="sec" aria-labelledby="s-week">
+    <div class="sec-head"><h2 id="s-week">Итог по дням</h2>
+      <span class="aside">последние 7 дней маркетов · за неделю <b class="num {{ 'pos' if week.total > 0.005 else ('neg' if week.total < -0.005 else '') }}">{{ money(week.total) }}</b> · {{ week.n }} ставок · в плюсе {{ week.won_days }} дн., в минусе {{ week.lost_days }} дн.</span></div>
+    <div class="pane week" role="img" aria-label="Итог закрытых ставок по дням за неделю: {{ money(week.total) }}">
+      {% for d in week.days %}
+      <div class="wk{{ ' pos' if d.pnl > 0.005 else (' neg' if d.pnl < -0.005 else '') }}{{ ' none' if not d.n else '' }}" title="{{ d.date }}: {% if d.n %}{{ money(d.pnl) }}, ставок {{ d.n }}{% else %}закрытых ставок нет{% endif %}">
+        <div class="wk-up"><span class="wk-v num">{% if d.n and d.pnl > 0.005 %}{{ money(d.pnl) }}{% endif %}</span>{% if d.pnl > 0.005 %}<i style="height: {{ [d.h, 3] | max }}%"></i>{% endif %}</div>
+        <div class="wk-dn">{% if d.pnl < -0.005 %}<i style="height: {{ [d.h, 3] | max }}%"></i>{% endif %}<span class="wk-v num">{% if d.n and d.pnl < -0.005 %}{{ money(d.pnl) }}{% elif d.n and d.pnl | abs <= 0.005 %}$0{% endif %}</span></div>
+        <div class="wk-l"><b>{{ d.wd }}</b>{{ d.date }}</div>
       </div>
-    </details>
+      {% endfor %}
+    </div>
   </section>
   {% endif %}
+
 
   <!-- 2. Открытые ставки -->
   <section class="sec" aria-labelledby="s-open">
@@ -455,11 +523,11 @@
         <tbody>
           {% for t in waiting %}
           <tr class="{{ '' if t.bought else 'wait' }}">
-            <td><span class="city">{{ t.city_ru }}</span> · {{ t.what }}<span class="sub">{{ t.local_date }} · цена {{ '%.0f' | format(t.price * 100) }}¢ · {{ '%.1f' | format(t.shares) }} долей</span></td>
+            <td><div class="with-date">{{ dbadge(t.local_date) }}<div><span class="city">{{ t.city_ru }}</span> · {{ t.what }}<span class="sub">{{ t.local_date }} · цена {{ '%.0f' | format(t.price * 100) }}¢ · {{ '%.1f' | format(t.shares) }} долей</span></div></div></td>
             <td class="r num" data-l="Заплатили">${{ '%.2f' | format(t.cost) }}</td>
             <td class="r num" data-l="Получим, если угадаем">${{ '%.2f' | format(t.shares) }} <span class="pos">({{ money(t.win_amt) }})</span></td>
             <td class="r num" data-l="Шанс: рынок / модель">{% if t.market_p is not none %}{{ '%.0f' | format(t.market_p * 100) }}% / {% if t.model_p is not none %}{{ '%.0f' | format(t.model_p * 100) }}%{% else %}—{% endif %}{% elif t.chance is not none %}{{ '%.0f' | format(t.chance * 100) }}% / —{% else %}—{% endif %}</td>
-            <td data-l="Итог">{% if t.bought %}~{{ t.closes }}{% else %}ещё не куплено — {{ t.closes }}{% endif %}</td>
+            <td data-l="Итог">{% if t.bought %}{{ chip('wait', 'ждём ~' ~ t.closes) }}{% else %}ещё не куплено — {{ t.closes }}{% endif %}</td>
           </tr>
           {% endfor %}
         </tbody>
@@ -498,7 +566,8 @@
         <ul class="res-list">
           {% for t in results %}
           <li>
-            <span class="t">{{ t.city_ru }} · {{ t.what }}<span class="mark {{ 'won' if t.result > 0 else 'lost' }}">{{ 'угадали' if t.result > 0 else 'не угадали' }}</span></span>
+            {{ dbadge(t.local_date) }}
+            <span class="t">{{ t.city_ru }} · {{ t.what }} {{ chip('in', 'угадали') if t.result > 0 else chip('out', 'не угадали') }}</span>
             <span class="w">{{ t.local_date }} · {{ t.why }}</span>
             <span class="a {{ 'pos' if t.result > 0 else 'neg' }}">{{ money(t.result) }}</span>
           </li>
@@ -566,6 +635,23 @@
       </div>
     </details>
   </section>
+  <!-- 6. Логика кошелька — в самом низу (2026-09-27, просьба Alex) (2026-09-27, просьба Alex: полное описание — данные, формулы, всё) -->
+  {% if doc %}
+  <section class="sec" aria-labelledby="s-doc">
+    <details class="fold doc">
+      <summary><h2 id="s-doc">Как работает этот кошелёк</h2><span class="aside">данные, модель, формулы, покупка, итог</span></summary>
+      <div class="in doc-grid">
+        {% for title, lines in doc %}
+        <div class="pane doc-part">
+          <h3>{{ title }}</h3>
+          {% set bullets = lines | select('string') | list %}
+          {% for ln in lines %}{% if ln.startswith('•') %}<p class="pt">{{ ln[1:] | trim }}</p>{% else %}<p>{{ ln }}</p>{% endif %}{% endfor %}
+        </div>
+        {% endfor %}
+      </div>
+    </details>
+  </section>
+  {% endif %}
   {% endif %}
 
   {% if not cur %}
@@ -576,7 +662,7 @@
       <span class="tag">главная модель</span>
       <div class="feat-name">{{ main.name }}</div>
       <div class="feat-desc">{{ main.desc }}</div>
-      <div class="big"><b class="num">${{ '%.2f' | format(main.balance) }}</b><span>на счёте · итог <b class="num {{ 'pos' if main.pnl > 0.005 else ('neg' if main.pnl < -0.005 else '') }}">{{ money(main.pnl) }}</b></span></div>
+      <div class="big">{{ cash_big(main.balance) }}<span>на счёте · итог <b class="num {{ 'pos' if main.pnl > 0.005 else ('neg' if main.pnl < -0.005 else '') }}">{{ money(main.pnl) }}</b></span></div>
       {% if main.upd %}<div class="upd" title="{{ main.upd.what | capitalize }} · последняя закрытая: {{ main.upd.settled or 'ещё не было' }} · последняя новая: {{ main.upd.bet or 'ещё не было' }}"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span class="num">{{ main.upd.when }}</span></div>{% endif %}
       <div class="feat-stats">
         <span>сыграно <b class="num">{{ main.n }}</b>{% if main.n %} · угадано <b class="num">{{ main.winrate }}%</b>{% endif %}{% if main.roi is not none %} · доходность <b class="num {{ 'pos' if main.roi > 0.05 else ('neg' if main.roi < -0.05 else '') }}">{{ '%+.1f' | format(main.roi) }}%</b> от поставленного{% endif %}</span>
@@ -588,7 +674,7 @@
       <div class="goal">
         <h3>До решения о реальных деньгах</h3>
         <div class="n num">{{ goal.n }} <small>из {{ goal.need }} закрытых ставок</small></div>
-        <div class="meter" role="progressbar" aria-label="Закрытых ставок" aria-valuemin="0" aria-valuemax="{{ goal.need }}" aria-valuenow="{{ goal.n }}"><i style="width: {{ goal.pct }}%"></i></div>
+        {{ segbar(goal.n, goal.need, "Закрытых ставок") }}
       </div>
       <span class="open-btn">Открыть кошелёк →</span>
     </div>
@@ -602,7 +688,7 @@
   <div class="wal-grid">
     {% for c in cs %}
     <a class="wal" href="?w={{ c.key }}">
-      <div class="wal-top"><span class="wal-name">{{ c.name }}</span><span class="wal-bal">${{ '%.2f' | format(c.balance) }}</span></div>
+      <div class="wal-top"><span class="wal-name">{{ c.name }}</span><span class="wal-bal">{{ cash_big(c.balance) }}</span></div>
       <div class="wal-desc">{{ c.desc }}</div>
       <div class="wal-mid">
         {% if c.spark %}<svg class="spark" viewBox="0 0 {{ c.spark.w }} {{ c.spark.h }}" preserveAspectRatio="none" aria-hidden="true"><line x1="0" x2="{{ c.spark.w }}" y1="{{ c.spark.base }}" y2="{{ c.spark.base }}"/><path pathLength="1" class="{{ 'up' if c.spark.up else 'down' }}" d="{{ c.spark.path }}"/><circle class="{{ 'up' if c.spark.up else 'down' }}" cx="{{ c.spark.end[0] }}" cy="{{ c.spark.end[1] }}" r="3"/></svg>
@@ -670,7 +756,19 @@ document.querySelectorAll('[data-viz]').forEach(function (card) {
     el.classList.add('rise'); el.style.setProperty('--i', Math.min(i++, 20));
   });
   var re = /^([+\u2212-]?)\$([\d,]+\.\d{2})$/;
-  document.querySelectorAll('.bk .wal-bal, .bk .wal-pnl, .bk .big b').forEach(function (el) {
+  document.querySelectorAll('.bk .mb[data-v]').forEach(function (el) {
+    var target = parseFloat(el.dataset.v), cents = el.querySelector('.cents'), t0 = null, dur = 900;
+    if (!target || !cents) return;
+    var whole = el.firstChild;
+    function frame(t) {
+      if (t0 === null) t0 = t;
+      var k = Math.min((t - t0) / dur, 1), v = (target * (1 - Math.pow(1 - k, 3))).toFixed(2);
+      whole.nodeValue = '$' + v.slice(0, -3); cents.textContent = v.slice(-3);
+      if (k < 1) requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+  });
+  document.querySelectorAll('.bk .wal-pnl, .bk .big > span b').forEach(function (el) {
     var m = el.textContent.trim().match(re); if (!m) return;
     var target = parseFloat(m[2].replace(/,/g, '')), sign = m[1], t0 = null, dur = 900;
     if (!target) return;
