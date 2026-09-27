@@ -1,0 +1,182 @@
+{% extends "base.html" %}
+{% block title %}Обучение модели — weather-lab{% endblock %}
+{% block content %}
+{#
+  2026-09-26 (просьба Alex — «хочу видеть и контролировать, что делала модель»):
+  отчёт ночного обучения из ml_train_log (weather_ml_report.py). Стиль — как /paper.
+#}
+{% macro dt(s) -%}{{ s[8:10] }}.{{ s[5:7] }}.{{ s[0:4] }}{%- endmacro %}
+<style>
+  body:has(.bk) .main-col { background: #000000; }
+  body:has(.bk) main { max-width: 1120px; }
+  .bk {
+    --bk-card: #15181e; --bk-raise: #1C2027; --bk-line: #262A31; --bk-text: #E5EAF2; --bk-muted: #93A2BA; --bk-faint: #7C8BA3;
+    --bk-accent: #FF6500; --bk-accent-bg: rgba(255, 101, 0, .14); --bk-pos: #4ADE80; --bk-pos-bg: rgba(34, 197, 94, .13);
+    --bk-neg: #F87171; --bk-gold: #E9C46A;
+    --bk-font: "Onest", -apple-system, "Segoe UI", Roboto, sans-serif; --bk-num: "Onest", -apple-system, "Segoe UI", Roboto, sans-serif;
+    color: var(--bk-text); font-family: var(--bk-font); font-size: 15px; line-height: 1.55;
+  }
+  .bk .num { font-family: var(--bk-num); font-variant-numeric: tabular-nums; }
+  .bk .muted { color: var(--bk-muted); }
+  .bk a { color: var(--bk-accent); text-underline-offset: 3px; }
+  .top h1 { margin: 0; font-size: 26px; font-weight: 700; letter-spacing: -.02em; }
+  .top p { margin: 4px 0 24px; color: var(--bk-muted); font-size: 14px; max-width: 760px; }
+  .sec { margin: 0 0 32px; }
+  .sec h2 { margin: 0 0 12px; font-size: 19px; font-weight: 600; }
+  .pane { background: var(--bk-card); border: 1px solid var(--bk-line); border-radius: 16px; padding: 22px 24px; }
+  .status { display: flex; flex-wrap: wrap; gap: 12px 28px; align-items: center; }
+  .status .big { font-size: 22px; font-weight: 600; }
+  .badge { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; padding: 4px 12px; border-radius: 999px; }
+  .badge.ok { background: var(--bk-pos-bg); color: var(--bk-pos); }
+  .badge.warn { background: rgba(233, 196, 106, .14); color: var(--bk-gold); }
+  .badge.dry { background: var(--bk-accent-bg); color: var(--bk-accent); }
+  .steps { list-style: none; margin: 0; padding: 0; counter-reset: st; }
+  .steps > li { counter-increment: st; position: relative; padding: 0 0 22px 44px; }
+  .steps > li:last-child { padding-bottom: 0; }
+  .steps > li::before { content: counter(st); position: absolute; left: 0; top: 0; width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center;
+    background: var(--bk-accent-bg); color: var(--bk-accent); font-weight: 700; font-size: 14px; }
+  .steps > li::after { content: ""; position: absolute; left: 13px; top: 32px; bottom: 6px; width: 2px; background: var(--bk-line); }
+  .steps > li:last-child::after { display: none; }
+  .steps h3 { margin: 2px 0 6px; font-size: 16px; font-weight: 600; }
+  .steps p { margin: 0; color: var(--bk-muted); font-size: 14.5px; }
+  .steps p b { color: var(--bk-text); font-weight: 600; }
+  .bk table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+  .bk th { text-align: left; font: 500 12.5px var(--bk-font); color: var(--bk-muted); text-transform: none; letter-spacing: 0; padding: 8px 10px; border-bottom: 1px solid var(--bk-line); }
+  .bk td { font-family: var(--bk-font); font-size: 14px; padding: 9px 10px; border-bottom: 1px solid var(--bk-line); vertical-align: top; }
+  .bk tbody tr:hover { background: transparent; }
+  .cmp { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 12px; }
+  .cmp .box { background: var(--bk-raise); border-radius: 12px; padding: 14px 16px; }
+  .cmp h4 { margin: 0 0 10px; font-size: 13.5px; font-weight: 600; color: var(--bk-muted); }
+  .hb { display: grid; grid-template-columns: 150px 1fr 64px; gap: 10px; align-items: center; margin: 6px 0; font-size: 14px; }
+  .hb i { display: block; height: 10px; border-radius: 0 4px 4px 0; }
+  .hb b { font-family: var(--bk-num); font-weight: 600; text-align: right; }
+  .c-model { background: #FF6500; } .c-market { background: #8FB3DE; } .c-fc { background: #64748B; }
+  .checks { list-style: none; margin: 8px 0 0; padding: 0; }
+  .checks li { display: flex; gap: 10px; padding: 6px 0; font-size: 14.5px; }
+  .checks .mk { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 13px; font-weight: 700; flex-shrink: 0; }
+  .checks .mk.ok { background: var(--bk-pos-bg); color: var(--bk-pos); }
+  .checks .mk.bad { background: rgba(233, 196, 106, .16); color: var(--bk-gold); }
+  .checks small { display: block; color: var(--bk-muted); font-size: 13px; }
+  .imp .hb { grid-template-columns: 260px 1fr 56px; }
+  .imp .hb i { background: var(--bk-accent); }
+  .foot { margin: 12px 0 0; font-size: 13px; color: var(--bk-muted); }
+  .scroll { overflow-x: auto; }
+  .empty { color: var(--bk-muted); padding: 36px 8px; text-align: center; }
+  @media (max-width: 760px) {
+    .cmp { grid-template-columns: 1fr; }
+    .hb { grid-template-columns: 110px 1fr 56px; }
+    .imp .hb { grid-template-columns: 1fr 70px 48px; }
+    .pane { padding: 18px 16px; }
+  }
+  .alerts { margin: 0 0 22px; padding: 14px 18px; border-radius: 14px; border: 1px solid rgba(248, 113, 113, .5); background: rgba(248, 113, 113, .1); }
+  .alerts b { color: #FCA5A5; } .alerts ul { margin: 6px 0 0; padding-left: 18px; font-size: 14px; } .alerts li span { color: var(--bk-muted); }
+</style>
+
+<div class="bk">
+  <div class="top">
+    <h1>Обучение модели</h1>
+    <p>Каждую ночь в 05:20 обучаемые модели (v1, v2 и главная v3) заново учатся на всей истории — с 01.06.2025 по вчерашний день.
+      Здесь видно, что именно произошло: какие данные взяты, что обучено, как модель сдала экзамен и на что она смотрит.</p>
+  </div>
+
+  {% if alerts %}
+  <div class="alerts" role="alert">
+    <b>Внимание — что-то не так</b>
+    <ul>{% for a in alerts %}<li>{{ a.msg }} <span>(с {{ a.since }})</span></li>{% endfor %}</ul>
+  </div>
+  {% endif %}
+  {% if not last %}
+  <div class="pane empty">Отчётов пока нет — первый появится после ночного обучения.</div>
+  {% else %}
+  <section class="sec">
+    <div class="pane status">
+      <div><div class="muted" style="font-size: 13px;">Последнее обучение</div><div class="big num">{{ last.when }}</div></div>
+      <div><div class="muted" style="font-size: 13px;">Длилось</div><div class="big num">{{ '%d' | format(last.duration_s // 60) }} мин {{ '%02d' | format(last.duration_s % 60) }} с</div></div>
+      <div>{% if last.ok %}<span class="badge ok">✓ все проверки пройдены</span>{% else %}<span class="badge warn">⚠ есть предупреждения — см. проверки</span>{% endif %}
+        {% if last.dry_run %}<span class="badge dry">пробный запуск: рабочие модели не менялись</span>{% endif %}</div>
+    </div>
+  </section>
+
+  <section class="sec">
+    <h2>Что сделано</h2>
+    <div class="pane">
+      <ol class="steps">
+        <li><h3>Собраны данные</h3>
+          <p><b class="num">{{ last.data.rows }}</b> город-дней за {{ dt(last.data.first) }} – {{ dt(last.data.last) }}, городов: <b>{{ last.data.cities }}</b>.
+            {% if last.data.new_rows is not none %}С прошлого обучения добавилось <b class="num">{{ last.data.new_rows }}</b>.{% endif %}
+            Для каждого дня: прогнозы 16 погодных моделей, утренние замеры станции, прогноз облачности/ветра/влажности, вчерашняя ошибка
+            и настоящий максимум (ответ, которому модель учится).</p></li>
+        <li><h3>Обучены три версии</h3>
+          <div class="scroll"><table>
+            <thead><tr><th>Версия</th><th>Дней</th><th>Признаков</th><th>Что особенного</th></tr></thead>
+            <tbody>{% for v in last.versions %}<tr><td><b>{{ v.name }}</b></td><td class="num">{{ v.rows }}</td><td class="num">{{ v.features }}</td><td class="muted">{{ v.note }}</td></tr>{% endfor %}</tbody>
+          </table></div></li>
+        <li><h3>Экзамен на незнакомых днях</h3>
+          {% set e = last.exam %}
+          {% if e %}
+          <p>Главную модель заново обучили <b>без</b> последних 14 дней ({{ dt(e.from) }} – {{ dt(e.to) }}) и проверили на них, как будто это будущее:
+            {{ e.n }} город-дней, которых она не видела.</p>
+          <div class="cmp">
+            <div class="box">
+              <h4>Шанс, который давали правильному ответу (больше — лучше)</h4>
+              {% set m = [e.p_model or 0, e.p_market or 0] | max %}
+              <div class="hb"><span>Модель</span><i class="c-model" style="width: {{ 100 * (e.p_model or 0) / m }}%"></i><b>{{ '%.1f' | format(e.p_model or 0) }}%</b></div>
+              <div class="hb"><span>Рынок</span><i class="c-market" style="width: {{ 100 * (e.p_market or 0) / m }}%"></i><b>{{ '%.1f' | format(e.p_market or 0) }}%</b></div>
+            </div>
+            <div class="box">
+              <h4>Ошибка в градусах (меньше — лучше)</h4>
+              {% set m = [e.err_model, e.err_fc, e.err_market or 0] | max %}
+              <div class="hb"><span>Модель</span><i class="c-model" style="width: {{ 100 * e.err_model / m }}%"></i><b>{{ '%.2f' | format(e.err_model) }}°</b></div>
+              {% if e.err_market is not none %}<div class="hb"><span>Рынок</span><i class="c-market" style="width: {{ 100 * e.err_market / m }}%"></i><b>{{ '%.2f' | format(e.err_market) }}°</b></div>{% endif %}
+              <div class="hb"><span>Среднее 16 моделей</span><i class="c-fc" style="width: {{ 100 * e.err_fc / m }}%"></i><b>{{ '%.2f' | format(e.err_fc) }}°</b></div>
+            </div>
+          </div>
+          <p style="margin-top: 10px;">
+            {% if e.err_model < e.err_fc - 0.05 %}Модель угадывает температуру заметно точнее простого среднего погодных моделей{% else %}Модель не точнее простого среднего погодных моделей{% endif %}{% if e.err_market is not none %}, {% if e.err_model < e.err_market - 0.03 %}и точнее рынка{% elif e.err_model > e.err_market + 0.03 %}но хуже рынка{% else %}и примерно как рынок{% endif %}{% endif %}.
+            По шансам правильному ответу {% if (e.p_model or 0) > (e.p_market or 0) + 0.5 %}модель лучше рынка{% elif (e.p_model or 0) < (e.p_market or 0) - 0.5 %}рынок немного лучше модели{% else %}почти одинаково с рынком{% endif %}.</p>
+          {% else %}<p>Экзамен не проведён — мало данных.</p>{% endif %}</li>
+        <li><h3>Проверки</h3>
+          <ul class="checks">{% for c in last.checks %}<li><span class="mk {{ 'ok' if c.ok else 'bad' }}">{{ '✓' if c.ok else '!' }}</span><span>{{ c.title }}<small>{{ c.detail }}</small></span></li>{% endfor %}</ul></li>
+        <li><h3>Модели сохранены</h3>
+          <p>{% if last.dry_run %}Это был пробный запуск: отчёт записан, рабочие модели не заменялись.{% else %}Новые модели заменили вчерашние и с этого утра дают прогнозы для кошельков.{% endif %}</p></li>
+      </ol>
+    </div>
+  </section>
+
+  {% if last.importance %}
+  <section class="sec">
+    <h2>На что модель смотрит больше всего</h2>
+    <div class="pane imp">
+      {% for i in last.importance %}
+      <div class="hb"><span>{{ i.ru }}</span><i style="width: {{ [i.bar, 1] | max }}%"></i><b>{{ '%.0f' | format(i.pct) }}%</b></div>
+      {% endfor %}
+      <p class="foot">Доля в «важности» главной модели (медиана v3): насколько признак помогает ей поправить среднее погодных моделей.
+        Сильное влияние рынка значит, что модель во многом опирается на его мнение и ищет, где рынок ошибается.</p>
+    </div>
+  </section>
+  {% endif %}
+
+  <section class="sec">
+    <h2>История обучений</h2>
+    <div class="pane scroll">
+      <table>
+        <thead><tr><th>Когда</th><th>Длилось</th><th>Данных</th><th>Экзамен: шанс модель / рынок</th><th>Ошибка модель / рынок</th><th>Проверки</th></tr></thead>
+        <tbody>
+          {% for r in runs %}
+          <tr>
+            <td class="num">{{ r.when }}{% if r.dry_run %} <span class="muted">(пробный)</span>{% endif %}</td>
+            <td class="num">{{ '%d' | format(r.duration_s // 60) }} мин</td>
+            <td class="num">{{ r.data.rows }}{% if r.data.new_rows %} <span class="muted">(+{{ r.data.new_rows }})</span>{% endif %}</td>
+            <td class="num">{% if r.exam %}{{ '%.1f' | format(r.exam.p_model or 0) }}% / {{ '%.1f' | format(r.exam.p_market or 0) }}%{% else %}—{% endif %}</td>
+            <td class="num">{% if r.exam %}{{ '%.2f' | format(r.exam.err_model) }}° / {{ '%.2f' | format(r.exam.err_market) if r.exam.err_market is not none else '—' }}°{% else %}—{% endif %}</td>
+            <td>{% if r.ok %}<span class="badge ok">✓</span>{% else %}<span class="badge warn">⚠</span>{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <p class="foot">Со временем здесь будет видно, растёт ли точность модели по мере накопления данных.</p>
+    </div>
+  </section>
+  {% endif %}
+</div>
+{% endblock %}

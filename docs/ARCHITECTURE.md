@@ -1,0 +1,196 @@
+# Архитектура weather-lab
+
+Общая картина: откуда берутся данные, какой скрипт что пишет в базу, как из этого получаются
+ставки кошельков и страницы сайта. Правила работы — `CLAUDE.md`, цели — `docs/PRD.md`,
+внешний вид сайта — `docs/DESIGN_SYSTEM.md`.
+
+## 1. Схема
+
+```
+ ВНЕШНИЕ ИСТОЧНИКИ                СКРИПТЫ (крон, collector)          БАЗА SQLite (WAL)           ВЫХОД
+ ─────────────────                ─────────────────────────          ─────────────────           ─────
+ Polymarket gamma/clob ─────────► weather_edge.py  (2 ч) ──────────► snapshots ─────────┐
+ Open-Meteo (16 моделей) ───────► weather_multimodel.py (6 ч) ─────► mm_forecasts       │
+ Open-Meteo прогноз. условия ───► weather_ml_data.py (6 ч) ────────► ml_fcst_vars       │
+ Open-Meteo ансамбли ───────────► weather_ens.py (2 ч) ────────────► ens_forecasts      │
+ METAR (Iowa Mesonet) ──────────► weather_station_obs.py (6 ч) ────► station_obs,       │
+                                                                     weather_station_daily (ФАКТ)
+ Polymarket (итоги) ────────────► weather_poly_resolve.py (2 ч) ───► weather_poly_outcomes (ИТОГ)
+ Polymarket data-api (сделки) ──► weather_trades_history.py (04:30) ► poly_trades, poly_trade_wallets,
+                                                                     poly_market_final
+                                  weather_sharp_rank.py (04:45) ───► sharp_wallets
+ Polymarket prices-history ─────► weather_price_history.py (04:50) ► price_history
+                                                                                        │
+                                  weather_ml_live.py --train (05:20) ► data/ml/* (модели), ml_train_log
+                                  weather_ml_fast.py (:02, :32) ───► snapshots_fast     │
+                                  weather_ml_skill.py (05:50) ─────► ml_skill           │
+                                                                                        ▼
+                                  weather_paper.py (2 ч, :10) ─────► paper_trades ──► сайт /paper
+ METAR онлайн (aviationweather) ► weather_obs_live.py (2 мин) ─────► paper_obs_trades
+ Polymarket websocket ──────────► weather_copy_live.py (всегда) ───► paper_trades (copy)
+                                  weather_copy.py (5 мин, запасной)► paper_trades (copy)
+                                  weather_alerts.py (30 мин) ──────► alerts ─────────► красная плашка
+                                  jobmark.py (из каждого скрипта) ─► job_runs ───────► /status
+```
+
+## 2. Контейнеры (`docker-compose.yml`)
+
+| Контейнер | Режим | Что делает |
+|---|---|---|
+| `collector` | по крону, `docker compose run --rm collector <скрипт>` | все скрипты `app/*.py`; вход через `app/run_job.sh` (предел времени `JOB_TIMEOUT`, по умолчанию 40 мин) |
+| `weather-lab-copier` | постоянно | `weather_copy_live.py` — слушает сделки Polymarket (websocket) и повторяет покупки сильных трейдеров за секунды |
+| `weather-lab-dashboard` | постоянно, порт 8093 | `dashboard.py` (FastAPI + Jinja2), снаружи — туннель Cloudflare |
+
+Общие папки: `./app` → `/app`, `./data` → `/data`. Часовой пояс контейнеров — `Europe/Chisinau`.
+
+## 3. Внешние источники
+
+| Источник | Адрес | Зачем | Лимиты |
+|---|---|---|---|
+| Polymarket Gamma | `gamma-api.polymarket.com` | список маркетов, варианты, итоги | — |
+| Polymarket CLOB | `clob.polymarket.com` | живой стакан (исполнение ставок), история цен | — |
+| Polymarket Data API | `data-api.polymarket.com` | настоящие сделки (хранит ~30 дней) | — |
+| Polymarket WS | `wss://ws-live-data.polymarket.com` | сделки в реальном времени (copier) | — |
+| Open-Meteo | `api.`, `ensemble-api.`, `previous-runs-api.`, `historical-forecast-api.open-meteo.com` | 16 погодных моделей, ансамбли, история прогнозов | ~10 тыс. вызовов/сутки, крон тратит 5-6 тыс. |
+| Iowa Mesonet | `mesonet.agron.iastate.edu` | METAR — факт температуры (как у Polymarket) | — |
+| aviationweather.gov, NOAA tgftp | METAR онлайн | кошелёк `obs` | — |
+
+Личные данные во внешние API не передаются.
+
+## 4. Таблицы базы
+
+`data/db/polymarket_lab.sqlite3`, ~6 ГБ, режим WAL.
+
+### Сырые данные
+
+| Таблица | Кто пишет | Что внутри |
+|---|---|---|
+| `snapshots` | `weather_edge.py`, `weather_multimodel.py` | снимок каждые 2 ч: цены всех вариантов + шансы всех моделей (колонка на модель) |
+| `snapshots_fast` | `weather_ml_fast.py` | то же для обучаемых моделей, ровно в 08:00 местного |
+| `mm_forecasts` | `weather_multimodel.py` | прогнозы 16 погодных моделей |
+| `ml_fcst_vars` | `weather_ml_data.py` | прогнозные условия (облака, ветер и т. п.) |
+| `ens_forecasts` | `weather_ens.py` | ансамбли (122 варианта), копятся для проверки |
+| `station_obs` | `weather_station_obs.py` | METAR по часам |
+| `weather_station_daily` | `weather_station_obs.py` | **факт**: максимум за день по станции |
+| `weather_poly_outcomes` | `weather_poly_resolve.py` (+ `weather_obs_live.py`, `weather_price_history.py`) | **итог** Polymarket: какой вариант выиграл |
+| `poly_trades`, `poly_trades_days`, `poly_trade_wallets`, `poly_market_final` | `weather_trades_history.py` | настоящие сделки — по ним проверяется преимущество |
+| `price_history`, `price_history_days` | `weather_price_history.py` | история цен (последние сделки, могут быть протухшими) |
+| `sharp_wallets` | `weather_sharp_rank.py` | 30 сильных трейдеров для кошелька `copy` |
+
+### Модели и результаты
+
+| Таблица | Кто пишет | Что внутри |
+|---|---|---|
+| `ml_train_log` | `weather_ml_live.py --train`, `weather_ml_report.py` | ежедневное переобучение, отчёт, экзамен → `/training` |
+| `ml_skill` | `weather_ml_skill.py` | «насколько модель права» |
+| `ml_preds_wf`, `ml_preds_q`, `ml_preds_var_*` | исследования | прогнозы на истории (проверка «обучил на прошлом — проверил на будущем») |
+| `paper_trades` | `weather_paper.py`, `weather_copy*.py` | ставки всех кошельков: покупка, пропуск с причиной, итог |
+| `paper_obs_trades`, `metar_seen*` | `weather_obs_live.py` | кошелёк `obs` |
+
+### Служебные
+
+| Таблица | Кто пишет | Что внутри |
+|---|---|---|
+| `job_runs` | `jobmark.py` (из каждого скрипта) | когда что обновлялось |
+| `alerts` | `weather_alerts.py` | активные тревоги → красная плашка на сайте |
+
+Устаревшие, больше не пополняются: `weather_outcomes` (факт по Open-Meteo — оказался неверным),
+`afd_signals` (разборы метеорологов), `ml_neighbors` (соседние станции).
+
+## 5. Факт и итог
+
+- 48 городов (`weather_cities.py`), маркеты «Highest temperature in X», резолв по METAR.
+- **Факт** — `weather_station_daily` (METAR, Iowa Mesonet); **итог** — `weather_poly_outcomes`.
+  Совпадают в ~98%; ставки рассчитываются по итогу. 5-минутные замеры США не засчитываются.
+- Проверять преимущество — по настоящим сделкам (`poly_trades`), не по `price_history`
+  (там последние сделки, могут быть протухшими).
+- `/book` уже содержит зеркальные заявки парного токена — стаканы не объединять.
+
+## 6. Модель
+
+- **v3 (главная, `ml3`)**: LightGBM, одна на 48 городов, квантильная регрессия (13 уровней) — поправка
+  к среднему 16 погодных моделей. Признаки на 08:00 местного: прогнозы и их разброс, прогнозные
+  условия, утренние METAR, вчерашняя ошибка, сезон, город, **мнение рынка**. История с 2025-06-01,
+  цены рынка тоже (Шэньчжэнь/Париж/Сеул до смены источника — без них, `MKT_UNRELIABLE_BEFORE`).
+- **Смесь 35% модели + 65% рынка** лучше и модели, и рынка: модель честна, но самоуверенна в ставках
+  (выбор максимального спора с рынком), смесь это лечит.
+- **v4** = v3 с 31 листом (`V4_EXTRA`); **v4e** = v4, среднее 3 обучений (зёрна `V4E_SEEDS` 11/22/33).
+  v1 (`ml`, одно число), v2 (`ml2`, без рынка) — для сравнения.
+- Код: `weather_ml.py` (`row_for` — **одна** функция признаков для обучения и живого прогноза),
+  `weather_ml_q.py` (квантильная регрессия), `weather_ml_live.py` (обучение и живой прогноз).
+- Файлы моделей — `data/ml/`: `q_mkt` (v3), `q_mkt31` (v4), `q_mkt31_s11/_s22/_s33` (v4e), `q` (v2), `model.txt` (v1).
+- Каждую ночь (05:20) — переобучение на всей истории, отчёт и экзамен в `ml_train_log`.
+- Живой прогноз считается в `weather_ml_fast.py` (08:00 местного) и `weather_edge.py` (каждые 2 ч) и пишется
+  колонкой в снимок.
+
+## 7. Кошельки и ставки
+
+$100 на кошелёк (`copy` — $300, `START_BY_WALLET`), ставка $2, минимум 5 долей.
+
+1. `weather_paper.py` берёт самый ранний снимок дня по городу (быстрый 08:00 или обычный).
+2. Раз в день на город — вариант с максимальным перевесом над ценой, если перевес ≥ порога и
+   цена 3-95¢; цена покупки не выше «шанс − порог».
+3. `polyexec.py` имитирует покупку: живой стакан → пауза 2 с → стакан ещё раз, комиссия
+   `доли × 0.05 × p × (1−p)` с того, кто забирает заявку. Нет исполнения — `nofill`, пропуск — `skip`
+   (с причиной). Файл `data/STOP` останавливает новые ставки.
+4. После итога маркета ставка рассчитывается, кошелёк пересчитывается.
+
+| Кошелёк | Логика |
+|---|---|
+| **`ml3`** | главная v3, порог 10 п.п. |
+| `ml4` / `ml4_cal` | v4; и смесь v4 с рынком, порог 3 п.п. |
+| `ml4e` / `ml4e_cal` | v4e; и её смесь, порог 3 п.п. |
+| `ml3_cal` | смесь v3 с рынком, порог 3 п.п. |
+| `ml3_cal_k` | смесь, ставка по перевесу (Келли ×0.25, $0.5-10) |
+| `ml3_no` | «против»: покупка «нет» на переоценённый вариант |
+| `ml3_mk` | сигнал ml3 своей заявкой (без комиссии, до 12:00) |
+| `copy` | повтор покупок 30 сильных трейдеров, только накануне дня маркета, за секунды |
+| `ml`, `ml2`, `ml_shift` | старые версии (ml_shift — v1, если центр ≠ рынку на ≥0.5°C) |
+| `main`, `emos`, `mm`, `*_mk` | старые формулы и их «своя заявка» |
+| `obs` | против вариантов, которые станция уже исключила |
+
+Подписи и группы на сайте — `WALLET_INFO` в `dashboard.py`; полная логика («Как работает этот
+кошелёк») — `app/wallet_docs.py`, preflight проверяет, что описание есть у каждого.
+
+## 8. Надёжность
+
+| Механизм | Где | Что защищает |
+|---|---|---|
+| WAL | база | чтение сайтом не мешает записи |
+| `JOB_TIMEOUT` | `app/run_job.sh` | зависший скрипт убивается (крупные задачи: `-e JOB_TIMEOUT=10800` и т. п. в кроне) |
+| `db_watchdog.sh` | крон */2 | база занята >6 мин → останавливает зависшие скрипты, при необходимости перезапускает copier/dashboard, пишет `data/ALERT_DB_LOCKED` |
+| `preflight.py` / `./check.sh` | каждые 30 мин / после изменений | сборка скриптов, колонки, прогон всех кошельков в памяти, страницы |
+| `weather_alerts.py` | крон */30 | сбои крона, упавшие проверки, потеря >$50/сутки |
+| `backup_db.sh` | **в крон не добавлен** | ночная копия на другой диск (HDD personal_data), 7 штук; включение — решение Alex |
+
+Исследования — только на копии `data/research/research.sqlite3`, иначе крон ловит «database is locked».
+
+## 9. Сайт (`dashboard.py`)
+
+| Страница | Что показывает | Основные таблицы |
+|---|---|---|
+| `/paper` | все кошельки → `?w=<кошелёк>`: счёт, открытые ставки сценариями, история | `paper_trades`, `ml_skill`, `job_runs`, `alerts` |
+| `/` , `/city/<город>` | погода по городам: цена рынка против моделей | `snapshots` |
+| `/calibration` | точность моделей против факта | `snapshots`, `weather_station_daily`, `weather_poly_outcomes` |
+| `/training` | ночное обучение, отчёт, экзамен | `ml_train_log` |
+| `/status` | когда что обновлялось | `job_runs` |
+
+## 10. Папки
+
+```
+weather-lab/
+├── app/                   скрипты, сайт, шаблоны (app/templates)
+├── data/
+│   ├── db/                рабочая база
+│   ├── research/          копия базы для исследований
+│   ├── ml/                файлы моделей
+│   ├── logs/              логи крона
+│   └── STOP               (если есть) — стоп новых ставок
+├── docs/                  PRD, ARCHITECTURE, DESIGN_SYSTEM, архивы CLAUDE.md
+├── check.sh               обязательная проверка после изменений
+├── db_watchdog.sh         сторож базы
+└── backup_db.sh           резервная копия (не в кроне)
+```
+
+Скрипты `weather_study_*.py`, `*_backtest.py`, `weather_ml_variants.py`, `weather_ml_realfill.py` и т. п. —
+разовые исследования, по крону не запускаются.

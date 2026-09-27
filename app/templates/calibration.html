@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% import "_icons.html" as icon %}
-{% block title %}Калибровка — polymarket-lab{% endblock %}
+{% block title %}Калибровка — weather-lab{% endblock %}
 {% block content %}
 <p class="meta" style="color: var(--muted); font-size: 13px; margin-bottom: 20px;">
   Не расхождение в моменте, а факт: угадывал ли наш источник (прогноз погоды /
@@ -14,14 +14,6 @@
   <a href="#wn2">WeatherNext 2</a>
   <a href="#emos">EMOS/NGR</a>
   {% if weather_bias and weather_bias.by_city %}<a href="#bias">Промах по городам</a>{% endif %}
-  <a href="#sports">Спорт</a>
-  <a href="#news-validation">Новости: по сути</a>
-  <a href="#news-timing">Новости: по времени</a>
-  <a href="#arbitrage">Арбитраж</a>
-  <a href="#esports-calib">Киберспорт: точность</a>
-  <a href="#esports-diff">Киберспорт: расхождение</a>
-  <a href="#macro">Макро</a>
-  <a href="#musk">Твиты Маска</a>
 </nav>
 
 <section class="block" id="weather">
@@ -153,236 +145,11 @@
 </section>
 {% endif %}
 
-<section class="block" id="sports">
-<h1>{{ icon.render('sports') }}Спорт (футбол, Pinnacle)</h1>
-{% if not sports or sports.n == 0 %}
-  <div class="empty">Пока нет резолвленных матчей — либо крон sports_resolve.py
-  ещё не запускался, либо ни один сматченный матч ещё не завершился.</div>
-{% else %}
-<table>
-  <thead>
-    <tr><th>Проверено случаев</th><th>Pinnacle угадал победителя</th><th>Рынок угадал победителя</th></tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td>{{ sports.n }}</td>
-      <td>{{ '%.1f%%' | format(sports.pinnacle_hit_rate * 100) }}</td>
-      <td>{{ '%.1f%%' | format(sports.market_hit_rate * 100) }}</td>
-    </tr>
-  </tbody>
-</table>
-{% endif %}
-</section>
 
-<section class="block" id="news-validation">
-<h1>{{ icon.render('news') }}Новости: была ли находка права по сути</h1>
-<p class="meta" style="color: var(--muted); font-size: 12px; margin-bottom: 8px;">
-  Берём последнюю по времени находку на каждую пару (команда, матч) и сравниваем факт
-  (выиграла команда или нет) с тем, во что верил рынок в последнем снимке перед матчем.
-  Ничья считается как "не выиграла".
-</p>
-{% if not news_validation or news_validation.combined_n == 0 %}
-  <div class="empty">Пока нет пересечения "есть находка + матч уже сыгран".</div>
-{% else %}
-<table>
-  <thead>
-    <tr><th>Направление</th><th>Проверено случаев</th><th>Выигрывала по факту</th><th>Верил рынок</th><th>Находка подтвердилась, если</th></tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td>"Ослабляет команду"</td>
-      <td>{{ news_validation.weakens.n }}</td>
-      <td>{{ '%.0f%%' | format(news_validation.weakens.avg_actual_win_rate * 100) if news_validation.weakens.n else '—' }}</td>
-      <td>{{ '%.0f%%' | format(news_validation.weakens.avg_market_p * 100) if news_validation.weakens.n else '—' }}</td>
-      <td>выигрывала реже, чем верил рынок</td>
-    </tr>
-    <tr>
-      <td>"Усиливает команду"</td>
-      <td>{{ news_validation.strengthens.n }}</td>
-      <td>{{ '%.0f%%' | format(news_validation.strengthens.avg_actual_win_rate * 100) if news_validation.strengthens.n else '—' }}</td>
-      <td>{{ '%.0f%%' | format(news_validation.strengthens.avg_market_p * 100) if news_validation.strengthens.n else '—' }}</td>
-      <td>выигрывала чаще, чем верил рынок</td>
-    </tr>
-  </tbody>
-</table>
-<p class="meta" style="color: var(--muted); font-size: 12px;">
-  Пропущено неоднозначных находок (в одной записи и "ослабляет", и "усиливает",
-  или направление вообще не ясно): {{ news_validation.skipped_mixed }}.
-</p>
-{% endif %}
-</section>
 
-<section class="block" id="news-timing">
-<h1>{{ icon.render('news') }}Новости: опередили ли рынок по времени</h1>
-<p class="meta" style="color: var(--muted); font-size: 12px; margin-bottom: 8px;">
-  Момент, когда мы впервые нашли новость, против цены команды в последнем снимке
-  ДО этого момента и первом снимке ПОСЛЕ. Положительное число — цена сдвинулась
-  в сторону, которую предсказывала находка, уже после того, как мы её заметили.
-  Точность грубая (цену смотрим 2 раза в день) — точнее пока не измерить.
-</p>
-{% if not news_timing or news_timing.combined_n == 0 %}
-  <div class="empty">Пока нет находок с ценой и до, и после момента, когда их заметили.</div>
-{% else %}
-<table>
-  <thead>
-    <tr><th>Направление</th><th>Проверено случаев</th><th>Куда сдвинулась цена после находки</th></tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td>"Ослабляет команду" (ждём, что цена команды упадёт)</td>
-      <td>{{ news_timing.weakens.n }}</td>
-      <td>{{ '%+.1f%%' | format(news_timing.weakens.avg_move * 100) if news_timing.weakens.n else '—' }}</td>
-    </tr>
-    <tr>
-      <td>"Усиливает команду" (ждём, что цена команды вырастет)</td>
-      <td>{{ news_timing.strengthens.n }}</td>
-      <td>{{ '%+.1f%%' | format(news_timing.strengthens.avg_move * 100) if news_timing.strengthens.n else '—' }}</td>
-    </tr>
-  </tbody>
-</table>
-{% endif %}
-</section>
 
-<section class="block" id="arbitrage">
-<h1>{{ icon.render('shuffle') }}Арбитраж: Polymarket vs Kalshi</h1>
-<p class="meta" style="color: var(--muted); font-size: 12px; margin-bottom: 8px;">
-  Резолвера фактов тут пока нет специально — это фаза диагностики: смотрим, насколько
-  большие расхождения между двумя рынками бывают и как часто, а не "кто оказался прав".
-  Одна строка = один снимок одного исхода, не один матч (матч встречается много раз,
-  пока к нему не начался матч).
-</p>
-{% if not kalshi_stats %}
-  <div class="empty">Пока нет снимков — крон kalshi_edge.py ещё не запускался.</div>
-{% else %}
-<table>
-  <thead>
-    <tr><th>Снимков</th><th>Среднее расхождение</th><th>Максимум</th><th>Заметных (от 3 п.п.)</th></tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td>{{ kalshi_stats.n }}</td>
-      <td>{{ '%.1f%%' | format(kalshi_stats.avg_abs_edge * 100) }}</td>
-      <td>{{ '%.1f%%' | format(kalshi_stats.max_abs_edge * 100) }}</td>
-      <td>{{ kalshi_stats.notable_n }} ({{ '%.0f%%' | format(kalshi_stats.notable_share * 100) }})</td>
-    </tr>
-  </tbody>
-</table>
-{% endif %}
-</section>
 
-<section class="block" id="esports-calib">
-<h1>{{ icon.render('esports') }}Киберспорт: точность (Pinnacle vs Polymarket)</h1>
-<p class="meta" style="color: var(--muted); font-size: 12px; margin-bottom: 8px;">
-  Резолвер (2026-09-18, `esports_resolve.py`) — не через OddsPapi (там жёсткий
-  бюджет, 250 запросов/месяц), а через саму резолюцию маркета на Polymarket:
-  после закрытия маркета его цена = 1 у победившей стороны. Это не то же самое,
-  что "цена = сигнал" (циркулярность, из-за которой закрыты крипто-маркеты) —
-  резолюция подтверждена внешним источником (HLTV.org и т.п. из правил
-  маркета), просто мы читаем готовый факт с Polymarket вместо отдельного API
-  счёта, как в футболе. Маркеты, резолвленные 50/50 (отменённые/перенесённые
-  матчи), не реальный исход — не считаются.
-</p>
-{% if not esports_calibration or esports_calibration.n == 0 %}
-  <div class="empty">Пока нет резолвленных матчей — либо крон esports_resolve.py
-  ещё не запускался, либо ни один сматченный матч ещё не завершился.</div>
-{% else %}
-<table>
-  <thead>
-    <tr><th>Проверено случаев</th><th>Pinnacle угадал победителя</th><th>Рынок угадал победителя</th></tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td>{{ esports_calibration.n }}</td>
-      <td>{{ '%.1f%%' | format(esports_calibration.pinnacle_hit_rate * 100) }}</td>
-      <td>{{ '%.1f%%' | format(esports_calibration.market_hit_rate * 100) }}</td>
-    </tr>
-  </tbody>
-</table>
-{% endif %}
-</section>
 
-<section class="block" id="esports-diff">
-<h1>{{ icon.render('esports') }}Киберспорт: размер расхождения в моменте</h1>
-<p class="meta" style="color: var(--muted); font-size: 12px; margin-bottom: 8px;">
-  Все снимки (не только уже резолвленные) — насколько большие расхождения
-  между Pinnacle и Polymarket бывают вообще, независимо от того, кто прав.
-</p>
-{% if not esports_stats %}
-  <div class="empty">Пока нет снимков — крон esports_edge.py ещё не запускался.</div>
-{% else %}
-<table>
-  <thead>
-    <tr><th>Снимков</th><th>Среднее расхождение</th><th>Максимум</th><th>Заметных (от 3 п.п.)</th></tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td>{{ esports_stats.n }}</td>
-      <td>{{ '%.1f%%' | format(esports_stats.avg_abs_edge * 100) }}</td>
-      <td>{{ '%.1f%%' | format(esports_stats.max_abs_edge * 100) }}</td>
-      <td>{{ esports_stats.notable_n }} ({{ '%.0f%%' | format(esports_stats.notable_share * 100) }})</td>
-    </tr>
-  </tbody>
-</table>
-{% endif %}
-</section>
 
-<section class="block" id="macro">
-<h1>{{ icon.render('trending') }}Макро: CPI/безработица/JOLTS/ВВП</h1>
-<p class="meta" style="color: var(--muted); font-size: 12px; margin-bottom: 8px;">
-  Эталон — не готовый чужой nowcast (у Cleveland Fed нет программного
-  доступа без JS), а наша собственная простая модель на бесплатных данных
-  FRED: CPI/Core CPI — персистентный YoY (среднее нескольких последних
-  уже известных годовых темпов, гасит сезонность NSA-рядов), безработица/
-  JOLTS — последнее значение + средний темп изменения, ВВП — готовый
-  профессиональный nowcast Atlanta Fed (GDPNow). Первая, намеренно простая
-  версия (2026-09-19) — резолвится раз в месяц на метрику, набор случаев
-  растёт медленно из-за самой частоты отчётов BLS/BEA, не потому что редко
-  считаем.
-</p>
-{% if not macro_calibration or macro_calibration.n == 0 %}
-  <div class="empty">Пока нет резолвленных отчётов — крон macro_resolve.py
-  ещё не запускался, либо ни один маркет ещё не закрылся.</div>
-{% else %}
-<table>
-  <thead>
-    <tr><th>Проверено случаев</th><th>Модель угадала диапазон</th><th>Рынок угадал диапазон</th></tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td>{{ macro_calibration.n }}</td>
-      <td>{{ '%.1f%%' | format(macro_calibration.model_hit_rate * 100) }}</td>
-      <td>{{ '%.1f%%' | format(macro_calibration.market_hit_rate * 100) }}</td>
-    </tr>
-  </tbody>
-</table>
-{% endif %}
-</section>
 
-<section class="block" id="musk">
-<h1>{{ icon.render('message') }}Твиты Илона Маска (число постов за месяц)</h1>
-<p class="meta" style="color: var(--muted); font-size: 12px; margin-bottom: 8px;">
-  Эталон — не готовый nowcast, а прямая проекция уже известного темпа
-  постинга (xtracker.polymarket.com — официальный трекер самого
-  Polymarket, публичный API без ключа) на оставшиеся дни месяца. Не
-  циркулярность: уже случившиеся посты — объективный факт, не выведенный
-  из цены Polymarket. Первая версия (2026-09-19), резолвится раз в месяц.
-</p>
-{% if not musk_calibration or musk_calibration.n == 0 %}
-  <div class="empty">Пока нет резолвленных месяцев — крон musk_tweets_resolve.py
-  ещё не запускался, либо месяц ещё не закрылся.</div>
-{% else %}
-<table>
-  <thead>
-    <tr><th>Проверено случаев</th><th>Модель угадала диапазон</th><th>Рынок угадал диапазон</th></tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td>{{ musk_calibration.n }}</td>
-      <td>{{ '%.1f%%' | format(musk_calibration.model_hit_rate * 100) }}</td>
-      <td>{{ '%.1f%%' | format(musk_calibration.market_hit_rate * 100) }}</td>
-    </tr>
-  </tbody>
-</table>
-{% endif %}
-</section>
 {% endblock %}

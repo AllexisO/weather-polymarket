@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% import "_icons.html" as icon %}
-{% block title %}Статус — polymarket-lab{% endblock %}
+{% block title %}Статус — weather-lab{% endblock %}
 {% block content %}
 <style>
   .money-banner {
@@ -65,85 +65,6 @@
     </div>
     <div class="status-bar-track"><div class="status-bar-fill" style="width: {{ [100, (weather.n / min_n * 100) | round(0)] | min }}%;"></div></div>
     <a class="status-link" href="/calibration">Подробнее по городам →</a>
-  </div>
-
-  <div class="block status-card">
-    <h2>{{ icon.render('sports') }}Спорт: букмекер Pinnacle</h2>
-    <span class="verdict-pill {{ sports.verdict.tone }}">{{ sports.verdict.label }}</span>
-    {% if sports.source_rate is not none %}
-    <div class="status-stat">Pinnacle угадывал победителя: <b>{{ '%.1f%%' | format(sports.source_rate * 100) }}</b></div>
-    <div class="status-stat">Рынок Polymarket угадывал: <b>{{ '%.1f%%' | format(sports.market_rate * 100) }}</b></div>
-    {% else %}
-    <div class="status-stat">Пока нет матчей, которые уже сыграны и сматчены с нашими данными.</div>
-    {% endif %}
-    <div class="status-n">
-      Проверено случаев: {{ sports.n }} {% if sports.n < min_n %}(нужно хотя бы {{ min_n }}, чтобы вообще судить){% endif %}
-    </div>
-    <div class="status-bar-track"><div class="status-bar-fill" style="width: {{ [100, (sports.n / min_n * 100) | round(0)] | min }}%;"></div></div>
-    <a class="status-link" href="/sports">Подробнее по матчам →</a>
-  </div>
-
-  <div class="block status-card">
-    <h2>{{ icon.render('esports') }}Киберспорт: букмекер Pinnacle</h2>
-    <span class="verdict-pill {{ esports.verdict.tone }}">{{ esports.verdict.label }}</span>
-    {% if esports.source_rate is not none %}
-    <div class="status-stat">Pinnacle угадывал победителя: <b>{{ '%.1f%%' | format(esports.source_rate * 100) }}</b></div>
-    <div class="status-stat">Рынок Polymarket угадывал: <b>{{ '%.1f%%' | format(esports.market_rate * 100) }}</b></div>
-    {% else %}
-    <div class="status-stat">Пока нет матчей, которые уже сыграны и резолвлены.</div>
-    {% endif %}
-    <div class="status-n">
-      Проверено случаев: {{ esports.n }} {% if esports.n < min_n %}(нужно хотя бы {{ min_n }}, чтобы вообще судить){% endif %}
-    </div>
-    <div class="status-bar-track"><div class="status-bar-fill" style="width: {{ [100, (esports.n / min_n * 100) | round(0)] | min }}%;"></div></div>
-    <a class="status-link" href="/esports">Подробнее по матчам →</a>
-  </div>
-
-  <div class="block status-card">
-    <h2>{{ icon.render('trending') }}Макро: CPI/безработица/JOLTS/ВВП</h2>
-    <span class="verdict-pill {{ macro.verdict.tone }}">{{ macro.verdict.label }}</span>
-    {% if macro.source_rate is not none %}
-    <div class="status-stat">Наша модель угадывала диапазон: <b>{{ '%.1f%%' | format(macro.source_rate * 100) }}</b></div>
-    <div class="status-stat">Рынок Polymarket угадывал: <b>{{ '%.1f%%' | format(macro.market_rate * 100) }}</b></div>
-    {% else %}
-    <div class="status-stat">Пока нет резолвленных отчётов BLS/BEA.</div>
-    {% endif %}
-    <div class="status-n">
-      Проверено случаев: {{ macro.n }} {% if macro.n < macro_min_n %}(нужно хотя бы {{ macro_min_n }}, чтобы вообще судить){% endif %}
-    </div>
-    <div class="status-bar-track"><div class="status-bar-fill" style="width: {{ [100, (macro.n / macro_min_n * 100) | round(0)] | min }}%;"></div></div>
-    <div class="status-note">
-      Резолвится раз в месяц на метрику (BLS/BEA отчёты) — набор случаев
-      растёт медленно по самой природе данных, не потому что редко смотрим.
-    </div>
-    <a class="status-link" href="/macro">Подробнее по метрикам →</a>
-  </div>
-
-  <div class="block status-card">
-    <h2>{{ icon.render('news') }}Спорт: новости (Ollama)</h2>
-    <span class="verdict-pill {{ news_verdict.tone }}">{{ news_verdict.label }}</span>
-    {% if news_validation.combined_score is not none %}
-    <div class="status-stat">Команды с находкой "ослабляет" ({{ news_validation.weakens.n }} случаев) выигрывали:
-      <b>{{ '%.0f%%' | format(news_validation.weakens.avg_actual_win_rate * 100) if news_validation.weakens.n else '—' }}</b>,
-      рынок ожидал <b>{{ '%.0f%%' | format(news_validation.weakens.avg_market_p * 100) if news_validation.weakens.n else '—' }}</b>
-      — правда, если факт НИЖЕ</div>
-    <div class="status-stat">Команды с находкой "усиливает" ({{ news_validation.strengthens.n }} случаев) выигрывали:
-      <b>{{ '%.0f%%' | format(news_validation.strengthens.avg_actual_win_rate * 100) if news_validation.strengthens.n else '—' }}</b>,
-      рынок ожидал <b>{{ '%.0f%%' | format(news_validation.strengthens.avg_market_p * 100) if news_validation.strengthens.n else '—' }}</b>
-      — правда, если факт ВЫШЕ</div>
-    {% else %}
-    <div class="status-stat">Проверено команд: <b>{{ news_n }}</b>, с находкой: <b>{{ news_flagged }}</b></div>
-    {% endif %}
-    <div class="status-n">
-      Проверено случаев: {{ news_validation.combined_n }} {% if news_validation.combined_n < news_min_n %}(нужно хотя бы {{ news_min_n }}, чтобы вообще судить){% endif %}
-    </div>
-    <div class="status-bar-track"><div class="status-bar-fill" style="width: {{ [100, (news_validation.combined_n / news_min_n * 100) | round(0)] | min }}%;"></div></div>
-    <div class="status-note">
-      Это проверка "была ли новость вообще права" (команда правда сыграла хуже/лучше,
-      чем считал рынок) — не "узнали ли мы раньше рынка", это отдельная проверка
-      на странице "точность".
-    </div>
-    <a class="status-link" href="/news">Что нашли →</a>
   </div>
 
 </div>

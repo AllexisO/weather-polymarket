@@ -3,7 +3,10 @@ services:
   # docker compose run --rm collector weather_edge.py
   collector:
     build: .
-    container_name: polymarket-lab-collector
+    container_name: weather-lab-collector
+    # 2026-09-27: предел времени для каждого запуска (app/run_job.sh, JOB_TIMEOUT) — зависший
+    # скрипт убивается, база освобождается
+    entrypoint: ["sh", "/app/run_job.sh"]
     env_file: .env
     volumes:
       - ./app:/app
@@ -15,11 +18,27 @@ services:
     profiles:
       - cli
 
+  # 2026-09-26: постоянно работающий слушатель сделок Polymarket — повтор за сильными
+  # трейдерами за секунды (weather_copy_live.py). Тот же образ, что у collector.
+  copier:
+    build: .
+    container_name: weather-lab-copier
+    restart: unless-stopped
+    command: ["weather_copy_live.py"]
+    env_file: .env
+    volumes:
+      - ./app:/app
+      - ./data:/data
+    environment:
+      TZ: Europe/Chisinau
+      POLY_LAB_DB: /data/db/polymarket_lab.sqlite3
+      PYTHONUNBUFFERED: "1"
+
   dashboard:
     build:
       context: .
       dockerfile: Dockerfile.dashboard
-    container_name: polymarket-lab-dashboard
+    container_name: weather-lab-dashboard
     restart: unless-stopped
     volumes:
       - ./app:/app

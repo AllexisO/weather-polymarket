@@ -27,6 +27,7 @@ forward пропускает (не из чего фитить) — это ожи
 
 import os
 import sqlite3
+import sys
 from pathlib import Path
 
 from weather_bias import compute_ensemble_moments, _ols, MIN_EMOS_N
@@ -35,16 +36,23 @@ from weather_edge import emos_bucket_prob
 DB_PATH = Path(os.environ.get("POLY_LAB_DB", Path(__file__).parent.parent / "data" / "db" / "polymarket_lab.sqlite3"))
 WEATHER_COORD_FIX_TS = "2026-08-25T19:58:27+00:00"
 
+# 2026-09-22: --recompute перезаписывает уже посчитанные emos_model_p.
+# Нужен был один раз: до этой даты EMOS обучался на "факте" из
+# Open-Meteo, а не на реальных показаниях станций (weather_station_daily)
+# — все старые EMOS-вероятности были подогнаны под неправильный эталон.
+# Пересчёт тоже walk-forward, как и исходный бэкафилл.
+RECOMPUTE = "--recompute" in sys.argv
+
 
 def run():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=60)
     conn.row_factory = sqlite3.Row
 
     rows = conn.execute(
         """
         SELECT s.id, s.ts_utc, s.city, s.local_date, s.bucket_lo, s.bucket_hi, s.model_p, o.actual_max
         FROM snapshots s
-        JOIN weather_outcomes o ON s.city = o.city AND s.local_date = o.local_date
+        JOIN weather_station_daily o ON s.city = o.city AND s.local_date = o.local_date
         WHERE s.ts_utc >= ? AND s.local_hour < 12
         ORDER BY s.city, s.local_date, s.ts_utc
         """,
@@ -100,7 +108,7 @@ def run():
 
             for r in day["rows"]:
                 cur = conn.execute("SELECT emos_model_p FROM snapshots WHERE id = ?", (r["id"],)).fetchone()
-                if cur["emos_model_p"] is not None:
+                if cur["emos_model_p"] is not None and not RECOMPUTE:
                     skipped_already += 1
                     continue
                 emos_mp = emos_bucket_prob(emos_mean, emos_std, r["bucket_lo"], r["bucket_hi"])

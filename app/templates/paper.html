@@ -1,0 +1,687 @@
+{% extends "base.html" %}
+{% block title %}Кошельки — weather-lab{% endblock %}
+{% block content %}
+{#
+  2026-09-25 (просьба Alex — «полностью переделать, непонятно что где»):
+  страница про ОДИН кошелёк (выбор вверху, по умолчанию главная модель).
+  Порядок — как человек думает о деньгах: сколько у меня есть → что будет
+  с открытыми ставками (сценарии «угадаем k из n → итог → шанс») → что уже
+  случилось → как дела у других кошельков. Палитра «Banking / Traditional
+  Finance» (ui-ux-pro-max), тёмная; цвета только через токены --bk-*.
+#}
+{% macro money(v) -%}{{ '−' if v < -0.005 else ('+' if v > 0.005 else '') }}${{ '%.2f' | format(v | abs) }}{%- endmacro %}
+{% macro pct(p) -%}{% if p < 0.01 and p > 0 %}&lt;1%{% else %}{{ '%.0f' | format(p * 100) }}%{% endif %}{%- endmacro %}
+{% macro lines(c, title) -%}
+<svg class="viz" viewBox="0 0 {{ c.w }} {{ c.h }}" role="img" aria-label="{{ title }}">
+  <g class="grid">{% for t in c.ticks %}<line x1="{{ c.L }}" x2="{{ c.R }}" y1="{{ t.y }}" y2="{{ t.y }}"/><text x="{{ c.L - 8 }}" y="{{ t.y + 4 }}" text-anchor="end">{{ t.label }}</text>{% endfor %}</g>
+  {% if c.vline is not none %}<line class="live" x1="{{ c.vline }}" x2="{{ c.vline }}" y1="{{ c.T }}" y2="{{ c.B }}"/><text x="{{ c.vline + 4 }}" y="{{ c.T + 10 }}">вживую →</text>{% endif %}
+  {% for s in c.series %}<path class="ln {{ s.cls }}" d="{{ s.path }}"/>{% endfor %}
+  {% for s in c.series %}<circle class="end {{ s.cls }}" cx="{{ s.end[0] }}" cy="{{ s.end[1] }}" r="4.5"/>
+    <text class="lab" x="{{ s.end[0] + 10 }}" y="{{ s.ly + 4 }}">{{ s.name }} · {{ c.cols[-1].vals[loop.index0][1] }}</text>{% endfor %}
+  <line class="cross" y1="{{ c.T }}" y2="{{ c.B }}" x1="0" x2="0"/>
+  <text x="{{ c.L }}" y="{{ c.h - 6 }}">{{ c.first }}</text>
+  <text x="{{ c.R }}" y="{{ c.h - 6 }}" text-anchor="end">{{ c.last }}</text>
+  {% for col in c.cols %}<rect class="hit" x="{{ col.x0 }}" y="{{ c.T }}" width="{{ col.cw }}" height="{{ c.B - c.T }}" tabindex="0"
+    data-tip-x="{{ col.x }}" data-tip-val="неделя с {{ col.label }}" data-tip-title="{% for n, v in col.vals %}{{ n }} {{ v }}{% if not loop.last %} · {% endif %}{% endfor %}" data-tip-sub=""/>{% endfor %}
+</svg>
+{%- endmacro %}
+{% set all_groups = ([("Главная модель", [main])] if main else []) + groups %}
+
+<style>
+  body:has(.bk) .main-col { background: #000000; }
+  body:has(.bk) main { max-width: 1120px; }
+  .bk {
+    --bk-card: #15181e;
+    --bk-raise: #1C2027;
+    --bk-line: #262A31;
+    --bk-text: #E5EAF2;
+    --bk-muted: #93A2BA;
+    --bk-faint: #7C8BA3;
+    --bk-accent: #FF6500;
+    --bk-accent-bg: rgba(255, 101, 0, .14);
+    --bk-pos: #4ADE80;
+    --bk-pos-bg: rgba(34, 197, 94, .13);
+    --bk-neg: #F87171;
+    --bk-neg-bg: rgba(248, 113, 113, .13);
+    --bk-gold: #E9C46A;
+    --bk-font: "Onest", -apple-system, "Segoe UI", Roboto, sans-serif;
+    --bk-num: "Onest", -apple-system, "Segoe UI", Roboto, sans-serif;
+    color: var(--bk-text); font-family: var(--bk-font); font-size: 15px; line-height: 1.55;
+  }
+  .bk .num { font-family: var(--bk-num); font-variant-numeric: tabular-nums; }
+  .bk .pos { color: var(--bk-pos); }
+  .bk .neg { color: var(--bk-neg); }
+  .bk .muted { color: var(--bk-muted); }
+  .bk a { color: var(--bk-accent); text-underline-offset: 3px; }
+  .bk a:hover { color: #FFFFFF; }
+  .bk a:focus-visible, .bk select:focus-visible, .bk summary:focus-visible, .bk [tabindex]:focus-visible {
+    outline: 2px solid var(--bk-accent); outline-offset: 3px; border-radius: 8px; }
+
+  /* шапка */
+  .top { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 16px 24px; margin-bottom: 28px; }
+  .top h1 { margin: 0; font-size: 26px; font-weight: 700; letter-spacing: -.02em; }
+  .top h1 .h1-cnt { display: inline-block; vertical-align: middle; margin-left: 10px; padding: 3px 12px; border-radius: 999px; background: var(--bk-accent-bg); color: var(--bk-accent); font-size: 14px; font-weight: 600; letter-spacing: 0; }
+  .top p { margin: 4px 0 0; color: var(--bk-muted); font-size: 14px; }
+  .picker { display: flex; flex-direction: column; gap: 6px; min-width: 320px; }
+  .picker label { font-size: 12.5px; color: var(--bk-muted); }
+  .picker select { appearance: none; min-height: 46px; padding: 0 44px 0 14px; border-radius: 12px; border: 1px solid var(--bk-line);
+    background: var(--bk-card) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='%2393A2BA' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E") no-repeat right 14px center;
+    color: var(--bk-text); font: 600 15px var(--bk-font); cursor: pointer; }
+
+
+  /* когда обновлялись данные */
+  .fresh { display: flex; flex-wrap: wrap; gap: 8px 10px; margin: -12px 0 28px; }
+  .fr { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--bk-line);
+    background: var(--bk-card); font-size: 12.5px; color: var(--bk-muted); }
+  .fr b { color: var(--bk-text); font-weight: 600; }
+  .bk a.fr { text-decoration: none; } .bk a.fr:hover { border-color: var(--bk-accent); } .fr u { color: var(--bk-accent); text-decoration: none; }
+  .fr i { width: 7px; height: 7px; border-radius: 50%; background: var(--bk-pos); flex-shrink: 0; }
+  .fr.none i { background: var(--bk-faint); }
+  .fr.stale { border-color: rgba(233, 196, 106, .45); }
+  .fr.stale i { background: var(--bk-gold); }
+  .fr.stale em { font-style: normal; color: var(--bk-gold); font-weight: 600; }
+
+  /* секции */
+  .sec { margin: 0 0 36px; }
+  .sec-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 16px; margin-bottom: 12px; }
+  .sec-head h2 { margin: 0; font-size: 19px; font-weight: 600; letter-spacing: -.01em; }
+  .sec-head .aside { font-size: 13.5px; color: var(--bk-muted); }
+  .pane { background: var(--bk-card); border: 1px solid var(--bk-line); border-radius: 16px; padding: 22px 24px; }
+
+  /* 1. счёт */
+  .acct { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 24px 32px; align-items: start; }
+  .acct-name { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; font-size: 16px; font-weight: 600; }
+  .tag { font-size: 11.5px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; padding: 3px 9px; border-radius: 999px;
+    background: rgba(233, 196, 106, .12); color: var(--bk-gold); }
+  .acct-desc { color: var(--bk-muted); font-size: 14px; margin: 4px 0 18px; max-width: 620px; }
+  .big { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; }
+  .big b { font-size: 44px; font-weight: 600; line-height: 1.05; letter-spacing: -.02em; }
+  .big span { color: var(--bk-muted); font-size: 14px; }
+  .split { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; margin-top: 20px; border-radius: 12px; overflow: hidden; background: var(--bk-line); }
+  .split div { background: var(--bk-raise); padding: 12px 14px; }
+  .split span { display: block; font-size: 12.5px; color: var(--bk-muted); }
+  .split b { display: block; font-size: 18px; font-weight: 600; margin-top: 2px; }
+  .goal { background: var(--bk-raise); border-radius: 12px; padding: 16px; }
+  .goal h3 { margin: 0 0 4px; font-size: 13.5px; font-weight: 600; }
+  .goal p { margin: 0; font-size: 13px; color: var(--bk-muted); }
+  .goal .n { font-size: 26px; font-weight: 600; margin: 10px 0 8px; }
+  .goal .n small { font-size: 14px; color: var(--bk-muted); font-weight: 500; font-family: var(--bk-font); }
+  .meter { height: 6px; border-radius: 999px; background: #262A31; overflow: hidden; }
+  .meter i { display: block; height: 100%; min-width: 6px; border-radius: 999px; background: var(--bk-accent); }
+
+  /* 2. открытые ставки */
+  .lead { font-size: 17px; line-height: 1.55; margin: 0 0 18px; max-width: 780px; }
+  .lead b { font-weight: 600; }
+  .bk table { width: 100%; border-collapse: collapse; }
+  .bk th { text-align: left; font: 500 12.5px var(--bk-font); color: var(--bk-muted); text-transform: none; letter-spacing: 0;
+    padding: 0 12px 8px 0; border-bottom: 1px solid var(--bk-line); white-space: nowrap; }
+  .bk td { font-family: var(--bk-font); border-bottom: 1px solid var(--bk-line); }
+  .bk tbody tr:hover { background: transparent; }
+  .scen td { padding: 11px 12px 11px 0; vertical-align: middle; font-size: 15px; }
+  .scen tr:last-child td { border-bottom: 0; }
+  .scen td:first-child, .scen th:first-child { padding-left: 14px; }
+  .scen tr.likely td { background: rgba(255, 101, 0, .07); }
+  .scen tr.likely td:first-child { box-shadow: inset 3px 0 0 var(--bk-accent); }
+  .scen .k { font-weight: 600; white-space: nowrap; width: 110px; }
+  .scen .res { font-family: var(--bk-num); font-size: 16px; font-weight: 600; }
+  .scen .hint { display: block; font-family: var(--bk-font); font-size: 12.5px; font-weight: 400; color: var(--bk-muted); }
+  .scen .chance { width: 40%; }
+  .bar { display: flex; align-items: center; gap: 10px; }
+  .bar i { display: block; height: 10px; border-radius: 0 4px 4px 0; background: var(--bk-accent); flex-shrink: 0; }
+  .bar b { font-family: var(--bk-num); font-size: 14.5px; font-weight: 600; min-width: 44px; }
+  .foot { margin: 12px 0 0; font-size: 13px; color: var(--bk-muted); }
+
+  .sub-title { margin: 28px 0 6px; font-size: 15px; font-weight: 600; }
+  .bets th { padding: 10px; }
+  .bets td { padding: 12px 10px; font-size: 14.5px; vertical-align: top; }
+  .bets tbody tr:hover { background: var(--bk-raise); }
+  .bets .r { text-align: right; }
+  .bets .city { font-weight: 600; }
+  .bets .sub { display: block; font-size: 12.5px; color: var(--bk-muted); }
+  .bets .num { white-space: nowrap; }
+  .bets tr.wait td { color: var(--bk-muted); }
+
+  /* 3. история */
+  .hist { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+  .chart { position: relative; }
+  .chart svg.viz { width: 100%; height: auto; display: block; overflow: visible; }
+  .viz .grid line { stroke: var(--bk-line); stroke-width: 1; }
+  .viz text { fill: var(--bk-muted); font-size: 12px; font-family: var(--bk-num); }
+  .viz .line { stroke: #FF6500; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; fill: none; }
+  .viz .area { fill: #FF6500; fill-opacity: .1; }
+  .viz .pt { fill: #93A2BA; stroke: var(--bk-card); stroke-width: 2; }
+  .viz .pt.up { fill: #4ADE80; } .viz .pt.down { fill: #F87171; }
+  .viz .dot { fill: #FF6500; stroke: var(--bk-card); stroke-width: 2; }
+  .viz .ref { stroke: #3A3F48; stroke-width: 1; }
+  .viz .hit { fill: transparent; }
+  .viz .cross { stroke: var(--bk-muted); stroke-width: 1; opacity: 0; }
+  .viz-tip { position: absolute; pointer-events: none; z-index: 5; background: #000000; border: 1px solid #262A31; border-radius: 10px;
+    padding: 8px 12px; font-size: 13px; line-height: 1.4; color: var(--bk-muted); opacity: 0; width: max-content; max-width: min(320px, calc(100% - 16px)); }
+  /* выбранную точку показывает вертикальная линия и подсказка — белая рамка фокуса на графике не нужна */
+  .bk .viz .hit:focus, .bk .viz .hit:focus-visible { outline: none; }
+  .viz-tip b { display: block; font-family: var(--bk-num); font-size: 15px; color: #F8FAFC; }
+  .label { font-size: 13.5px; color: var(--bk-muted); margin-bottom: 8px; }
+  .res-list { list-style: none; margin: 0; padding: 0; max-height: 440px; overflow-y: auto; }
+  .res-list li { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; padding: 11px 0; border-bottom: 1px solid var(--bk-line); }
+  .res-list li:last-child { border-bottom: 0; }
+  .res-list .t { font-weight: 600; font-size: 14.5px; }
+  .res-list .w { grid-column: 1; font-size: 13px; color: var(--bk-muted); }
+  .res-list .a { grid-row: 1 / span 2; grid-column: 2; align-self: center; font-family: var(--bk-num); font-weight: 600; font-size: 15px; white-space: nowrap; }
+  .mark { display: inline-block; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 999px; margin-left: 6px; vertical-align: 1px; }
+  .mark.won { background: var(--bk-pos-bg); color: var(--bk-pos); }
+  .mark.lost { background: var(--bk-neg-bg); color: var(--bk-neg); }
+  .empty { color: var(--bk-muted); font-size: 14.5px; padding: 28px 8px; text-align: center; }
+
+
+  /* насколько модель права */
+  .skill-kpi { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+  .kpi { background: var(--bk-raise); border-radius: 12px; padding: 16px 18px; }
+  .kpi h3 { margin: 0 0 6px; font-size: 13.5px; font-weight: 600; color: var(--bk-muted); }
+  .kpi .v { font-size: 17px; line-height: 1.5; }
+  .kpi .v b { font-family: var(--bk-num); font-weight: 600; }
+  .kpi .verdict { margin-top: 8px; font-size: 14px; }
+  .key { display: inline-block; width: 14px; height: 3px; border-radius: 2px; vertical-align: 4px; margin-right: 6px; }
+  .key.s-model { background: #FF6500; } .key.s-market { background: #8FB3DE; } .key.s-real { background: #199E70; }
+  .viz .ln { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+  .viz .ln.s-model { stroke: #FF6500; } .viz .ln.s-market { stroke: #8FB3DE; } .viz .ln.s-real { stroke: #199E70; stroke-width: 2.5; }
+  .viz .end { stroke: var(--bk-card); stroke-width: 2; }
+  .viz .end.s-model { fill: #FF6500; } .viz .end.s-market { fill: #8FB3DE; } .viz .end.s-real { fill: #199E70; }
+  .viz text.lab { fill: var(--bk-text); font-family: var(--bk-font); font-size: 12.5px; }
+  .viz .live { stroke: var(--bk-gold); stroke-width: 1; }
+  .skill-charts { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .skill-charts h3 { margin: 0 0 2px; font-size: 15px; font-weight: 600; }
+  .skill-charts .label { margin-bottom: 10px; }
+
+  /* 4. сравнение */
+  /* группа кошельков — отдельный блок с заголовком, чтобы на телефоне группы не сливались */
+  .grp-box { margin-top: 32px; padding: 18px; border-radius: 16px; background: #0c0e12; }
+  .grp-box.first { margin-top: 0; }
+  .grp { display: flex; align-items: center; gap: 12px; margin: 0 0 14px; padding-bottom: 12px; border-bottom: 1px solid var(--bk-line); }
+  .grp::before { content: ""; width: 4px; align-self: stretch; min-height: 22px; border-radius: 2px; background: var(--bk-accent); flex-shrink: 0; }
+  .grp h2 { margin: 0; font-size: 18px; font-weight: 700; letter-spacing: -.01em; color: var(--bk-text); line-height: 1.3; }
+  .grp .cnt { margin-left: auto; flex-shrink: 0; padding: 3px 10px; border-radius: 999px; background: var(--bk-accent-bg); color: var(--bk-accent); font-size: 12.5px; font-weight: 600; }
+  @media (max-width: 600px) { .grp-box { margin-top: 40px; padding: 14px 12px; } .grp h2 { font-size: 17px; } }
+  .wal-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px; }
+  .bk a.wal { display: block; padding: 14px 16px; border-radius: 12px; border: 0; background: var(--bk-card);
+    color: var(--bk-text); text-decoration: none; }
+  .bk a.wal:hover { border-color: rgba(255, 101, 0, .6); color: var(--bk-text); }
+  .bk a.wal.sel { border-color: var(--bk-accent); box-shadow: inset 0 0 0 1px var(--bk-accent); }
+  .wal-top { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+  .wal-name { font-weight: 600; font-size: 14.5px; line-height: 1.3; }
+  .wal-bal { font-family: var(--bk-num); font-weight: 600; font-size: 16px; white-space: nowrap; }
+  .wal-desc { font-size: 12.5px; color: var(--bk-muted); margin-top: 2px; }
+  .upd { display: inline-flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 12.5px; color: var(--bk-faint); }
+  .upd svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; flex-shrink: 0; }
+  .upd.corner { align-self: flex-end; margin-top: auto; padding-top: 10px; }
+  .wal-meta { font-size: 12.5px; color: var(--bk-muted); margin-top: 8px; }
+  .wal-meta b { font-family: var(--bk-num); font-weight: 600; color: var(--bk-text); }
+  .wal-meta b.pos { color: var(--bk-pos); }
+  .wal-meta b.neg { color: var(--bk-neg); }
+
+
+  /* обзор */
+  .back { display: inline-flex; align-items: center; min-height: 32px; font-size: 14px; font-weight: 600; text-decoration: none; margin-bottom: 4px; }
+  .bk a.feat { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 24px 32px; padding: 24px; margin-bottom: 30px; border-radius: 18px;
+    border: 1px solid rgba(255, 101, 0, .4); background: linear-gradient(135deg, #1E3E62, #0B192C 60%); color: var(--bk-text); text-decoration: none; }
+  .bk a.feat:hover { border-color: var(--bk-gold); color: var(--bk-text); }
+  .feat-name { font-size: 20px; font-weight: 700; margin: 10px 0 2px; }
+  .feat-desc { color: var(--bk-muted); font-size: 14px; margin-bottom: 16px; max-width: 640px; }
+  .feat .big span b { font-size: 15px; font-weight: 600; }
+  .feat-stats { display: flex; flex-direction: column; gap: 4px; margin-top: 14px; font-size: 14px; color: var(--bk-muted); }
+  .feat-stats b { color: var(--bk-text); font-weight: 600; }
+  .feat-r { display: flex; flex-direction: column; gap: 14px; justify-content: space-between; }
+  .open-btn { align-self: flex-start; display: inline-flex; align-items: center; min-height: 44px; padding: 0 18px; border-radius: 12px;
+    background: #FF6500; color: #000000; font-weight: 600; font-size: 14px; }
+  .wal-mid { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 10px; min-height: 44px; }
+  .spark { flex: 1 1 auto; min-width: 0; max-width: 170px; height: 44px; overflow: visible; }
+  .spark line { stroke: var(--bk-line); stroke-width: 1; }
+  .spark path { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+  .spark path.up { stroke: var(--bk-pos); } .spark path.down { stroke: var(--bk-neg); }
+  .spark circle.up { fill: var(--bk-pos); } .spark circle.down { fill: var(--bk-neg); }
+  .nospark { font-size: 12.5px; color: var(--bk-faint); }
+  .wal-pnl { font-size: 16px; font-weight: 600; white-space: nowrap; flex-shrink: 0; }
+  .wal-skill { font-size: 12.5px; color: var(--bk-muted); margin-top: 4px; }
+  .wal-skill b { font-family: var(--bk-num); color: var(--bk-text); }
+  .wal-skill span { font-weight: 600; white-space: nowrap; }
+  .bk a.wal { display: flex; flex-direction: column; }
+  .bk a.wal:hover .wal-name { text-decoration: underline; text-underline-offset: 3px; }
+
+  /* 5. свёрнутые разделы */
+  details.fold { border-top: 1px solid var(--bk-line); }
+  details.fold:last-of-type { border-bottom: 1px solid var(--bk-line); }
+  details.fold > summary { list-style: none; cursor: pointer; display: flex; justify-content: space-between; align-items: center; gap: 12px;
+    min-height: 56px; font-size: 16px; font-weight: 600; }
+  details.fold > summary::-webkit-details-marker { display: none; }
+  details.fold > summary::after { content: ""; width: 9px; height: 9px; border-right: 2px solid var(--bk-muted); border-bottom: 2px solid var(--bk-muted);
+    transform: rotate(45deg); margin-right: 6px; }
+  details.fold[open] > summary::after { transform: rotate(-135deg); }
+  details.fold .in { padding: 0 0 20px; }
+  details.fold.doc { border: 0; }
+  details.fold.doc > summary { padding: 0 0 14px; }
+  details.fold.doc > summary h2 { margin: 0; font-size: 19px; font-weight: 600; }
+  details.fold.doc > summary .aside { margin-left: auto; color: var(--bk-muted); font-size: 13px; }
+  .doc-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
+  .doc-part h3 { margin: 0 0 8px; font-size: 15px; font-weight: 600; color: var(--bk-text); }
+  .doc-part p { margin: 0 0 8px; font-size: 14px; line-height: 1.6; color: var(--bk-muted); }
+  .doc-part p:last-child { margin-bottom: 0; }
+  .doc-part p.pt { padding-left: 14px; position: relative; }
+  .doc-part p.pt::before { content: ""; position: absolute; left: 2px; top: .7em; width: 5px; height: 5px; border-radius: 50%; background: var(--bk-accent); }
+  .skip-list { list-style: none; margin: 0; padding: 0; max-height: 480px; overflow-y: auto; }
+  .skip-list li { padding: 9px 0; border-bottom: 1px solid var(--bk-line); font-size: 14px; }
+  .skip-list li:last-child { border-bottom: 0; }
+  .skip-list .muted { font-size: 13px; }
+  .how { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 28px; margin: 0; padding: 0; list-style: none; counter-reset: how; }
+  .how li { counter-increment: how; padding-left: 36px; position: relative; font-size: 14px; color: var(--bk-muted); }
+  .how li::before { content: counter(how); position: absolute; left: 0; top: 0; width: 24px; height: 24px; border-radius: 7px; display: grid; place-items: center;
+    background: var(--bk-accent-bg); color: var(--bk-accent); font-weight: 700; font-size: 13px; }
+  .how b { color: var(--bk-text); font-weight: 600; display: block; }
+  .note { margin-top: 16px; font-size: 13.5px; color: var(--bk-muted); border-left: 2px solid var(--bk-gold); padding-left: 12px; }
+
+  @media (max-width: 900px) {
+    .acct, .hist, .how, .skill-kpi, .skill-charts, .bk a.feat { grid-template-columns: 1fr; }
+    .picker { min-width: 0; width: 100%; }
+  }
+  @media (max-width: 600px) {
+    .pane { padding: 18px 16px; }
+    .big b { font-size: 36px; }
+    .picker select { font-size: 14px; padding-left: 12px; }
+    .split { grid-template-columns: 1fr 1fr; }
+    .split div:last-child { grid-column: 1 / -1; }
+    .lead { font-size: 16px; }
+    .scen .k { width: auto; }
+    .scen .res { font-size: 14.5px; }
+    .scen .chance { width: 30%; }
+    .bets thead { display: none; }
+    .bets, .bets tbody, .bets tr, .bets td { display: block; width: 100%; }
+    .bets tr { padding: 12px 0; border-bottom: 1px solid var(--bk-line); }
+    .bets td { border: 0; padding: 2px 0; text-align: left !important; }
+    .bets td[data-l]::before { content: attr(data-l) ": "; color: var(--bk-muted); font-family: var(--bk-font); font-size: 13px; }
+    .viz text { font-size: 17px; }
+    .viz text.lab { font-size: 16px; }
+  }
+  /* 2026-09-27 (просьба Alex — «страница живая»): анимации только если система не просит меньше движения */
+  @media (prefers-reduced-motion: no-preference) {
+    .bk a.wal { transition: border-color .2s ease, transform .2s ease, box-shadow .2s ease; }
+    .bk a.wal:hover { transform: translateY(-3px); box-shadow: 0 10px 28px rgba(0, 0, 0, .35); }
+    .bk a.wal:active { transform: translateY(-1px) scale(.99); }
+    /* появление блоков снизу по очереди (--i ставит скрипт) */
+    .bk .rise { opacity: 0; animation: rise .5s cubic-bezier(.2, .7, .2, 1) forwards; animation-delay: calc(var(--i, 0) * 45ms); }
+    @keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+    /* линии графиков прорисовываются слева направо */
+    .spark path, .viz .line { stroke-dasharray: 1; stroke-dashoffset: 1; animation: draw 1.1s ease-out .25s forwards; }
+    .viz .area { opacity: 0; animation: fadein .8s ease-out .9s forwards; }
+    @keyframes draw { to { stroke-dashoffset: 0; } }
+    @keyframes fadein { to { opacity: 1; } }
+    /* последняя точка «дышит» — баланс сейчас */
+    .spark circle, .viz .dot { transform-box: fill-box; transform-origin: center; animation: beat 2.4s ease-in-out 1.3s infinite; }
+    @keyframes beat { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.45); } }
+    /* зелёные огоньки «данные свежие» мигают, как индикатор онлайна */
+    .fr:not(.none):not(.stale) i { animation: live 2s ease-in-out infinite; }
+    @keyframes live { 0%, 100% { box-shadow: 0 0 0 0 rgba(74, 222, 128, .55); } 60% { box-shadow: 0 0 0 6px rgba(74, 222, 128, 0); } }
+    /* полоска «до решения о реальных деньгах» заполняется */
+    .meter i { transform-origin: left; animation: grow 1.2s cubic-bezier(.2, .7, .2, 1) .4s both; }
+    @keyframes grow { from { transform: scaleX(0); } }
+  }
+  .alerts { margin: 0 0 22px; padding: 14px 18px; border-radius: 14px; border: 1px solid rgba(248, 113, 113, .5); background: rgba(248, 113, 113, .1); }
+  .alerts b { color: #FCA5A5; } .alerts ul { margin: 6px 0 0; padding-left: 18px; font-size: 14px; } .alerts li span { color: var(--bk-muted); }
+</style>
+
+<div class="bk">
+  <div class="top">
+    <div>
+      {% if cur %}<a class="back" href="/paper">← Все кошельки</a>{% endif %}
+      {% set nw = wallets | length %}
+      <h1>{{ cur.name if cur else 'Кошельки' }}{% if not cur %} <span class="h1-cnt num">{{ nw }} {{ 'кошелёк' if nw % 10 == 1 and nw % 100 != 11 else ('кошелька' if nw % 10 in [2, 3, 4] and nw % 100 not in [12, 13, 14] else 'кошельков') }}</span>{% endif %}</h1>
+      <p>{% if cur %}{{ cur.desc }}{% else %}Виртуальные деньги: $100 на кошелёк, ставка $2. Покупка — по живым ценам Polymarket, с комиссией. Нажмите на кошелёк, чтобы увидеть всё о нём.{% endif %}</p>
+    </div>
+    {% if cur %}
+    <form class="picker" method="get" action="/paper">
+      <label for="w">Другой кошелёк</label>
+      <select id="w" name="w" onchange="this.form.submit()">
+        {% for g, cs in all_groups %}
+        <optgroup label="{{ g }}">
+          {% for c in cs %}<option value="{{ c.key }}"{% if c.key == sel %} selected{% endif %}>{{ c.name }} · ${{ '%.2f' | format(c.balance) }}</option>{% endfor %}
+        </optgroup>
+        {% endfor %}
+      </select>
+      <noscript><button type="submit">Показать</button></noscript>
+    </form>
+    {% endif %}
+  </div>
+
+  {% if alerts %}
+  <div class="alerts" role="alert">
+    <b>Внимание — что-то не так</b>
+    <ul>{% for a in alerts %}<li>{{ a.msg }} <span>(с {{ a.since }})</span></li>{% endfor %}</ul>
+  </div>
+  {% endif %}
+  {% if fresh %}
+  <div class="fresh" aria-label="Когда обновлялись данные">
+    {% for f in fresh %}
+    {% set tag = 'a href="/training"' if f.label == 'Обучение моделей' else 'span' %}
+    <{{ tag | safe }} class="fr{{ ' stale' if f.stale else '' }}{{ ' none' if not f.when else '' }}" title="Следующее обновление по расписанию — {{ f.next }}"><i aria-hidden="true"></i>{{ f.label }}: <b>{{ f.when or ('первый запуск ~' ~ f.next) }}</b>{% if f.stale %} <em>задерживается</em>{% endif %}{% if f.label == 'Обучение моделей' %} <u>подробно →</u>{% endif %}</{{ 'a' if f.label == 'Обучение моделей' else 'span' }}>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {% if cur %}
+  <!-- 1. Счёт -->
+  <section class="sec" aria-labelledby="s-acct">
+    <div class="sec-head"><h2 id="s-acct">Счёт</h2></div>
+    <div class="pane acct">
+      <div>
+        {% if main and cur.key == main.key %}<div class="acct-name" style="margin-bottom: 14px;"><span class="tag">главная модель</span></div>{% endif %}
+        <div class="big"><b class="num">${{ '%.2f' | format(cur.balance) }}</b><span>на счёте · старт ${{ '%.0f' | format(start) }}{% if cur.roi is not none %} · доходность <b class="num {{ 'pos' if cur.roi > 0.05 else ('neg' if cur.roi < -0.05 else '') }}">{{ '%+.1f' | format(cur.roi) }}%</b> от поставленного{% endif %}</span></div>
+        {% if cur.upd %}<div class="upd" title="{{ cur.upd.what | capitalize }} · последняя закрытая: {{ cur.upd.settled or 'ещё не было' }} · последняя новая: {{ cur.upd.bet or 'ещё не было' }}"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span class="num">{{ cur.upd.when }}</span></div>{% endif %}
+        <div class="split">
+          <div><span>Свободно</span><b class="num">${{ '%.2f' | format(cur.cash) }}</b></div>
+          <div><span>В открытых ставках</span><b class="num">${{ '%.2f' | format(cur.in_play) }}</b></div>
+          <div><span>Итог закрытых ставок</span><b class="num {{ 'pos' if cur.pnl > 0.005 else ('neg' if cur.pnl < -0.005 else '') }}">{{ money(cur.pnl) }}</b></div>
+        </div>
+      </div>
+      {% if main and cur.key == main.key %}
+      <div class="goal">
+        <h3>До решения о реальных деньгах</h3>
+        <p>Нужно {{ goal.need }} закрытых ставок главной модели — меньше может оказаться случайностью.</p>
+        <div class="n num">{{ goal.n }} <small>из {{ goal.need }}</small></div>
+        <div class="meter" role="progressbar" aria-label="Закрытых ставок" aria-valuemin="0" aria-valuemax="{{ goal.need }}" aria-valuenow="{{ goal.n }}"><i style="width: {{ goal.pct }}%"></i></div>
+        <p style="margin-top: 10px;">Угадано {{ cur.won }} из {{ cur.n }}{% if cur.winrate is not none %} ({{ cur.winrate }}%){% endif %}.</p>
+      </div>
+      {% else %}
+      <div class="goal">
+        <h3>Сыграно ставок</h3>
+        <div class="n num">{{ cur.n }} <small>угадано {{ cur.won }}{% if cur.winrate is not none %} · {{ cur.winrate }}%{% endif %}</small></div>
+        <p>Этот кошелёк — для сравнения с главной моделью.</p>
+      </div>
+      {% endif %}
+    </div>
+  </section>
+
+  <!-- 1б. Логика кошелька (2026-09-27, просьба Alex: полное описание — данные, формулы, всё) -->
+  {% if doc %}
+  <section class="sec" aria-labelledby="s-doc">
+    <details class="fold doc">
+      <summary><h2 id="s-doc">Как работает этот кошелёк</h2><span class="aside">данные, модель, формулы, покупка, итог</span></summary>
+      <div class="in doc-grid">
+        {% for title, lines in doc %}
+        <div class="pane doc-part">
+          <h3>{{ title }}</h3>
+          {% set bullets = lines | select('string') | list %}
+          {% for ln in lines %}{% if ln.startswith('•') %}<p class="pt">{{ ln[1:] | trim }}</p>{% else %}<p>{{ ln }}</p>{% endif %}{% endfor %}
+        </div>
+        {% endfor %}
+      </div>
+    </details>
+  </section>
+  {% endif %}
+
+  <!-- 2. Открытые ставки -->
+  <section class="sec" aria-labelledby="s-open">
+    <div class="sec-head">
+      <h2 id="s-open">Открытые ставки</h2>
+      {% if closes %}<span class="aside">итог ~{{ closes[0] }}{% if closes[1] != closes[0] %} – {{ closes[1] }}{% endif %} (по Кишинёву)</span>{% endif %}
+    </div>
+    <div class="pane">
+      {% if scen %}
+      <p class="lead">Поставили <b class="num">${{ '%.2f' | format(scen.cost) }}</b> на {{ scen.n }} {{ 'ставку' if scen.n % 10 == 1 and scen.n != 11 else ('ставки' if scen.n % 10 in [2, 3, 4] and scen.n not in [12, 13, 14] else 'ставок') }}.
+        Скорее всего угадаем <b>{{ scen.likely[0] }}{% if scen.likely[1] != scen.likely[0] %}–{{ scen.likely[1] }}{% endif %}</b> (шанс {{ pct(scen.likely_p) }}).
+        В плюсе окажемся с шансом <b>{{ pct(scen.p_plus) }}</b>.</p>
+      <table class="scen">
+        <thead><tr><th>Угадаем</th><th>Итог</th><th class="chance">Шанс</th></tr></thead>
+        <tbody>
+          {% for r in scen.rows %}
+          <tr class="{{ 'likely' if r.likely else '' }}">
+            <td class="k">{{ r.label }} из {{ scen.n }}</td>
+            <td class="res">
+              {% if r.hi is none %}<span class="{{ 'pos' if r.lo > 0 else '' }}">{{ money(r.lo) }} и больше</span>
+              {% elif (r.hi - r.lo) | abs < 0.01 %}<span class="{{ 'neg' if r.lo < 0 else 'pos' }}">{{ money(r.lo) }}</span>
+              {% else %}<span class="{{ 'neg' if r.hi < 0 else ('pos' if r.lo > 0 else '') }}">от {{ money(r.lo) }} до {{ money(r.hi) }}</span>
+                <span class="hint">зависит от того, какие именно угадаем</span>{% endif %}
+            </td>
+            <td class="chance"><div class="bar"><i style="width: {{ [r.bar * 0.75, 1] | max }}%"></i><b>{{ pct(r.prob) }}</b></div></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <p class="foot">Шансы — по ценам рынка: на истории рынок оценивает шансы точно. Угаданная ставка платит $1 за долю, неугаданная сгорает.</p>
+      {% else %}
+      <div class="empty">Открытых ставок нет.</div>
+      {% endif %}
+
+      {% if waiting %}
+      <h3 class="sub-title">Ставки</h3>
+      <table class="bets">
+        <thead><tr><th>Город и вариант</th><th class="r">Заплатили</th><th class="r">Получим, если угадаем</th><th class="r">Шанс: рынок / модель</th><th>Итог</th></tr></thead>
+        <tbody>
+          {% for t in waiting %}
+          <tr class="{{ '' if t.bought else 'wait' }}">
+            <td><span class="city">{{ t.city_ru }}</span> · {{ t.what }}<span class="sub">{{ t.local_date }} · цена {{ '%.0f' | format(t.price * 100) }}¢ · {{ '%.1f' | format(t.shares) }} долей</span></td>
+            <td class="r num" data-l="Заплатили">${{ '%.2f' | format(t.cost) }}</td>
+            <td class="r num" data-l="Получим, если угадаем">${{ '%.2f' | format(t.shares) }} <span class="pos">({{ money(t.win_amt) }})</span></td>
+            <td class="r num" data-l="Шанс: рынок / модель">{% if t.market_p is not none %}{{ '%.0f' | format(t.market_p * 100) }}% / {% if t.model_p is not none %}{{ '%.0f' | format(t.model_p * 100) }}%{% else %}—{% endif %}{% elif t.chance is not none %}{{ '%.0f' | format(t.chance * 100) }}% / —{% else %}—{% endif %}</td>
+            <td data-l="Итог">{% if t.bought %}~{{ t.closes }}{% else %}ещё не куплено — {{ t.closes }}{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+    </div>
+  </section>
+
+  <!-- 3. История -->
+  <section class="sec" aria-labelledby="s-hist">
+    <div class="sec-head"><h2 id="s-hist">История</h2><span class="aside">закрытые ставки этого кошелька</span></div>
+    <div class="hist">
+      <div class="pane chart" data-viz>
+        <div class="label">Баланс после каждого расчёта ставок (линия — старт ${{ '%.0f' | format(start) }})</div>
+        {% if chart %}
+        {% set cw = (chart.R - chart.L) / (chart.points | length - 1) %}
+        <svg class="viz" viewBox="0 0 {{ chart.w }} {{ chart.h }}" role="img" aria-label="Баланс: с ${{ '%.0f' | format(start) }} до ${{ '%.2f' | format(chart.last.v) }}">
+          <g class="grid">{% for t in chart.ticks %}<line x1="{{ chart.L }}" x2="{{ chart.R }}" y1="{{ t.y }}" y2="{{ t.y }}"/><text x="{{ chart.L - 8 }}" y="{{ t.y + 4 }}" text-anchor="end">{{ t.label }}</text>{% endfor %}</g>
+          <line class="ref" x1="{{ chart.L }}" x2="{{ chart.R }}" y1="{{ chart.start_y }}" y2="{{ chart.start_y }}"/>
+          <path class="area" d="{{ chart.area }}"/>
+          <path pathLength="1" class="line" d="{{ chart.path }}"/>
+          <line class="cross" y1="{{ chart.T }}" y2="{{ chart.B }}" x1="0" x2="0"/>
+          {% for p in chart.points[1:] %}<circle class="{{ 'dot' if loop.last else 'pt ' ~ ('up' if p.chg > 0.005 else ('down' if p.chg < -0.005 else '')) }}" cx="{{ p.x }}" cy="{{ p.y }}" r="{{ 5 if loop.last else 4 }}"/>{% endfor %}
+          <text x="{{ chart.L }}" y="{{ chart.h - 6 }}">{{ chart.first_t }}</text>
+          <text x="{{ chart.R }}" y="{{ chart.h - 6 }}" text-anchor="end">{{ chart.last_t }}</text>
+          {% for p in chart.points %}<rect class="hit" data-tip-x="{{ p.x }}" data-tip-title="{{ p.t }}" data-tip-val="${{ '%.2f' | format(p.v) }}" data-tip-sub="{{ p.sub }}"
+            x="{{ p.x - cw / 2 }}" y="{{ chart.T }}" width="{{ cw }}" height="{{ chart.B - chart.T }}" tabindex="0"/>{% endfor %}
+        </svg>
+        {% else %}
+        <div class="empty">График появится после первых закрытых ставок.</div>
+        {% endif %}
+      </div>
+      <div class="pane">
+        <div class="label">Закрытые ставки{% if results %} · {{ results | length }}{% endif %}</div>
+        {% if results %}
+        <ul class="res-list">
+          {% for t in results %}
+          <li>
+            <span class="t">{{ t.city_ru }} · {{ t.what }}<span class="mark {{ 'won' if t.result > 0 else 'lost' }}">{{ 'угадали' if t.result > 0 else 'не угадали' }}</span></span>
+            <span class="w">{{ t.local_date }} · {{ t.why }}</span>
+            <span class="a {{ 'pos' if t.result > 0 else 'neg' }}">{{ money(t.result) }}</span>
+          </li>
+          {% endfor %}
+        </ul>
+        {% else %}
+        <div class="empty">Закрытых ставок пока нет.</div>
+        {% endif %}
+      </div>
+    </div>
+  </section>
+
+  {% if skill %}
+  <!-- 3б. Насколько модель права -->
+  <section class="sec" aria-labelledby="s-skill">
+    <div class="sec-head"><h2 id="s-skill">Насколько модель права</h2>
+      <span class="aside">{% if skill.tot.history %}проверка вслепую{% else %}только живые дни{% endif %} {{ skill.tot.first[8:10] }}.{{ skill.tot.first[5:7] }}–{{ skill.tot.last[8:10] }}.{{ skill.tot.last[5:7] }}, {{ skill.tot.n }} город-дней{% if skill.tot.history and skill.tot.live %}, из них вживую {{ skill.tot.live }}{% endif %}</span></div>
+    {% if skill.tot.parent %}<p class="foot" style="margin: -4px 0 12px;">Сигнал у этого кошелька тот же, что у «{{ (wallets | selectattr('key', 'equalto', skill.tot.parent) | first).name }}» — отличается только способ покупки, поэтому и точность та же.</p>{% endif %}
+    {% if sel in ['ml', 'ml2', 'ml3', 'ml_shift'] %}<p class="foot" style="margin: -4px 0 12px;"><a href="/training">Как модель обучается каждую ночь и как сдаёт экзамен →</a></p>{% endif %}
+    {% if not skill.tot.history %}<p class="foot" style="margin: -4px 0 12px;">Проверки на истории у этой модели нет — только настоящие дни с 22.08 (до 23.09 — 6 городов). Выводы по малому числу дней ненадёжны.</p>{% endif %}
+    <div class="skill-kpi">
+      <div class="kpi">
+        <h3>В среднем: кто точнее угадывает температуру</h3>
+        <div class="v">Правильному ответу модель давала <b>{{ '%.1f' | format(skill.tot.pm) }}%</b>, рынок — <b>{{ '%.1f' | format(skill.tot.pk) }}%</b>.</div>
+        <div class="verdict muted">{% set gap = skill.tot.pm - skill.tot.pk %}{% if gap > 3 %}Модель заметно точнее рынка.{% elif gap > 0.5 %}Модель немного точнее рынка.{% elif gap < -3 %}Рынок заметно точнее модели.{% elif gap < -0.5 %}Рынок немного точнее модели.{% else %}Почти одинаково — в среднем модель не точнее рынка.{% endif %}
+          Модель ближе к правде в {{ '%.0f' | format(skill.tot.better) }}% случаев.</div>
+      </div>
+      <div class="kpi">
+        <h3>Там, где модель делает ставку</h3>
+        <div class="v">Из <b>{{ skill.tot.bets }}</b> ставок угадано <b class="{{ 'pos' if skill.tot.won > skill.tot.ek else 'neg' }}">{{ skill.tot.won }}</b>. Рынок ожидал <b>{{ '%.0f' | format(skill.tot.ek) }}</b>, модель обещала <b>{{ '%.0f' | format(skill.tot.em) }}</b>.</div>
+        <div class="verdict muted">{% if skill.tot.won > skill.tot.ek %}Модель выбирает ставки лучше, чем думает рынок (+{{ '%.0f' | format(skill.tot.won - skill.tot.ek) }} угаданных){% else %}Модель не выбирает ставки лучше рынка{% endif %}{% if skill.tot.em > skill.tot.won %}, но переоценивает себя{% endif %}.</div>
+      </div>
+    </div>
+    <div class="skill-charts">
+      <div class="pane chart" data-viz>
+        <h3>Шанс правильному ответу, по неделям</h3>
+        <div class="label"><span class="key s-model"></span>модель <span class="key s-market" style="margin-left: 12px;"></span>рынок <span style="margin-left: 12px;">(выше — лучше)</span></div>
+        {% if skill.acc %}{{ lines(skill.acc, "Шанс правильному ответу: модель и рынок по неделям") }}{% else %}<div class="empty">Мало данных.</div>{% endif %}
+      </div>
+      <div class="pane chart" data-viz>
+        <h3>Угаданные ставки, накопительно</h3>
+        <div class="label"><span class="key s-real"></span>реально <span class="key s-market" style="margin-left: 12px;"></span>ожидал рынок <span class="key s-model" style="margin-left: 12px;"></span>обещала модель</div>
+        {% if skill.bets %}{{ lines(skill.bets, "Угаданные ставки: реально, ожидал рынок, обещала модель") }}{% else %}<div class="empty">Мало данных.</div>{% endif %}
+      </div>
+    </div>
+    <p class="foot">Зелёная линия выше оранжевой — модель находит ставки, которые рынок недооценивает; ниже синей — модель слишком уверена в себе.
+      {% if skill.tot.history %}На истории цена рынка — последняя сделка перед 08:00 (может быть устаревшей), поэтому решает живая часть справа от жёлтой линии. {% endif %}Обновляется каждую ночь.</p>
+  </section>
+  {% endif %}
+
+  {% if not skill and sel == 'obs' %}
+  <section class="sec"><div class="sec-head"><h2>Насколько модель права</h2></div>
+    <p class="foot">Этот кошелёк не прогнозирует погоду — он ставит против вариантов, которые станция уже исключила. Сравнивать с рынком нечего: важно только, успеваем ли купить раньше, чем рынок уберёт цену.</p></section>
+  {% endif %}
+  <!-- 5. Свёрнутое -->
+  <section class="sec">
+    <details class="fold">
+      <summary>Почему не ставили{% if skips %} · {{ skips | length }}{% endif %}</summary>
+      <div class="in">
+        {% if skips %}
+        <ul class="skip-list">
+          {% for t in skips %}<li><b>{{ t.city_ru }}</b> <span class="muted">· {{ t.local_date }} · {{ t.kind }}</span>{% if t.reason %}<div class="muted">{{ t.reason }}</div>{% endif %}</li>{% endfor %}
+        </ul>
+        {% else %}<div class="empty">Пропусков нет.</div>{% endif %}
+      </div>
+    </details>
+  </section>
+  {% endif %}
+
+  {% if not cur %}
+  <!-- Обзор всех кошельков -->
+  {% if main %}
+  <a class="feat" href="?w={{ main.key }}">
+    <div class="feat-l">
+      <span class="tag">главная модель</span>
+      <div class="feat-name">{{ main.name }}</div>
+      <div class="feat-desc">{{ main.desc }}</div>
+      <div class="big"><b class="num">${{ '%.2f' | format(main.balance) }}</b><span>на счёте · итог <b class="num {{ 'pos' if main.pnl > 0.005 else ('neg' if main.pnl < -0.005 else '') }}">{{ money(main.pnl) }}</b></span></div>
+      {% if main.upd %}<div class="upd" title="{{ main.upd.what | capitalize }} · последняя закрытая: {{ main.upd.settled or 'ещё не было' }} · последняя новая: {{ main.upd.bet or 'ещё не было' }}"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span class="num">{{ main.upd.when }}</span></div>{% endif %}
+      <div class="feat-stats">
+        <span>сыграно <b class="num">{{ main.n }}</b>{% if main.n %} · угадано <b class="num">{{ main.winrate }}%</b>{% endif %}{% if main.roi is not none %} · доходность <b class="num {{ 'pos' if main.roi > 0.05 else ('neg' if main.roi < -0.05 else '') }}">{{ '%+.1f' | format(main.roi) }}%</b> от поставленного{% endif %}</span>
+        <span>ждут результата <b class="num">{{ main.open }}</b> · в ставках <b class="num">${{ '%.2f' | format(main.in_play) }}</b></span>
+        {% if main.skill and main.skill.bets %}<span>на истории: угадано <b class="num">{{ main.skill.won }}</b> ставок при ожидании рынка <b class="num">{{ '%.0f' | format(main.skill.ek) }}</b></span>{% endif %}
+      </div>
+    </div>
+    <div class="feat-r">
+      <div class="goal">
+        <h3>До решения о реальных деньгах</h3>
+        <div class="n num">{{ goal.n }} <small>из {{ goal.need }} закрытых ставок</small></div>
+        <div class="meter" role="progressbar" aria-label="Закрытых ставок" aria-valuemin="0" aria-valuemax="{{ goal.need }}" aria-valuenow="{{ goal.n }}"><i style="width: {{ goal.pct }}%"></i></div>
+      </div>
+      <span class="open-btn">Открыть кошелёк →</span>
+    </div>
+  </a>
+  {% endif %}
+
+  {% for g, cs in groups %}
+  {% set n = cs | length %}
+  <section class="grp-box{{ ' first' if loop.first else '' }}" aria-labelledby="grp-{{ loop.index }}">
+  <div class="grp"><h2 id="grp-{{ loop.index }}">{{ g }}</h2><span class="cnt num">{{ n }} {{ 'кошелёк' if n % 10 == 1 and n % 100 != 11 else ('кошелька' if n % 10 in [2, 3, 4] and n % 100 not in [12, 13, 14] else 'кошельков') }}</span></div>
+  <div class="wal-grid">
+    {% for c in cs %}
+    <a class="wal" href="?w={{ c.key }}">
+      <div class="wal-top"><span class="wal-name">{{ c.name }}</span><span class="wal-bal">${{ '%.2f' | format(c.balance) }}</span></div>
+      <div class="wal-desc">{{ c.desc }}</div>
+      <div class="wal-mid">
+        {% if c.spark %}<svg class="spark" viewBox="0 0 {{ c.spark.w }} {{ c.spark.h }}" preserveAspectRatio="none" aria-hidden="true"><line x1="0" x2="{{ c.spark.w }}" y1="{{ c.spark.base }}" y2="{{ c.spark.base }}"/><path pathLength="1" class="{{ 'up' if c.spark.up else 'down' }}" d="{{ c.spark.path }}"/><circle class="{{ 'up' if c.spark.up else 'down' }}" cx="{{ c.spark.end[0] }}" cy="{{ c.spark.end[1] }}" r="3"/></svg>
+        {% else %}<span class="nospark">итогов ещё нет</span>{% endif %}
+        <span class="wal-pnl num {{ 'pos' if c.pnl > 0.005 else ('neg' if c.pnl < -0.005 else '') }}">{{ money(c.pnl) }}</span>
+      </div>
+      <div class="wal-meta">сыграно <b>{{ c.n }}</b>{% if c.n %} · угадано <b>{{ c.winrate }}%</b>{% endif %}{% if c.open %} · ждут <b>{{ c.open }}</b>{% endif %}</div>
+      {% if c.roi is not none %}<div class="wal-meta" title="Итог в процентах от всех денег, поставленных в закрытые ставки (с комиссией)">доходность <b class="{{ 'pos' if c.roi > 0.05 else ('neg' if c.roi < -0.05 else '') }}">{{ '%+.1f' | format(c.roi) }}%</b> от поставленного{% if c.start != 100 %} · старт ${{ '%.0f' | format(c.start) }}{% endif %}</div>
+      {% elif c.start != 100 %}<div class="wal-meta">старт <b>${{ '%.0f' | format(c.start) }}</b></div>{% endif %}
+      {% if c.skill and c.skill.bets and not c.skill.parent %}<div class="wal-skill">ставки: угадано <b>{{ c.skill.won }}</b>, рынок ждал <b>{{ '%.0f' | format(c.skill.ek) }}</b> <span class="{{ 'pos' if c.skill.won > c.skill.ek else 'neg' }}">{{ '▲' if c.skill.won > c.skill.ek else '▼' }} {{ 'лучше' if c.skill.won > c.skill.ek else 'хуже' }} рынка</span></div>{% endif %}
+      {% if c.upd %}<div class="upd corner" title="{{ c.upd.what | capitalize }} · последняя закрытая: {{ c.upd.settled or 'ещё не было' }} · последняя новая: {{ c.upd.bet or 'ещё не было' }}"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span class="num">{{ c.upd.when }}</span></div>{% endif %}
+    </a>
+    {% endfor %}
+  </div>
+  </section>
+  {% endfor %}
+  <section class="sec" style="margin-top: 36px;">
+    <details class="fold">
+      <summary>Как это работает</summary>
+      <div class="in">
+        <ol class="how">
+          <li><b>Прогноз</b>Утром (08:00–12:00 по местному) модель оценивает шанс каждого варианта максимальной температуры в городе.</li>
+          <li><b>Ставка</b>Только если модель выше цены рынка минимум на 10 п.п., цена 3–95¢. Раз в день на город, $2.</li>
+          <li><b>Покупка как настоящая</b>Живой стакан Polymarket, задержка 2 с, минимум 5 долей, комиссия 5% × p × (1−p).</li>
+          <li><b>Итог</b>По официальному закрытию маркета (замеры аэропорта METAR): угадали — $1 за долю, нет — ставка сгорает.</li>
+        </ol>
+        <div class="note">Правила записаны до результатов и не подгоняются. Реальные деньги — только решением Alex после {{ goal.need }} закрытых ставок главной модели.</div>
+      </div>
+    </details>
+  </section>
+  {% endif %}
+</div>
+
+<script>
+/* подсказки графика баланса: наведение и фокус с клавиатуры; данные — через textContent */
+document.querySelectorAll('[data-viz]').forEach(function (card) {
+  var svg = card.querySelector('svg.viz'); if (!svg) return;
+  var tip = document.createElement('div'); tip.className = 'viz-tip'; card.appendChild(tip);
+  var cross = svg.querySelector('.cross');
+  function show(el) {
+    tip.textContent = '';
+    var b = document.createElement('b'); b.textContent = el.dataset.tipVal; tip.appendChild(b);
+    tip.appendChild(document.createTextNode(el.dataset.tipTitle + (el.dataset.tipSub ? ' · ' + el.dataset.tipSub : '')));
+    var vb = svg.viewBox.baseVal, r = svg.getBoundingClientRect(), c = card.getBoundingClientRect();
+    var x = r.left - c.left + (+el.dataset.tipX) * r.width / vb.width;
+    var y = r.top - c.top + (+el.getAttribute('y')) * r.height / vb.height;
+    tip.style.opacity = 1;
+    tip.style.left = Math.max(8, Math.min(x - tip.offsetWidth / 2, c.width - tip.offsetWidth - 8)) + 'px';
+    tip.style.top = Math.max(0, y - tip.offsetHeight - 8) + 'px';
+    if (cross) { cross.setAttribute('x1', el.dataset.tipX); cross.setAttribute('x2', el.dataset.tipX); cross.style.opacity = .6; }
+  }
+  function hide() { tip.style.opacity = 0; if (cross) cross.style.opacity = 0; }
+  svg.querySelectorAll('.hit').forEach(function (el) {
+    el.addEventListener('pointerenter', function () { show(el); });
+    el.addEventListener('focus', function () { show(el); });
+    el.addEventListener('pointerleave', hide); el.addEventListener('blur', hide);
+  });
+});
+
+/* 2026-09-27: «живая» страница — блоки появляются по очереди, суммы «набегают» от нуля */
+(function () {
+  if (!window.matchMedia || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  var i = 0;
+  document.querySelectorAll('.bk .feat, .bk .grp-box > .grp, .bk a.wal, .bk .sec > .pane, .bk .hist > .pane, .bk .sec > div > .pane').forEach(function (el) {
+    el.classList.add('rise'); el.style.setProperty('--i', Math.min(i++, 20));
+  });
+  var re = /^([+\u2212-]?)\$([\d,]+\.\d{2})$/;
+  document.querySelectorAll('.bk .wal-bal, .bk .wal-pnl, .bk .big b').forEach(function (el) {
+    var m = el.textContent.trim().match(re); if (!m) return;
+    var target = parseFloat(m[2].replace(/,/g, '')), sign = m[1], t0 = null, dur = 900;
+    if (!target) return;
+    function frame(t) {
+      if (t0 === null) t0 = t;
+      var k = Math.min((t - t0) / dur, 1), e = 1 - Math.pow(1 - k, 3);
+      el.textContent = sign + '$' + (target * e).toFixed(2);
+      if (k < 1) requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+  });
+})();
+</script>
+{% endblock %}

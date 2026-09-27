@@ -20,13 +20,16 @@ import os
 import re
 import sqlite3
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import requests
 
+from weather_cities import OBS_CITIES
 from weather_bias import compute_city_bias, compute_emos_params
+from weather_multimodel import ensure_schema as ensure_mm_schema, live_bucket_probs
 
 # Локально (без Docker) — файл рядом с проектом. В контейнере путь
 # приходит через переменную окружения (см. docker-compose.yml), чтобы не
@@ -45,17 +48,22 @@ DB_PATH = Path(os.environ.get("POLY_LAB_DB", Path(__file__).parent.parent / "dat
 # tz — таймзона для расчёта "сегодняшнего" дневного максимума (по времени
 # города, не станции — они в одном поясе везде здесь), poly_slug —
 # сегмент URL Polymarket (highest-temperature-in-{poly_slug}-on-{month}-{day}-{year}).
+# 2026-09-22: Азия (Токио, Сеул, Гонконг, Пекин) отключена по решению
+# Alex — по официальным исходам Polymarket модель там проигрывала рынку
+# сильнее всего (11-32% против 22-57%). Взамен — Мадрид и Торонто: лучше
+# меньше городов, но глубже данные по каждому. Старые азиатские снимки
+# в sqlite остаются. Координаты — точные координаты самой метеостанции
+# (aviationweather.gov stationinfo), а не аэропорта в целом.
+# 2026-09-23: Пекин возвращён (решение Alex) — Азию отключали по цифрам,
+# посчитанным ещё по неправильному "факту"; на реальных показаниях
+# станции EMOS в Пекине угадывает 56% против 39% у рынка (16 дней),
+# бэктест +$122 на 9 ставках — мало, проверяем на живых ставках.
+# 2026-09-23: все 26 городов из weather_cities.OBS_CITIES (решение Alex —
+# больше городов = быстрее статистика по виртуальным кошелькам).
+# Координаты — точные координаты станций.
 CITIES = {
-    # unit — единица, в которой Polymarket задаёт бакеты ДЛЯ ЭТОГО города:
-    # US-города — Fahrenheit с шагом 2°, остальные — Celsius с шагом 1°.
-    # Ансамбль запрашиваем сразу в той же единице, чтобы не путать конвертацию.
-    "nyc":       {"lat": 40.7769, "lon": -73.8740, "tz": "America/New_York", "poly_slug": "nyc",      "unit": "fahrenheit"},  # LaGuardia (KLGA)
-    "paris":     {"lat": 48.9694, "lon": 2.4414,   "tz": "Europe/Paris",     "poly_slug": "paris",    "unit": "celsius"},     # Paris-Le Bourget (LFPB)
-    "london":    {"lat": 51.5048, "lon": 0.0495,   "tz": "Europe/London",    "poly_slug": "london",   "unit": "celsius"},     # London City Airport (EGLC)
-    "tokyo":     {"lat": 35.5494, "lon": 139.7798, "tz": "Asia/Tokyo",       "poly_slug": "tokyo",    "unit": "celsius"},     # Haneda (RJTT)
-    "seoul":     {"lat": 37.4602, "lon": 126.4407, "tz": "Asia/Seoul",       "poly_slug": "seoul",    "unit": "celsius"},     # Incheon Intl (RKSI)
-    "hong_kong": {"lat": 22.3020, "lon": 114.1740, "tz": "Asia/Hong_Kong",   "poly_slug": "hong-kong", "unit": "celsius"},    # Hong Kong Observatory
-    "beijing":   {"lat": 40.0799, "lon": 116.6031, "tz": "Asia/Shanghai",    "poly_slug": "beijing",  "unit": "celsius"},     # Beijing Capital Intl (ZBAA)
+    k: {"lat": c["lat"], "lon": c["lon"], "tz": c["tz"], "poly_slug": c["poly_slug"], "unit": c["unit"]}
+    for k, c in OBS_CITIES.items()
 }
 
 GAMMA = "https://gamma-api.polymarket.com"
@@ -81,6 +89,16 @@ ENSEMBLE_MODELS = ["gfs_seamless", "icon_seamless"]
 # не тронутое сравнение с рынком, которое можно смотреть параллельно с
 # основным прогнозом на /calibration и решить позже, стоит ли сливать.
 WEATHERNEXT2_MODEL = "google_weathernext2_ensemble"
+# 2026-09-23: при 48 городах упёрлись в бесплатный лимит Open-Meteo
+# (ансамбль считается как много запросов: каждые ~10 членов = 1 вызов;
+# у WeatherNext 2 64 члена — самый тяжёлый, и при этом самый слабый,
+# ~10% попаданий). WN2 оставлен только на исходных 6 городах — это
+# отдельное исследование, на кошельки не влияет.
+WN2_CITIES = {"nyc", "toronto", "london", "paris", "madrid", "beijing"}
+# Пауза между городами — размазать ~48 городов по паре минут, чтобы не
+# упираться в минутный лимит Open-Meteo.
+CITY_PAUSE_S = 1.5
+OPEN_METEO_RETRY_S = 30
 
 # Та же отметка, что WEATHER_COORD_FIX_TS в dashboard.py: данные до фикса
 # координат сравнивали модель не с той точкой на карте, для расчёта
@@ -105,19 +123,20 @@ def month_day_year_slug(dt_local):
 def fetch_ensemble_daily_max(lat, lon, tz_name, unit, model):
     """Все члены + контроль одной модели ансамбля -> список дневных
     максимумов на СЕГОДНЯ по местному времени."""
-    r = requests.get(
-        OPEN_METEO_ENSEMBLE,
-        params={
-            "latitude": lat,
-            "longitude": lon,
-            "models": model,
-            "hourly": "temperature_2m",
-            "temperature_unit": unit,
-            "timezone": tz_name,
-            "forecast_days": 2,
-        },
-        timeout=20,
-    )
+    params = {
+        "latitude": lat,
+        "longitude": lon,
+        "models": model,
+        "hourly": "temperature_2m",
+        "temperature_unit": unit,
+        "timezone": tz_name,
+        "forecast_days": 2,
+    }
+    r = requests.get(OPEN_METEO_ENSEMBLE, params=params, timeout=20)
+    if r.status_code == 429:
+        # минутный лимит Open-Meteo — одна повторная попытка после паузы
+        time.sleep(OPEN_METEO_RETRY_S)
+        r = requests.get(OPEN_METEO_ENSEMBLE, params=params, timeout=20)
     r.raise_for_status()
     data = r.json()["hourly"]
     tz = ZoneInfo(tz_name)
@@ -172,7 +191,12 @@ def fetch_polymarket_buckets(poly_slug, dt_local):
         prices = json.loads(m["outcomePrices"])
         outcomes = json.loads(m["outcomes"])
         yes_price = float(prices[outcomes.index("Yes")])
-        buckets.append({"lo": rng[0], "hi": rng[1], "market_p": yes_price, "question": m["question"]})
+        # bestAsk — цена, по которой реально можно купить Yes прямо сейчас
+        # (outcomePrices — середина/последняя сделка). Нужна виртуальному
+        # портфелю (weather_paper.py), чтобы не покупать дешевле, чем дал бы рынок.
+        best_ask = m.get("bestAsk")
+        buckets.append({"lo": rng[0], "hi": rng[1], "market_p": yes_price, "question": m["question"],
+                        "best_ask": float(best_ask) if best_ask not in (None, "") else None})
     return {"event_vol": events[0].get("volume", 0), "buckets": buckets}
 
 
@@ -246,14 +270,41 @@ def ensure_schema(conn):
     if "emos_model_p" not in cols:
         conn.execute("ALTER TABLE snapshots ADD COLUMN emos_model_p REAL")
         conn.execute("ALTER TABLE snapshots ADD COLUMN emos_edge REAL")
+    if "best_ask" not in cols:
+        conn.execute("ALTER TABLE snapshots ADD COLUMN best_ask REAL")
+    if "ml_model_p" not in cols:
+        # 2026-09-25: обучаемая модель (weather_ml_live.py), с 08:00 до 12:00 местного
+        conn.execute("ALTER TABLE snapshots ADD COLUMN ml_model_p REAL")
+        conn.execute("ALTER TABLE snapshots ADD COLUMN ml_edge REAL")
+    if "ml2_model_p" not in cols:
+        # 2026-09-25: обучаемая модель v2 — распределение (weather_ml_q.py)
+        conn.execute("ALTER TABLE snapshots ADD COLUMN ml2_model_p REAL")
+        conn.execute("ALTER TABLE snapshots ADD COLUMN ml2_edge REAL")
+    if "ml3_model_p" not in cols:
+        # 2026-09-25: обучаемая модель v3 = v2 + мнение рынка в 08:00
+        conn.execute("ALTER TABLE snapshots ADD COLUMN ml3_model_p REAL")
+        conn.execute("ALTER TABLE snapshots ADD COLUMN ml3_edge REAL")
+    if "ml4_model_p" not in cols:
+        # 2026-09-26: v4 (v3 с 31 листом) и её смесь с рынком — кошельки ml4 / ml4_cal
+        for c in ("ml4_model_p", "ml4_edge", "ml4c_model_p", "ml4c_edge"):
+            conn.execute(f"ALTER TABLE snapshots ADD COLUMN {c} REAL")
+    if "ml4e_model_p" not in cols:
+        # 2026-09-27: v4e (v4, среднее 3 обучений) и её смесь с рынком — кошельки ml4e / ml4e_cal
+        for c in ("ml4e_model_p", "ml4e_edge", "ml4ec_model_p", "ml4ec_edge"):
+            conn.execute(f"ALTER TABLE snapshots ADD COLUMN {c} REAL")
+    if "ml3c_model_p" not in cols:
+        # 2026-09-26: смесь главной модели с рынком (weather_ml_live.ML3_BLEND_W) — кошелёк ml3_cal
+        conn.execute("ALTER TABLE snapshots ADD COLUMN ml3c_model_p REAL")
+        conn.execute("ALTER TABLE snapshots ADD COLUMN ml3c_edge REAL")
     conn.commit()
 
 
 def run():
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=60)
     conn.row_factory = sqlite3.Row
     ensure_schema(conn)
+    ensure_mm_schema(conn)
     now = datetime.now(timezone.utc)
 
     city_bias = compute_city_bias(conn, BIAS_SINCE_TS)
@@ -261,10 +312,23 @@ def run():
         print(f"{city}: поправка на историческое смещение {bias:+.2f}")
 
     emos_params = compute_emos_params(conn, BIAS_SINCE_TS)
+
+    # Свежие METAR всех станций одним запросом — утренние замеры для
+    # обучаемой модели (архив Iowa Mesonet для утра ещё не готов).
+    metars_by_icao = {}
+    try:
+        icaos = ",".join(c["icao"] for c in OBS_CITIES.values())
+        for m in requests.get("https://aviationweather.gov/api/data/metar",
+                              params={"ids": icaos, "hours": 36, "format": "json"}, timeout=30).json():
+            metars_by_icao.setdefault(m["icaoId"], []).append(m)
+    except (requests.RequestException, ValueError) as e:
+        print(f"METAR для обучаемой модели недоступны — {e}", file=sys.stderr)
     for city, p in emos_params.items():
         print(f"{city}: EMOS a={p['a']:.2f} b={p['b']:.2f} spread_scale={p['spread_scale']:.2f} (n={p['n']})")
 
-    for city, cfg in CITIES.items():
+    for i_city, (city, cfg) in enumerate(CITIES.items()):
+        if i_city:
+            time.sleep(CITY_PAUSE_S)
         tz = ZoneInfo(cfg["tz"])
         today_local = datetime.now(tz)
         bias = city_bias.get(city, 0.0)
@@ -279,11 +343,12 @@ def run():
         if not any(ensembles.values()):
             continue
 
-        try:
-            wn2_ensemble = fetch_ensemble_daily_max(cfg["lat"], cfg["lon"], cfg["tz"], cfg["unit"], WEATHERNEXT2_MODEL)
-        except requests.RequestException as e:
-            print(f"{city}: ошибка запроса (WeatherNext 2) — {e}", file=sys.stderr)
-            wn2_ensemble = []
+        wn2_ensemble = []
+        if city in WN2_CITIES:
+            try:
+                wn2_ensemble = fetch_ensemble_daily_max(cfg["lat"], cfg["lon"], cfg["tz"], cfg["unit"], WEATHERNEXT2_MODEL)
+            except requests.RequestException as e:
+                print(f"{city}: ошибка запроса (WeatherNext 2) — {e}", file=sys.stderr)
 
         try:
             market = fetch_polymarket_buckets(cfg["poly_slug"], today_local)
@@ -298,6 +363,37 @@ def run():
         # Пул сырых членов GFS+ICON — вход для EMOS (см. weather_bias.py).
         # Пулим оба источника вместе: EMOS-регрессия обучена на такой же
         # пуле (compute_ensemble_moments восстанавливает его из истории).
+        # Микс ~16 моделей с весами по городу — отдельный трек (mm_*),
+        # см. weather_multimodel.py. Ошибка сети здесь не должна ломать
+        # основной снимок.
+        mm_probs = None
+        try:
+            mm = live_bucket_probs(conn, city, cfg, market["buckets"])
+            if mm is not None:
+                mm_probs, mm_mu, _ = mm
+                print(f"{city}: микс моделей — прогноз максимума {mm_mu:.1f}")
+        except requests.RequestException as e:
+            print(f"{city}: ошибка запроса (микс моделей) — {e}", file=sys.stderr)
+
+        ml_probs = ml2_probs = ml3_probs = ml3c_probs = ml4_probs = ml4c_probs = ml4e_probs = ml4ec_probs = None
+        try:
+            from weather_ml_live import bucket_probs as ml_bucket_probs
+            ml_res = ml_bucket_probs(conn, city, cfg, market["buckets"],
+                                     metars_by_icao.get(OBS_CITIES[city]["icao"], []))
+            if ml_res is not None:
+                ml_probs, ml_mu, ml2_probs, ml3_probs, ml4_probs, ml4e_probs = ml_res
+                ml3c_probs = ml4c_probs = None
+                from weather_ml_live import blend_with_market
+                if ml3_probs:
+                    ml3c_probs = blend_with_market(ml3_probs, [b["market_p"] for b in market["buckets"]])
+                if ml4_probs:
+                    ml4c_probs = blend_with_market(ml4_probs, [b["market_p"] for b in market["buckets"]])
+                if ml4e_probs:
+                    ml4ec_probs = blend_with_market(ml4e_probs, [b["market_p"] for b in market["buckets"]])
+                print(f"{city}: обучаемая модель — прогноз максимума {ml_mu:.1f}")
+        except Exception as e:  # отдельный трек: его ошибка не должна ломать снимок
+            print(f"{city}: ошибка обучаемой модели — {e}", file=sys.stderr)
+
         pooled = [v for members in ensembles.values() for v in members]
         emos_mean = emos_std = None
         if emos is not None and pooled:
@@ -307,7 +403,7 @@ def run():
             emos_std = emos["spread_scale"] * (raw_var ** 0.5)
 
         rows = []
-        for b in market["buckets"]:
+        for i_b, b in enumerate(market["buckets"]):
             mp, ensemble_n = blended_model_prob(ensembles, b["lo"], b["hi"], bias)
             if mp is None:
                 continue
@@ -344,14 +440,34 @@ def run():
                     wn2_n,
                     emos_mp,
                     emos_edge,
+                    b["best_ask"],
+                    mm_probs[i_b] if mm_probs else None,
+                    (mm_probs[i_b] - b["market_p"]) if mm_probs else None,
+                    ml_probs[i_b] if ml_probs else None,
+                    (ml_probs[i_b] - b["market_p"]) if ml_probs else None,
+                    ml2_probs[i_b] if ml2_probs else None,
+                    (ml2_probs[i_b] - b["market_p"]) if ml2_probs else None,
+                    ml3_probs[i_b] if ml3_probs else None,
+                    (ml3_probs[i_b] - b["market_p"]) if ml3_probs else None,
+                    ml3c_probs[i_b] if ml3c_probs else None,
+                    (ml3c_probs[i_b] - b["market_p"]) if ml3c_probs else None,
+                    ml4_probs[i_b] if ml4_probs else None,
+                    (ml4_probs[i_b] - b["market_p"]) if ml4_probs else None,
+                    ml4c_probs[i_b] if ml4c_probs else None,
+                    (ml4c_probs[i_b] - b["market_p"]) if ml4c_probs else None,
+                    ml4e_probs[i_b] if ml4e_probs else None,
+                    (ml4e_probs[i_b] - b["market_p"]) if ml4e_probs else None,
+                    ml4ec_probs[i_b] if ml4ec_probs else None,
+                    (ml4ec_probs[i_b] - b["market_p"]) if ml4ec_probs else None,
                 )
             )
         conn.executemany(
             """
             INSERT INTO snapshots
             (ts_utc, city, local_date, local_hour, unit, bucket_lo, bucket_hi, market_p, model_p, edge, event_vol, ensemble_n,
-             wn2_model_p, wn2_edge, wn2_ensemble_n, emos_model_p, emos_edge)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             wn2_model_p, wn2_edge, wn2_ensemble_n, emos_model_p, emos_edge, best_ask, mm_model_p, mm_edge, ml_model_p, ml_edge, ml2_model_p, ml2_edge, ml3_model_p, ml3_edge, ml3c_model_p, ml3c_edge, ml4_model_p, ml4_edge, ml4c_model_p, ml4c_edge,
+             ml4e_model_p, ml4e_edge, ml4ec_model_p, ml4ec_edge)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             rows,
         )
@@ -373,6 +489,8 @@ def run():
             print(f"{city} EMOS: макс |edge|={emos_best[16]:+.3f} "
                   f"в бакете {emos_best[5]}-{emos_best[6]}{unit_sym} (модель={emos_best[15]:.2f}, рынок={emos_best[7]:.2f})")
 
+    from jobmark import mark
+    mark(conn, "weather_edge")
     conn.close()
 
 

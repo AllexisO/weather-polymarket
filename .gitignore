@@ -1,5 +1,6 @@
 __pycache__/
 *.pyc
-data/db/*.sqlite3
-data/logs/*.log
 .env
+# данные: база, копия для исследований, модели, логи, флаги STOP/ALERT — только на сервере
+data/
+.claude/

@@ -16,7 +16,7 @@ def compute_city_bias(conn, since_ts):
     в нативных для города единицах}, только для городов, где накопилось
     хотя бы MIN_BIAS_N резолвленных дней."""
     has_outcomes = conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='weather_outcomes'"
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='weather_station_daily'"
     ).fetchone()
     if not has_outcomes:
         return {}
@@ -25,7 +25,7 @@ def compute_city_bias(conn, since_ts):
         """
         SELECT s.ts_utc, s.city, s.local_date, s.bucket_lo, s.bucket_hi, s.model_p, o.actual_max
         FROM snapshots s
-        JOIN weather_outcomes o ON s.city = o.city AND s.local_date = o.local_date
+        JOIN weather_station_daily o ON s.city = o.city AND s.local_date = o.local_date
         WHERE s.ts_utc >= ? AND s.local_hour < 12
         ORDER BY s.city, s.local_date, s.ts_utc
         """,
@@ -119,7 +119,7 @@ def compute_emos_params(conn, since_ts, min_n=MIN_EMOS_N):
     MIN_BIAS_N, потому что EMOS оценивает всего 3 параметра (a, b,
     spread_scale), а не сложную форму распределения."""
     has_outcomes = conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='weather_outcomes'"
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='weather_station_daily'"
     ).fetchone()
     if not has_outcomes:
         return {}
@@ -128,7 +128,7 @@ def compute_emos_params(conn, since_ts, min_n=MIN_EMOS_N):
         """
         SELECT s.ts_utc, s.city, s.local_date, s.bucket_lo, s.bucket_hi, s.model_p, o.actual_max
         FROM snapshots s
-        JOIN weather_outcomes o ON s.city = o.city AND s.local_date = o.local_date
+        JOIN weather_station_daily o ON s.city = o.city AND s.local_date = o.local_date
         WHERE s.ts_utc >= ? AND s.local_hour < 12
         ORDER BY s.city, s.local_date, s.ts_utc
         """,

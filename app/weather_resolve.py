@@ -76,7 +76,7 @@ def ensure_schema(conn):
 
 def run():
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=60)
     conn.row_factory = sqlite3.Row
     ensure_schema(conn)
     now = datetime.now().astimezone()

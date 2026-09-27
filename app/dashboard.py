@@ -7,11 +7,17 @@ gold-sim (8090-8092).
 import json
 import os
 import sqlite3
+import time
 from pathlib import Path
+
+from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
+
+from wallet_docs import WALLET_DOCS
 
 DB_PATH = Path(os.environ.get("POLY_LAB_DB", Path(__file__).parent.parent / "data" / "db" / "polymarket_lab.sqlite3"))
 TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
@@ -24,7 +30,7 @@ TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 # но из sqlite не удаляем — это свидетельство самого бага, не мусор.
 WEATHER_COORD_FIX_TS = "2026-08-25T19:58:27+00:00"
 
-app = FastAPI(title="polymarket-lab dashboard")
+app = FastAPI(title="weather-lab dashboard")
 
 
 def db():
@@ -84,7 +90,7 @@ def index(request: Request):
             }
         )
     weather_results = []
-    if table_exists(conn, "weather_outcomes"):
+    if table_exists(conn, "weather_station_daily"):
         weather_results = compute_weather_results(conn)
 
     conn.close()
@@ -232,242 +238,6 @@ def compute_weather_bias(rows):
     }
 
 
-def compute_market_gap_stats(conn, table):
-    # Для kalshi_snapshots/esports_snapshots резолвера фактов пока нет —
-    # это фаза диагностики (см. CLAUDE.md): просто смотрим, насколько
-    # большие расхождения между двумя рынками бывают и как часто, а не
-    # "кто оказался прав". "Заметным" считаем расхождение от 3 п.п.
-    rows = conn.execute(f"SELECT edge FROM {table}").fetchall()  # nosec: table — литерал, не ввод пользователя
-    if not rows:
-        return None
-    edges = [abs(r["edge"]) for r in rows]
-    n = len(edges)
-    notable = sum(1 for e in edges if e >= 0.03)
-    return {
-        "n": n,
-        "avg_abs_edge": sum(edges) / n,
-        "max_abs_edge": max(edges),
-        "notable_n": notable,
-        "notable_share": notable / n,
-    }
-
-
-def compute_sports_calibration(rows):
-    # 2026-09-18: тот же класс бага, что уже чинили в погоде
-    # (_one_snapshot_per_day, см. CLAUDE.md, "Баг с задвоенным n") —
-    # группировка по (матч, ts_utc) считала КАЖДЫЙ снимок матча отдельным
-    # случаем. Футбол собирается 2 раза в день, киберспорт — раз в 2 дня;
-    # матч, который ещё не начался к следующему прогону, снимается снова —
-    # почти не изменившаяся линия Pinnacle/рынка считалась отдельным
-    # "случаем" до 14 раз на одном и том же матче. Обнаружено при добавлении
-    # esports_resolve.py, задним числом раздувало и футбольную калибровку
-    # (159 уникальных матчей вместо якобы 480 "случаев"). Берём только
-    # САМЫЙ ПОЗДНИЙ снимок перед матчем на матч — так же, как уже делает
-    # compute_sports_results.
-    by_match = {}
-    for r in rows:
-        key = (r["home_team"], r["away_team"], r["commence_time"])
-        by_match.setdefault(key, []).append(r)
-
-    n = 0
-    pinnacle_hits = 0
-    market_hits = 0
-    for match_rows in by_match.values():
-        last_ts = max(r["ts_utc"] for r in match_rows)
-        grp = [r for r in match_rows if r["ts_utc"] == last_ts]
-        actual = grp[0]["actual_outcome"]
-        market_pick = max(grp, key=lambda r: r["market_p"])
-        pinnacle_pick = max(grp, key=lambda r: r["pinnacle_p"])
-        n += 1
-        if market_pick["outcome"] == actual:
-            market_hits += 1
-        if pinnacle_pick["outcome"] == actual:
-            pinnacle_hits += 1
-    return {
-        "n": n,
-        "pinnacle_hit_rate": pinnacle_hits / n if n else None,
-        "market_hit_rate": market_hits / n if n else None,
-    }
-
-
-def compute_news_validation(conn):
-    # Пункт 2 из разговора с Alex: не "опередила ли новость рынок по
-    # времени" (это отдельная, более сложная проверка — пункт 1), а проще —
-    # "была ли новость вообще права по сути". Берём последний по времени
-    # сигнал на каждую пару (команда, матч) — чтобы не считать один и тот
-    # же найденный факт несколько раз просто потому, что новостной сборщик
-    # находил его снова каждый день. Сравниваем факт (выиграла команда или
-    # нет) с вероятностью, которую в неё закладывали Pinnacle/рынок В
-    # ПОСЛЕДНЕМ снимке перед матчем — если "ослабляет" команды систематически
-    # выигрывают реже, чем в них верили, сигнал что-то ловит по делу.
-    rows = conn.execute(
-        """
-        SELECT n.ts_utc, n.home_team, n.away_team, n.commence_time, n.team, n.side, n.changes,
-               o.actual_outcome
-        FROM sports_news_signal n
-        JOIN sports_outcomes o
-          ON n.home_team = o.home_team AND n.away_team = o.away_team AND n.commence_time = o.commence_time
-        WHERE n.severity != 'none'
-        ORDER BY n.ts_utc
-        """
-    ).fetchall()
-
-    latest = {}
-    for r in rows:
-        key = (r["home_team"], r["away_team"], r["commence_time"], r["team"])
-        latest[key] = r  # строки идут по возрастанию ts_utc — последняя запись побеждает
-
-    buckets = {"weakens": [], "strengthens": []}
-    skipped_mixed = 0
-    for (home_team, away_team, commence_time, team), r in latest.items():
-        try:
-            changes = json.loads(r["changes"]) if r["changes"] else []
-        except (json.JSONDecodeError, TypeError):
-            changes = []
-        effects = {c.get("effect") for c in changes if c.get("effect") in ("weakens", "strengthens")}
-        if len(effects) != 1:
-            skipped_mixed += 1
-            continue
-        net_effect = next(iter(effects))
-
-        snap = conn.execute(
-            """
-            SELECT market_p, pinnacle_p FROM sports_snapshots
-            WHERE home_team = ? AND away_team = ? AND commence_time = ? AND outcome = ?
-            ORDER BY ts_utc DESC LIMIT 1
-            """,
-            (home_team, away_team, commence_time, r["side"]),
-        ).fetchone()
-        if snap is None:
-            continue
-
-        actual_win = 1 if r["actual_outcome"] == r["side"] else 0
-        buckets[net_effect].append(
-            {
-                "team": team,
-                "home_team": home_team,
-                "away_team": away_team,
-                "actual_win": actual_win,
-                "market_p": snap["market_p"],
-                "pinnacle_p": snap["pinnacle_p"],
-                "ts_utc": r["ts_utc"],
-            }
-        )
-
-    def summarize(items):
-        n = len(items)
-        if n == 0:
-            return {"n": 0, "avg_actual_win_rate": None, "avg_market_p": None, "diff_market": None, "items": []}
-        avg_actual = sum(i["actual_win"] for i in items) / n
-        avg_market = sum(i["market_p"] for i in items) / n
-        return {
-            "n": n,
-            "avg_actual_win_rate": avg_actual,
-            "avg_market_p": avg_market,
-            "diff_market": avg_actual - avg_market,
-            "items": items,
-        }
-
-    # combined_score: и для "ослабляет", и для "усиливает" — положительное
-    # число значит "сигнал подтвердился" (у ослабленных факт хуже рынка,
-    # у усиленных — лучше). Знак у "ослабляет" переворачиваем, чтобы обе
-    # категории читались в одну сторону на одной шкале.
-    combined = [-(i["actual_win"] - i["market_p"]) for i in buckets["weakens"]]
-    combined += [(i["actual_win"] - i["market_p"]) for i in buckets["strengthens"]]
-
-    return {
-        "weakens": summarize(buckets["weakens"]),
-        "strengthens": summarize(buckets["strengthens"]),
-        "skipped_mixed": skipped_mixed,
-        "combined_n": len(combined),
-        "combined_score": sum(combined) / len(combined) if combined else None,
-    }
-
-
-def compute_news_timing(conn):
-    # Пункт 1: опередила ли новость движение цены рынка, а не только "была
-    # ли она в целом права" (это пункт 2 выше). Берём САМЫЙ РАННИЙ момент,
-    # когда мы поймали конкретный сигнал (team+match+направление), и
-    # сравниваем цену этой команды в последнем снимке ДО этого момента и в
-    # первом снимке ПОСЛЕ. Если цена сдвинулась в сторону, которую
-    # предсказывал сигнал, именно между этими двумя снимками — значит,
-    # движение (если оно вообще было) случилось уже после того, как мы
-    # заметили новость, а не до. Разрешение грубое (снимки цены — 2 раза
-    # в день, сигнал — 1 раз в день), точнее сейчас всё равно не измерить.
-    rows = conn.execute(
-        """
-        SELECT n.ts_utc, n.home_team, n.away_team, n.commence_time, n.team, n.side, n.changes
-        FROM sports_news_signal n
-        WHERE n.severity != 'none'
-        ORDER BY n.ts_utc
-        """
-    ).fetchall()
-
-    earliest = {}
-    for r in rows:
-        try:
-            changes = json.loads(r["changes"]) if r["changes"] else []
-        except (json.JSONDecodeError, TypeError):
-            changes = []
-        effects = {c.get("effect") for c in changes if c.get("effect") in ("weakens", "strengthens")}
-        if len(effects) != 1:
-            continue
-        net_effect = next(iter(effects))
-        key = (r["home_team"], r["away_team"], r["commence_time"], r["team"], r["side"], net_effect)
-        earliest.setdefault(key, r["ts_utc"])  # первая по возрастанию ts_utc запись побеждает
-
-    buckets = {"weakens": [], "strengthens": []}
-    for (home_team, away_team, commence_time, team, side, net_effect), t_signal in earliest.items():
-        before = conn.execute(
-            """
-            SELECT market_p FROM sports_snapshots
-            WHERE home_team = ? AND away_team = ? AND commence_time = ? AND outcome = ? AND ts_utc < ?
-            ORDER BY ts_utc DESC LIMIT 1
-            """,
-            (home_team, away_team, commence_time, side, t_signal),
-        ).fetchone()
-        after = conn.execute(
-            """
-            SELECT market_p FROM sports_snapshots
-            WHERE home_team = ? AND away_team = ? AND commence_time = ? AND outcome = ? AND ts_utc > ?
-            ORDER BY ts_utc ASC LIMIT 1
-            """,
-            (home_team, away_team, commence_time, side, t_signal),
-        ).fetchone()
-        if before is None or after is None:
-            continue
-        buckets[net_effect].append(after["market_p"] - before["market_p"])
-
-    def summarize(moves):
-        n = len(moves)
-        if n == 0:
-            return {"n": 0, "avg_move": None}
-        return {"n": n, "avg_move": sum(moves) / n}
-
-    combined = [-m for m in buckets["weakens"]] + list(buckets["strengthens"])
-
-    return {
-        "weakens": summarize(buckets["weakens"]),
-        "strengthens": summarize(buckets["strengthens"]),
-        "combined_n": len(combined),
-        "combined_score": sum(combined) / len(combined) if combined else None,
-    }
-
-
-NEWS_MIN_N = 20
-NEWS_MIN_GAP = 0.10
-
-
-def news_verdict(combined_score, n):
-    if n < NEWS_MIN_N or combined_score is None:
-        return {"tone": "insufficient", "label": "мало данных"}
-    if combined_score > NEWS_MIN_GAP:
-        return {"tone": "good", "label": "сигнал подтверждается"}
-    if combined_score < -NEWS_MIN_GAP:
-        return {"tone": "bad", "label": "сигнал в обратную сторону"}
-    return {"tone": "neutral", "label": "не подтверждается"}
-
-
 def format_bucket(lo, hi, unit_symbol):
     if lo <= -900:
         return f"до {hi}{unit_symbol}"
@@ -493,7 +263,7 @@ def compute_weather_results(conn):
         SELECT s.ts_utc, s.city, s.local_date, s.local_hour, s.unit, s.bucket_lo, s.bucket_hi,
                s.market_p, s.model_p, o.actual_max
         FROM snapshots s
-        JOIN weather_outcomes o ON s.city = o.city AND s.local_date = o.local_date
+        JOIN weather_station_daily o ON s.city = o.city AND s.local_date = o.local_date
         WHERE s.ts_utc >= ? AND s.local_hour < 12
         ORDER BY s.city, s.local_date, s.ts_utc
         """,
@@ -531,101 +301,12 @@ def compute_weather_results(conn):
     return results
 
 
-def compute_sports_results(conn):
-    rows = conn.execute(
-        """
-        SELECT s.ts_utc, s.league, s.home_team, s.away_team, s.commence_time,
-               s.outcome, s.market_p, s.pinnacle_p, o.actual_outcome
-        FROM sports_snapshots s
-        JOIN sports_outcomes o
-          ON s.home_team = o.home_team AND s.away_team = o.away_team AND s.commence_time = o.commence_time
-        ORDER BY s.home_team, s.away_team, s.commence_time, s.ts_utc
-        """
-    ).fetchall()
-
-    groups = {}
-    for r in rows:
-        key = (r["home_team"], r["away_team"], r["commence_time"])
-        groups.setdefault(key, []).append(r)
-
-    outcome_ru = {"home": "победа хозяев", "draw": "ничья", "away": "победа гостей"}
-    results = []
-    for (home_team, away_team, commence_time), grp in groups.items():
-        last_ts = grp[-1]["ts_utc"]
-        last_grp = [r for r in grp if r["ts_utc"] == last_ts]
-        actual = last_grp[0]["actual_outcome"]
-        market_pick = max(last_grp, key=lambda r: r["market_p"])
-        pinnacle_pick = max(last_grp, key=lambda r: r["pinnacle_p"])
-        results.append(
-            {
-                "league": last_grp[0]["league"],
-                "home_team": home_team,
-                "away_team": away_team,
-                "commence_time": commence_time,
-                "actual": outcome_ru.get(actual, actual),
-                "pinnacle_pick": outcome_ru.get(pinnacle_pick["outcome"], pinnacle_pick["outcome"]),
-                "market_pick": outcome_ru.get(market_pick["outcome"], market_pick["outcome"]),
-                "verdict": row_verdict(pinnacle_pick["outcome"] == actual, market_pick["outcome"] == actual),
-            }
-        )
-    results.sort(key=lambda r: r["commence_time"], reverse=True)
-    return results
-
-
-def compute_esports_results(conn):
-    # Та же логика, что compute_sports_results, но без ничьей (в BOn её не
-    # бывает) и без лиги — вместо неё "игра" (CS2/Dota 2/LoL/Valorant).
-    rows = conn.execute(
-        """
-        SELECT s.ts_utc, s.game, s.home_team, s.away_team, s.commence_time,
-               s.outcome, s.market_p, s.pinnacle_p, o.actual_outcome
-        FROM esports_snapshots s
-        JOIN esports_outcomes o
-          ON s.home_team = o.home_team AND s.away_team = o.away_team AND s.commence_time = o.commence_time
-        ORDER BY s.home_team, s.away_team, s.commence_time, s.ts_utc
-        """
-    ).fetchall()
-
-    groups = {}
-    for r in rows:
-        key = (r["home_team"], r["away_team"], r["commence_time"])
-        groups.setdefault(key, []).append(r)
-
-    outcome_ru = {"home": "победа хозяина", "away": "победа гостя"}
-    results = []
-    for (home_team, away_team, commence_time), grp in groups.items():
-        last_ts = grp[-1]["ts_utc"]
-        last_grp = [r for r in grp if r["ts_utc"] == last_ts]
-        actual = last_grp[0]["actual_outcome"]
-        market_pick = max(last_grp, key=lambda r: r["market_p"])
-        pinnacle_pick = max(last_grp, key=lambda r: r["pinnacle_p"])
-        results.append(
-            {
-                "game": last_grp[0]["game"],
-                "home_team": home_team,
-                "away_team": away_team,
-                "commence_time": commence_time,
-                "actual": outcome_ru.get(actual, actual),
-                "pinnacle_pick": outcome_ru.get(pinnacle_pick["outcome"], pinnacle_pick["outcome"]),
-                "market_pick": outcome_ru.get(market_pick["outcome"], market_pick["outcome"]),
-                "verdict": row_verdict(pinnacle_pick["outcome"] == actual, market_pick["outcome"] == actual),
-            }
-        )
-    results.sort(key=lambda r: r["commence_time"], reverse=True)
-    return results
-
-
 # Пороги для вердикта на /status — осознанно консервативные, чтобы не
 # выдавать "опережаем" на шуме. n меньше MIN_N — вообще не судим, разница
 # меньше MIN_GAP п.п. — считаем "наравне", даже если один процент выше
 # другого: на такой выборке это ничего не значит.
 VERDICT_MIN_N = 30
 VERDICT_MIN_GAP = 0.05
-
-# Макро резолвится раз в месяц на метрику (5 метрик = ~5 случаев/месяц) —
-# при VERDICT_MIN_N=30 вердикта пришлось бы ждать полгода. Порог ниже,
-# потому что это неизбежное следствие частоты резолва, а не поблажка себе.
-MACRO_MIN_N = 10
 
 
 def verdict(source_rate, market_rate, n, min_n=VERDICT_MIN_N):
@@ -646,13 +327,13 @@ def status(request: Request):
     conn = db()
 
     weather_card = {"verdict": verdict(None, None, 0), "n": 0, "source_rate": None, "market_rate": None}
-    if table_exists(conn, "weather_outcomes"):
+    if table_exists(conn, "weather_station_daily"):
         rows = conn.execute(
             """
             SELECT s.ts_utc, s.city, s.local_date, s.local_hour, s.unit, s.bucket_lo, s.bucket_hi,
                    s.market_p, s.model_p, o.actual_max
             FROM snapshots s
-            JOIN weather_outcomes o ON s.city = o.city AND s.local_date = o.local_date
+            JOIN weather_station_daily o ON s.city = o.city AND s.local_date = o.local_date
             WHERE s.ts_utc >= ? AND s.local_hour < 12
             """,
             (WEATHER_COORD_FIX_TS,),
@@ -665,83 +346,13 @@ def status(request: Request):
             "market_rate": stats["market_hit_rate"],
         }
 
-    sports_card = {"verdict": verdict(None, None, 0), "n": 0, "source_rate": None, "market_rate": None}
-    if table_exists(conn, "sports_outcomes"):
-        rows = conn.execute(
-            """
-            SELECT s.ts_utc, s.home_team, s.away_team, s.commence_time,
-                   s.outcome, s.market_p, s.pinnacle_p, o.actual_outcome
-            FROM sports_snapshots s
-            JOIN sports_outcomes o
-              ON s.home_team = o.home_team AND s.away_team = o.away_team AND s.commence_time = o.commence_time
-            """
-        ).fetchall()
-        stats = compute_sports_calibration(rows)
-        sports_card = {
-            "verdict": verdict(stats["pinnacle_hit_rate"], stats["market_hit_rate"], stats["n"]),
-            "n": stats["n"],
-            "source_rate": stats["pinnacle_hit_rate"],
-            "market_rate": stats["market_hit_rate"],
-        }
-
-    esports_card = {"verdict": verdict(None, None, 0), "n": 0, "source_rate": None, "market_rate": None}
-    if table_exists(conn, "esports_outcomes"):
-        rows = conn.execute(
-            """
-            SELECT s.ts_utc, s.home_team, s.away_team, s.commence_time,
-                   s.outcome, s.market_p, s.pinnacle_p, o.actual_outcome
-            FROM esports_snapshots s
-            JOIN esports_outcomes o
-              ON s.home_team = o.home_team AND s.away_team = o.away_team AND s.commence_time = o.commence_time
-            """
-        ).fetchall()
-        stats = compute_sports_calibration(rows)
-        esports_card = {
-            "verdict": verdict(stats["pinnacle_hit_rate"], stats["market_hit_rate"], stats["n"]),
-            "n": stats["n"],
-            "source_rate": stats["pinnacle_hit_rate"],
-            "market_rate": stats["market_hit_rate"],
-        }
-
-    macro_card = {"verdict": verdict(None, None, 0), "n": 0, "source_rate": None, "market_rate": None}
-    if table_exists(conn, "macro_outcomes"):
-        stats = compute_macro_calibration(conn)
-        macro_card = {
-            "verdict": verdict(stats["model_hit_rate"], stats["market_hit_rate"], stats["n"], min_n=MACRO_MIN_N),
-            "n": stats["n"],
-            "source_rate": stats["model_hit_rate"],
-            "market_rate": stats["market_hit_rate"],
-        }
-
-    news_n = 0
-    news_flagged = 0
-    news_validation = {"combined_n": 0, "combined_score": None}
-    news_card_verdict = news_verdict(None, 0)
-    if table_exists(conn, "sports_news_signal"):
-        news_n = conn.execute("SELECT COUNT(*) AS n FROM sports_news_signal").fetchone()["n"]
-        news_flagged = conn.execute(
-            "SELECT COUNT(*) AS n FROM sports_news_signal WHERE severity != 'none'"
-        ).fetchone()["n"]
-        if table_exists(conn, "sports_outcomes"):
-            news_validation = compute_news_validation(conn)
-            news_card_verdict = news_verdict(news_validation["combined_score"], news_validation["combined_n"])
-
     conn.close()
     return TEMPLATES.TemplateResponse(
         "status.html",
         {
             "request": request,
             "weather": weather_card,
-            "sports": sports_card,
-            "esports": esports_card,
-            "macro": macro_card,
-            "news_n": news_n,
-            "news_flagged": news_flagged,
-            "news_validation": news_validation,
-            "news_verdict": news_card_verdict,
-            "news_min_n": NEWS_MIN_N,
             "min_n": VERDICT_MIN_N,
-            "macro_min_n": MACRO_MIN_N,
         },
     )
 
@@ -753,11 +364,11 @@ def calibration(request: Request):
     weather_stats = {"all": None, "early": None}
     weather_bias = None
     weather_pre_fix_n = 0
-    if table_exists(conn, "weather_outcomes"):
+    if table_exists(conn, "weather_station_daily"):
         weather_pre_fix_n = conn.execute(
             """
             SELECT COUNT(*) AS n FROM snapshots s
-            JOIN weather_outcomes o ON s.city = o.city AND s.local_date = o.local_date
+            JOIN weather_station_daily o ON s.city = o.city AND s.local_date = o.local_date
             WHERE s.ts_utc < ?
             """,
             (WEATHER_COORD_FIX_TS,),
@@ -768,7 +379,7 @@ def calibration(request: Request):
                 SELECT s.ts_utc, s.city, s.local_date, s.local_hour, s.unit, s.bucket_lo, s.bucket_hi,
                        s.market_p, s.model_p, o.actual_max
                 FROM snapshots s
-                JOIN weather_outcomes o ON s.city = o.city AND s.local_date = o.local_date
+                JOIN weather_station_daily o ON s.city = o.city AND s.local_date = o.local_date
                 WHERE s.ts_utc >= ? {extra_filter}
                 """,
                 (WEATHER_COORD_FIX_TS,),
@@ -778,13 +389,13 @@ def calibration(request: Request):
                 weather_bias = compute_weather_bias(rows)
 
     wn2_stats = None
-    if table_exists(conn, "weather_outcomes"):
+    if table_exists(conn, "weather_station_daily"):
         rows = conn.execute(
             """
             SELECT s.ts_utc, s.city, s.local_date, s.local_hour, s.unit, s.bucket_lo, s.bucket_hi,
                    s.market_p, s.wn2_model_p, o.actual_max
             FROM snapshots s
-            JOIN weather_outcomes o ON s.city = o.city AND s.local_date = o.local_date
+            JOIN weather_station_daily o ON s.city = o.city AND s.local_date = o.local_date
             WHERE s.local_hour < 12 AND s.wn2_model_p IS NOT NULL
             """
         ).fetchall()
@@ -792,67 +403,18 @@ def calibration(request: Request):
             wn2_stats = compute_weather_calibration(rows, model_field="wn2_model_p")
 
     emos_stats = None
-    if table_exists(conn, "weather_outcomes"):
+    if table_exists(conn, "weather_station_daily"):
         rows = conn.execute(
             """
             SELECT s.ts_utc, s.city, s.local_date, s.local_hour, s.unit, s.bucket_lo, s.bucket_hi,
                    s.market_p, s.emos_model_p, o.actual_max
             FROM snapshots s
-            JOIN weather_outcomes o ON s.city = o.city AND s.local_date = o.local_date
+            JOIN weather_station_daily o ON s.city = o.city AND s.local_date = o.local_date
             WHERE s.local_hour < 12 AND s.emos_model_p IS NOT NULL
             """
         ).fetchall()
         if rows:
             emos_stats = compute_weather_calibration(rows, model_field="emos_model_p")
-
-    sports_stats = None
-    if table_exists(conn, "sports_outcomes"):
-        rows = conn.execute(
-            """
-            SELECT s.ts_utc, s.home_team, s.away_team, s.commence_time,
-                   s.outcome, s.market_p, s.pinnacle_p, o.actual_outcome
-            FROM sports_snapshots s
-            JOIN sports_outcomes o
-              ON s.home_team = o.home_team AND s.away_team = o.away_team AND s.commence_time = o.commence_time
-            """
-        ).fetchall()
-        sports_stats = compute_sports_calibration(rows)
-
-    news_validation = None
-    news_timing = None
-    if table_exists(conn, "sports_news_signal") and table_exists(conn, "sports_outcomes"):
-        news_validation = compute_news_validation(conn)
-    if table_exists(conn, "sports_news_signal"):
-        news_timing = compute_news_timing(conn)
-
-    kalshi_stats = None
-    if table_exists(conn, "kalshi_snapshots"):
-        kalshi_stats = compute_market_gap_stats(conn, "kalshi_snapshots")
-
-    esports_stats = None
-    if table_exists(conn, "esports_snapshots"):
-        esports_stats = compute_market_gap_stats(conn, "esports_snapshots")
-
-    esports_calibration = None
-    if table_exists(conn, "esports_outcomes"):
-        rows = conn.execute(
-            """
-            SELECT s.ts_utc, s.home_team, s.away_team, s.commence_time,
-                   s.outcome, s.market_p, s.pinnacle_p, o.actual_outcome
-            FROM esports_snapshots s
-            JOIN esports_outcomes o
-              ON s.home_team = o.home_team AND s.away_team = o.away_team AND s.commence_time = o.commence_time
-            """
-        ).fetchall()
-        esports_calibration = compute_sports_calibration(rows)
-
-    macro_calibration = None
-    if table_exists(conn, "macro_outcomes"):
-        macro_calibration = compute_macro_calibration(conn)
-
-    musk_calibration = None
-    if table_exists(conn, "musk_tweets_outcomes"):
-        musk_calibration = compute_musk_calibration(conn)
 
     conn.close()
     return TEMPLATES.TemplateResponse(
@@ -864,364 +426,756 @@ def calibration(request: Request):
             "weather_pre_fix_n": weather_pre_fix_n,
             "wn2_stats": wn2_stats,
             "emos_stats": emos_stats,
-            "sports": sports_stats,
-            "news_validation": news_validation,
-            "news_timing": news_timing,
-            "kalshi_stats": kalshi_stats,
-            "esports_stats": esports_stats,
-            "esports_calibration": esports_calibration,
-            "macro_calibration": macro_calibration,
-            "musk_calibration": musk_calibration,
         },
     )
 
 
-@app.get("/news", response_class=HTMLResponse)
-def news(request: Request):
-    conn = db()
-    rows = []
-    if table_exists(conn, "sports_news_signal"):
-        latest_ts = conn.execute("SELECT MAX(ts_utc) AS ts FROM sports_news_signal").fetchone()["ts"]
-        if latest_ts:
-            raw_rows = conn.execute(
-                "SELECT * FROM sports_news_signal WHERE ts_utc = ? ORDER BY severity DESC, home_team",
-                (latest_ts,),
-            ).fetchall()
-            for r in raw_rows:
-                row = dict(r)
-                try:
-                    row["changes_parsed"] = json.loads(row["changes"]) if row["changes"] else []
-                except (json.JSONDecodeError, TypeError):
-                    row["changes_parsed"] = []
-                rows.append(row)
-
-    news_results = []
-    if table_exists(conn, "sports_news_signal") and table_exists(conn, "sports_outcomes"):
-        nv = compute_news_validation(conn)
-        for i in nv["weakens"]["items"]:
-            confirmed = i["actual_win"] == 0
-            news_results.append(
-                {
-                    "team": i["team"],
-                    "match": f"{i['home_team']} — {i['away_team']}",
-                    "effect": "ослабляет",
-                    "actual": "не выиграла" if i["actual_win"] == 0 else "выиграла",
-                    "market_p": i["market_p"],
-                    "ts_utc": i["ts_utc"],
-                    "verdict": {"tone": "good", "label": "подтвердилось"} if confirmed
-                    else {"tone": "bad", "label": "не подтвердилось"},
-                }
-            )
-        for i in nv["strengthens"]["items"]:
-            confirmed = i["actual_win"] == 1
-            news_results.append(
-                {
-                    "team": i["team"],
-                    "match": f"{i['home_team']} — {i['away_team']}",
-                    "effect": "усиливает",
-                    "actual": "не выиграла" if i["actual_win"] == 0 else "выиграла",
-                    "market_p": i["market_p"],
-                    "ts_utc": i["ts_utc"],
-                    "verdict": {"tone": "good", "label": "подтвердилось"} if confirmed
-                    else {"tone": "bad", "label": "не подтвердилось"},
-                }
-            )
-        news_results.sort(key=lambda r: r["ts_utc"], reverse=True)
-
-    conn.close()
-    return TEMPLATES.TemplateResponse("news.html", {"request": request, "rows": rows, "news_results": news_results})
+# Время на странице — кишинёвское (часовой пояс сервера и Alex).
+VIEWER_TZ = ZoneInfo("Europe/Chisinau")
 
 
-@app.get("/sports", response_class=HTMLResponse)
-def sports(request: Request):
-    conn = db()
-    matches = []
-    if table_exists(conn, "sports_snapshots"):
-        latest_ts = conn.execute("SELECT MAX(ts_utc) AS ts FROM sports_snapshots").fetchone()["ts"]
-        if latest_ts:
-            rows = conn.execute(
-                "SELECT * FROM sports_snapshots WHERE ts_utc = ? ORDER BY poly_slug", (latest_ts,)
-            ).fetchall()
-            by_slug = {}
-            for r in rows:
-                m = by_slug.setdefault(
-                    r["poly_slug"],
-                    {
-                        "league": r["league"],
-                        "home_team": r["home_team"],
-                        "away_team": r["away_team"],
-                        "commence_time": r["commence_time"],
-                        "event_vol": r["event_vol"],
-                        "outcomes": {},
-                    },
-                )
-                m["outcomes"][r["outcome"]] = {"market_p": r["market_p"], "pinnacle_p": r["pinnacle_p"], "edge": r["edge"]}
-            matches = list(by_slug.values())
-            for m in matches:
-                m["best_abs_edge"] = max(abs(o["edge"]) for o in m["outcomes"].values())
-            matches.sort(key=lambda m: m["best_abs_edge"], reverse=True)
+def expected_close(city, local_date):
+    """Когда ждать результата открытой ставки: Polymarket закрывает маркет
+    примерно через 1-3 часа после полуночи по местному времени города
+    (ждёт официальные данные станции), плюс мы проверяем исходы раз в 2
+    часа — по наблюдениям 22-23.09. Возвращает строку для страницы."""
+    from weather_cities import OBS_CITIES
 
-    sports_results = []
-    if table_exists(conn, "sports_outcomes"):
-        sports_results = compute_sports_results(conn)
-
-    conn.close()
-    return TEMPLATES.TemplateResponse(
-        "sports.html", {"request": request, "matches": matches, "sports_results": sports_results}
-    )
+    cfg = OBS_CITIES.get(city)
+    if cfg is None:
+        return None
+    d = date.fromisoformat(local_date) + timedelta(days=1)
+    midnight = datetime(d.year, d.month, d.day, tzinfo=ZoneInfo(cfg["tz"]))
+    # Верхняя граница окна (3 часа после полуночи) — к этому времени
+    # результат обычно уже есть. Просто дата и время, без "сегодня/завтра".
+    return (midnight + timedelta(hours=3)).astimezone(VIEWER_TZ).strftime("%d.%m %H:%M")
 
 
-def compute_macro_calibration(conn):
-    rows = conn.execute(
-        """
-        SELECT s.ts_utc, s.metric, s.target_period, s.bucket_lo, s.bucket_hi, s.market_p, s.model_p, o.actual_value
-        FROM macro_snapshots s
-        JOIN macro_outcomes o ON s.metric = o.metric AND s.target_period = o.target_period
-        """
-    ).fetchall()
-    # Один резолвленный период может иметь несколько снимков (крон гоняет
-    # macro_edge.py регулярно, пока маркет не закроется) — тот же класс
-    # бага, что уже чинили у спорта: берём только последний снимок перед
-    # резолвом на период, не все снимки разом.
-    by_case = {}
-    for r in rows:
-        key = (r["metric"], r["target_period"])
-        by_case.setdefault(key, []).append(r)
+# Имена кошельков weather_paper.py -> подписи на странице.
+PAPER_WALLETS = {
+    "main": "Основная модель (GFS+ICON)", "emos": "EMOS", "mm": "Микс моделей",
+    "ml": "Обучаемая модель (ML)",
+    "ml2": "Обучаемая модель v2 (распределение)",
+    "ml3": "Обучаемая модель v3 (v2 + мнение рынка)",
+    "ml_shift": "Обучаемая v1 — только при расхождении с рынком",
+    "ml3_cal": "Главная v3 + рынок (смесь)",
+    "ml3_no": "Главная v3 — ставки «против»",
+    "ml3_cal_k": "Смесь — ставка по перевесу",
+    "ml4": "Обучаемая v4 (v3, 31 лист)",
+    "ml4_cal": "v4 + рынок (смесь)",
+    "ml4e": "v4 — среднее 3 обучений",
+    "ml4e_cal": "v4 среднее 3 + рынок (смесь)",
+    "copy": "Повтор за сильными трейдерами",
+    # двойники: те же сигналы, но покупают своей заявкой (без комиссии, по нижней цене)
+    "main_mk": "Основная модель — своя заявка", "emos_mk": "EMOS — своя заявка", "mm_mk": "Микс — своя заявка",
+    "ml3_mk": "Главная v3 — своя заявка",
+}
+PAPER_START_BALANCE = 100.0
+# свой старт у кошелька (как weather_paper.START_BY_WALLET; совпадение проверяет preflight.py)
+WALLET_START = {"copy": 300.0}
+# 2026-09-25 (просьба Alex — "много кошельков, не понять что к чему"):
+# одна главная модель наверху, остальные — компактно, по группам, с
+# пояснением в одну строку. Таблицы ставок по умолчанию — только главная.
+MAIN_WALLET = "ml3"
+WALLET_INFO = {
+    "ml3": ("Главная модель", "Главная модель — обучаемая v3",
+            "Учится на 16 месяцах погоды: прогнозы 16 погодных моделей, утренние замеры, облачность, влажность, "
+            "вчерашние ошибки и мнение рынка. Лучшая на истории — кандидат на реальные деньги."),
+    "ml4": ("Другие версии обучаемой модели", "Обучаемая v4 (v3, 31 лист)",
+            "Та же v3, но деревья крупнее: на проверке точнее v3 в августе и сентябре. Ставит как главная"),
+    "ml4_cal": ("Другие версии обучаемой модели", "v4 + рынок (смесь)",
+                "35% v4 + 65% рынка, ставит при перевесе от 3 п.п. — как «смесь», но на v4"),
+    "ml4e": ("Другие версии обучаемой модели", "v4 — среднее 3 обучений",
+             "Та же v4, но прогноз — среднее трёх обучений: на проверке точнее одного обучения везде. Ставит как главная"),
+    "ml4e_cal": ("Другие версии обучаемой модели", "v4 среднее 3 + рынок (смесь)",
+                 "35% v4 (среднее 3 обучений) + 65% рынка, ставит при перевесе от 3 п.п."),
+    "ml3_cal_k": ("Другие версии обучаемой модели", "Смесь — ставка по перевесу",
+                  "Как «смесь», но ставка от $0.5 до $10: чем больше перевес, тем больше ставка (Келли ×0.25)"),
+    "ml3_no": ("Другие версии обучаемой модели", "Главная v3 — ставки «против»",
+               "Покупает «нет» на вариант, который модель считает переоценённым (перевес от 10 п.п.)"),
+    "ml3_cal": ("Другие версии обучаемой модели", "Главная v3 + рынок (смесь)",
+                "35% главной модели + 65% рынка: без самоуверенности, ставит при перевесе от 3 п.п."),
+    "ml2": ("Другие версии обучаемой модели", "Обучаемая v2", "То же без мнения рынка"),
+    "ml": ("Другие версии обучаемой модели", "Обучаемая v1", "Первая версия: одно число и одинаковый разброс"),
+    "ml_shift": ("Другие версии обучаемой модели", "Обучаемая v1 — только при расхождении",
+                 "Та же v1, но ставит, только если ждёт другую температуру, чем рынок (≥0.5°C)"),
+    "mm": ("Прогноз по формулам (раньше)", "Микс 16 погодных моделей", "Веса моделей по городу, без обучения"),
+    "emos": ("Прогноз по формулам (раньше)", "EMOS", "Поправка ошибки GFS+ICON по истории"),
+    "main": ("Прогноз по формулам (раньше)", "Основная модель", "GFS+ICON с поправкой на смещение — самый первый вариант"),
+    "ml3_mk": ("Тот же сигнал, но покупка своей заявкой", "Главная v3 — своя заявка",
+               "Сигнал главной модели, но своей заявкой: без комиссии, по нижней цене, снимается в 12:00"),
+    "mm_mk": ("Тот же сигнал, но покупка своей заявкой", "Микс — своя заявка", "Без комиссии, по нижней цене, но не всегда исполняется"),
+    "emos_mk": ("Тот же сигнал, но покупка своей заявкой", "EMOS — своя заявка", "То же для EMOS"),
+    "main_mk": ("Тот же сигнал, но покупка своей заявкой", "Основная — своя заявка", "То же для основной модели"),
+    "copy": ("Повтор за сильными трейдерами", "Повтор за сильными трейдерами",
+             "Повторяет покупки 30 лучших трейдеров погоды за 14 дней — только сделанные накануне дня маркета, не дороже их цены +2¢"),
+    "obs": ("Живые замеры", "По живым замерам станции", "Ставка против варианта, который станция уже исключила"),
+}
+# 2026-09-25: страница кошелька в стиле банковского приложения — города по-русски,
+# у каждого счёта короткий значок вместо иконки.
+CITY_RU = {
+    "nyc": "Нью-Йорк", "toronto": "Торонто", "london": "Лондон", "paris": "Париж", "madrid": "Мадрид",
+    "beijing": "Пекин", "atlanta": "Атланта", "miami": "Майами", "los_angeles": "Лос-Анджелес",
+    "chicago": "Чикаго", "dallas": "Даллас", "san_francisco": "Сан-Франциско", "houston": "Хьюстон",
+    "denver": "Денвер", "seattle": "Сиэтл", "austin": "Остин", "wellington": "Веллингтон",
+    "sao_paulo": "Сан-Паулу", "panama_city": "Панама", "tokyo": "Токио", "shanghai": "Шанхай",
+    "helsinki": "Хельсинки", "mexico_city": "Мехико", "buenos_aires": "Буэнос-Айрес", "seoul": "Сеул",
+    "munich": "Мюнхен", "shenzhen": "Шэньчжэнь", "manila": "Манила", "warsaw": "Варшава", "busan": "Пусан",
+    "qingdao": "Циндао", "guangzhou": "Гуанчжоу", "singapore": "Сингапур", "milan": "Милан",
+    "amsterdam": "Амстердам", "lucknow": "Лакхнау", "chongqing": "Чунцин", "chengdu": "Чэнду",
+    "kuala_lumpur": "Куала-Лумпур", "jeddah": "Джидда", "karachi": "Карачи", "cape_town": "Кейптаун",
+    "ankara": "Анкара", "moscow": "Москва", "tel_aviv": "Тель-Авив", "istanbul": "Стамбул",
+    "wuhan": "Ухань", "zhengzhou": "Чжэнчжоу",
+}
+WALLET_BADGE = {"ml3": "v3", "ml2": "v2", "ml": "v1", "ml_shift": "v1+", "mm": "MX", "emos": "EM", "main": "GI",
+                "mm_mk": "MX", "emos_mk": "EM", "main_mk": "GI", "ml3_mk": "v3", "ml3_cal": "v3+", "ml3_no": "v3−", "ml3_cal_k": "v3$", "ml4": "v4", "ml4_cal": "v4+", "ml4e": "v4³", "ml4e_cal": "v4³+", "copy": "CP", "obs": "OB"}
+WALLET_GROUPS = ["Другие версии обучаемой модели", "Повтор за сильными трейдерами", "Прогноз по формулам (раньше)",
+                 "Тот же сигнал, но покупка своей заявкой", "Живые замеры"]
 
-    n = 0
-    model_hits = 0
-    market_hits = 0
-    for grp in by_case.values():
-        last_ts = max(r["ts_utc"] for r in grp)
-        latest = [r for r in grp if r["ts_utc"] == last_ts]
-        actual = latest[0]["actual_value"]
-        model_pick = max(latest, key=lambda r: r["model_p"])
-        market_pick = max(latest, key=lambda r: r["market_p"])
-        n += 1
-        if model_pick["bucket_lo"] < actual <= model_pick["bucket_hi"]:
-            model_hits += 1
-        if market_pick["bucket_lo"] < actual <= market_pick["bucket_hi"]:
-            market_hits += 1
+
+def paper_bucket(lo, hi, unit):
+    """Бакет по-человечески: 31°C, 84–85°F, ≤75°F, ≥94°F."""
+    sym = "°F" if unit == "fahrenheit" else "°C"
+    if lo is None:
+        return ""
+    if lo <= -900:
+        return f"≤{hi - 0.5:.0f}{sym}"
+    if hi >= 900:
+        return f"≥{lo + 0.5:.0f}{sym}"
+    x, y = lo + 0.5, hi - 0.5
+    return f"{x:.0f}{sym}" if x == y else f"{x:.0f}–{y:.0f}{sym}"
+
+
+def _fee(r):
+    return (r["fee"] or 0) if "fee" in r.keys() else 0.0
+
+
+def _pnl(r):
+    """Итог сделки: выплата - покупка - комиссия Polymarket."""
+    return (r["payout"] or 0) - r["stake"] - _fee(r)
+
+
+def _wallet_card(label, rows, nofill=0, skipped=0):
+    settled = [r for r in rows if r["status"] in ("won", "lost", "void")]
+    open_ = [r for r in rows if r["status"] in ("open", "resting")]
+    pnl = sum(_pnl(r) for r in settled)
+    by_city = {}
+    for r in settled:
+        c = by_city.setdefault(r["city"], {"n": 0, "won": 0, "pnl": 0.0})
+        c["n"] += 1
+        c["won"] += r["status"] == "won"
+        c["pnl"] += _pnl(r)
     return {
-        "n": n,
-        "model_hit_rate": model_hits / n if n else None,
-        "market_hit_rate": market_hits / n if n else None,
+        "label": label, "balance": PAPER_START_BALANCE + pnl, "pnl": pnl,
+        # 2026-09-27 (Alex: «видеть, насколько эффективно», а не сравнивать доллары): итог в % от поставленного
+        "roi": 100 * pnl / staked if (staked := sum(r["stake"] + _fee(r) for r in settled)) else None,
+        "in_play": sum(r["stake"] + _fee(r) for r in open_), "n": len(settled),
+        "fees": sum(_fee(r) for r in rows if r["status"] in ("open", "won", "lost", "void")),
+        "won": sum(1 for r in settled if r["status"] == "won"), "open": len(open_),
+        "by_city": sorted(by_city.items()), "nofill": nofill, "skipped": skipped,
     }
 
 
-def compute_macro_results(conn):
-    rows = conn.execute(
-        """
-        SELECT s.ts_utc, s.metric, s.target_period, s.bucket_lo, s.bucket_hi, s.market_p, s.model_p,
-               s.model_mean, s.model_std, o.actual_value
-        FROM macro_snapshots s
-        JOIN macro_outcomes o ON s.metric = o.metric AND s.target_period = o.target_period
-        ORDER BY s.metric, s.target_period, s.ts_utc
-        """
-    ).fetchall()
-    groups = {}
+REAL_MONEY_THRESHOLD = 150  # закрытых ставок главной модели до решения о реальных деньгах (CLAUDE.md)
+
+
+def _nice_step(span, target=4):
+    raw = max(span, 1e-9) / target
+    for m in (1, 2, 2.5, 5, 10, 20, 25, 50, 100):
+        if m >= raw:
+            return m
+    return 100 * (raw // 100 + 1)
+
+
+def smooth_path(pts):
+    """Плавная линия через точки (2026-09-27, просьба Alex): монотонная кубическая кривая
+    (Фритч-Карлсон) — проходит точно через каждую точку и не «перелетает» выше/ниже соседних
+    значений, то есть не рисует баланс, которого не было."""
+    n = len(pts)
+    if n < 3:
+        return " ".join(("M" if i == 0 else "L") + f"{x},{y}" for i, (x, y) in enumerate(pts))
+    dx = [pts[i + 1][0] - pts[i][0] for i in range(n - 1)]
+    d = [(pts[i + 1][1] - pts[i][1]) / dx[i] if dx[i] else 0.0 for i in range(n - 1)]
+    m = [d[0]] + [0.0 if d[i - 1] * d[i] <= 0 else (d[i - 1] + d[i]) / 2 for i in range(1, n - 1)] + [d[-1]]
+    for i in range(n - 1):
+        if d[i] == 0:
+            m[i] = m[i + 1] = 0.0
+            continue
+        a, b = m[i] / d[i], m[i + 1] / d[i]
+        if a * a + b * b > 9:
+            t = 3 / (a * a + b * b) ** 0.5
+            m[i], m[i + 1] = t * a * d[i], t * b * d[i]
+    out = [f"M{pts[0][0]},{pts[0][1]}"]
+    for i in range(n - 1):
+        (x0, y0), (x1, y1) = pts[i], pts[i + 1]
+        h = dx[i] / 3
+        out.append(f"C{x0 + h:.1f},{y0 + m[i] * h:.1f} {x1 - h:.1f},{y1 - m[i + 1] * h:.1f} {x1},{y1}")
+    return " ".join(out)
+
+
+def balance_chart(rows, start=100.0, w=500, h=330):
+    """Баланс по моментам, когда он менялся (2026-09-27, просьба Alex): точка — каждый
+    расчёт ставок (settled_at, с точностью до минуты), ступенька — баланс между
+    расчётами не меняется. rows: (settled_at, итог, город, won/lost/void).
+    Точки идут через равный шаг (иначе расчёты одного дня слипаются), время — в подсказке."""
+    ev = {}
+    for ts, pnl, city, status in rows:
+        k = (ts or "")[:16]
+        e = ev.setdefault(k, {"pnl": 0.0, "won": 0, "n": 0, "cities": []})
+        e["pnl"] += pnl
+        e["n"] += 1
+        e["won"] += status == "won"
+        e["cities"].append(CITY_RU.get(city, city))
+    if not ev:
+        return None
+    fmt = lambda k: f"{k[8:10]}.{k[5:7]} {k[11:16]}" if len(k) >= 16 else k
+    bal, pts = start, [{"t": "старт", "v": start, "chg": 0.0, "sub": "стартовый баланс"}]
+    for k in sorted(ev):
+        e = ev[k]
+        bal += e["pnl"]
+        who = ", ".join(sorted(set(e["cities"])))
+        sub = f"{money_str(e['pnl'])} · угадано {e['won']} из {e['n']}: {who}"
+        pts.append({"t": fmt(k), "v": bal, "chg": e["pnl"], "sub": sub})
+    lo, hi = min(p["v"] for p in pts), max(p["v"] for p in pts)
+    step = _nice_step(hi - lo if hi > lo else 10)
+    y0 = step * ((lo - step * 0.25) // step)
+    y1 = step * (-(-(hi + step * 0.25) // step))
+    L, R, T, B = 52, 20, 14, 30
+    pw, ph = w - L - R, h - T - B
+    X = lambda i: L + pw * i / (len(pts) - 1)
+    Y = lambda v: T + ph * (1 - (v - y0) / (y1 - y0))
+    for i, p in enumerate(pts):
+        p["x"], p["y"] = round(X(i), 1), round(Y(p["v"]), 1)
+    path = smooth_path([(p["x"], p["y"]) for p in pts])
+    area = path + f" L{pts[-1]['x']},{T + ph} L{pts[0]['x']},{T + ph} Z"
+    ticks = []
+    t = y0
+    while t <= y1 + 1e-9:
+        ticks.append({"y": round(Y(t), 1), "label": f"${t:,.0f}" if step >= 1 else f"${t:.1f}"})
+        t += step
+    return {"w": w, "h": h, "L": L, "R": w - R, "T": T, "B": T + ph, "path": path, "area": area, "points": pts,
+            "ticks": ticks, "start_y": round(Y(start), 1), "last": pts[-1], "first_t": pts[1]["t"], "last_t": pts[-1]["t"]}
+
+
+def money_str(v):
+    return f"{'+' if v >= 0 else '−'}${abs(v):.2f}"
+
+
+def _pnl_distribution(bets, step=0.1):
+    """Точное распределение итога ставок (каждая выигрывает независимо со своим
+    шансом): {итог в шагах step: вероятность}. bets: (шанс, выигрыш, проигрыш)."""
+    dist = {0: 1.0}
+    for p, win, loss in bets:
+        w, l = round(win / step), round(loss / step)
+        nxt = {}
+        for k, q in dist.items():
+            nxt[k + w] = nxt.get(k + w, 0.0) + q * p
+            nxt[k + l] = nxt.get(k + l, 0.0) + q * (1 - p)
+        dist = nxt
+    return dist
+
+
+def scenarios(items):
+    """2026-09-25 (просьба Alex — «сколько по факту выиграем или проиграем»):
+    сценарии по числу угаданных ставок. Для каждого «угадаем k из n» — шанс
+    (по ценам рынка: на истории рынок откалиброван) и итог: от «угадали самые
+    дешёвые выплаты» до «угадали самые дорогие». Хвост маловероятных сценариев
+    (<0.5% вместе) сворачивается в «k и больше», чтобы не показывать
+    бессмысленные «все выиграли». Заявки, ещё не купленные, не считаем."""
+    bets = [t for t in items if t.get("bought") and t.get("chance") is not None]
+    if not bets:
+        return None
+    n, cost = len(bets), sum(t["cost"] for t in bets)
+    pay = sorted(t["shares"] for t in bets)
+    probs = [1.0]
+    for t in bets:
+        p = min(max(t["chance"], 0.0), 1.0)
+        nxt = [0.0] * (len(probs) + 1)
+        for k, q in enumerate(probs):
+            nxt[k] += q * (1 - p)
+            nxt[k + 1] += q * p
+        probs = nxt
+    tail, kmax = 0.0, n
+    for k in range(n, 0, -1):
+        if tail + probs[k] >= 0.005:
+            kmax = k
+            break
+        tail += probs[k]
+    rows = []
+    for k in range(0, kmax + 1):
+        last = k == kmax and kmax < n
+        pr = sum(probs[k:]) if last else probs[k]
+        lo = -cost + sum(pay[:k])
+        hi = -cost + sum(pay[-k:]) if k else lo
+        rows.append({"k": k, "label": f"{k}+" if last else str(k), "prob": pr, "lo": lo, "hi": None if last else hi})
+    top = max(r["prob"] for r in rows)
     for r in rows:
-        key = (r["metric"], r["target_period"])
-        groups.setdefault(key, []).append(r)
-
-    results = []
-    for (metric, target_period), grp in groups.items():
-        last_ts = grp[-1]["ts_utc"]
-        last_grp = [r for r in grp if r["ts_utc"] == last_ts]
-        actual = last_grp[0]["actual_value"]
-        model_mean = last_grp[0]["model_mean"]
-        model_pick = max(last_grp, key=lambda r: r["model_p"])
-        market_pick = max(last_grp, key=lambda r: r["market_p"])
-        model_hit = model_pick["bucket_lo"] < actual <= model_pick["bucket_hi"]
-        market_hit = market_pick["bucket_lo"] < actual <= market_pick["bucket_hi"]
-        results.append(
-            {
-                "metric": METRIC_LABELS.get(metric, metric),
-                "target_period": target_period,
-                "model_mean": model_mean,
-                "actual": actual,
-                "verdict": row_verdict(model_hit, market_hit),
-            }
-        )
-    results.sort(key=lambda r: r["target_period"], reverse=True)
-    return results
+        r["bar"] = round(100 * r["prob"] / top)
+        r["tone"] = "neg" if (r["hi"] if r["hi"] is not None else r["lo"]) < 0 else ("pos" if r["lo"] > 0 else "mix")
+    # «скорее всего»: самое вероятное число угаданных и соседи, пока вместе ≥60%
+    i = max(range(len(rows)), key=lambda j: rows[j]["prob"])
+    a = b = i
+    acc = rows[i]["prob"]
+    while acc < 0.6 and (a > 0 or b < len(rows) - 1):
+        left = rows[a - 1]["prob"] if a > 0 else -1
+        right = rows[b + 1]["prob"] if b < len(rows) - 1 else -1
+        if left >= right:
+            a -= 1
+            acc += left
+        else:
+            b += 1
+            acc += right
+    for j, r in enumerate(rows):
+        r["likely"] = a <= j <= b
+    dist = _pnl_distribution([(min(max(t["chance"], 0.0), 1.0), t["shares"] - t["cost"], -t["cost"]) for t in bets])
+    return {"n": n, "cost": cost, "rows": rows, "likely": (rows[a]["label"], rows[b]["label"]), "likely_p": acc,
+            "p_plus": sum(q for k, q in dist.items() if k > 0)}
 
 
-METRIC_LABELS = {
-    "cpi_annual": "CPI (годовая)",
-    "core_cpi_yoy": "Core CPI (годовая)",
-    "unemployment": "Безработица (U-3)",
-    "jolts": "JOLTS (вакансии)",
-    "gdp": "ВВП США (QoQ SAAR)",
+def line_chart(labels, series, fmt, w=520, h=300, vline=None):
+    """Несколько линий на одной оси. series: [{"name", "cls", "values"}].
+    Геометрия для SVG + подписи на концах линий (раздвинуты, чтобы не слипались)."""
+    vals = [v for s in series for v in s["values"] if v is not None]
+    if len(labels) < 2 or not vals:
+        return None
+    lo, hi = min(vals), max(vals)
+    step = _nice_step(hi - lo if hi > lo else 1)
+    y0 = step * ((lo - step * 0.2) // step)
+    if lo >= 0:
+        y0 = max(y0, 0)  # счётчики не бывают отрицательными — ось от нуля
+    y1 = step * (-(-(hi + step * 0.2) // step))
+    L, R, T, B = 50, 175, 14, 30
+    pw, ph = w - L - R, h - T - B
+    X = lambda i: L + pw * i / (len(labels) - 1)
+    Y = lambda v: T + ph * (1 - (v - y0) / (y1 - y0))
+    out = []
+    for s_ in series:
+        pts = [(round(X(i), 1), round(Y(v), 1)) for i, v in enumerate(s_["values"]) if v is not None]
+        out.append({"name": s_["name"], "cls": s_["cls"], "path": " ".join(("M" if i == 0 else "L") + f"{x},{y}" for i, (x, y) in enumerate(pts)),
+                    "end": pts[-1], "last": s_["values"][-1]})
+    ends = sorted(out, key=lambda s_: s_["end"][1])
+    for i in range(1, len(ends)):  # подписи на концах — не ближе 16px друг к другу
+        ends[i]["ly"] = max(ends[i]["end"][1], ends[i - 1].get("ly", ends[i - 1]["end"][1]) + 16)
+    ends[0]["ly"] = ends[0]["end"][1]
+    ticks, t = [], y0
+    while t <= y1 + 1e-9:
+        ticks.append({"y": round(Y(t), 1), "label": fmt(t)})
+        t += step
+    cw = pw / (len(labels) - 1)
+    cols = [{"x": round(X(i), 1), "x0": round(X(i) - cw / 2, 1), "cw": round(cw, 1), "label": lab,
+             "vals": [(s_["name"], fmt(s_["values"][i]) if s_["values"][i] is not None else "—") for s_ in series]}
+            for i, lab in enumerate(labels)]
+    return {"w": w, "h": h, "L": L, "R": w - R, "T": T, "B": T + ph, "series": out, "ticks": ticks, "cols": cols,
+            "first": labels[0], "last": labels[-1], "vline": round(X(vline), 1) if vline is not None else None}
+
+
+SKILL_PARENT = {"main_mk": "main", "emos_mk": "emos", "mm_mk": "mm", "ml3_mk": "ml3", "ml3_cal_k": "ml3_cal"}  # «своя заявка» — сигнал родителя
+
+
+def model_skill(conn, key):
+    """Насколько главная модель права по сравнению с рынком (таблица ml_skill,
+    weather_ml_skill.py). По неделям: средний шанс, который модель и рынок
+    давали правильному ответу; и на днях ставок — сколько угадано реально,
+    сколько ожидал рынок и сколько обещала модель (накопительно)."""
+    if not table_exists(conn, "ml_skill"):
+        return None
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(ml_skill)")]
+    if "model" not in cols:
+        return None
+    rows = conn.execute("""SELECT date, source, p_model, p_market, bet_p_model, bet_p_market, bet_won FROM ml_skill
+                           WHERE model = ? ORDER BY date""", (SKILL_PARENT.get(key, key),)).fetchall()
+    if not rows:
+        return None
+    weeks = {}
+    for r in rows:
+        d = date.fromisoformat(r["date"])
+        wk = (d - timedelta(days=d.weekday())).isoformat()
+        g = weeks.setdefault(wk, {"n": 0, "pm": 0.0, "pk": 0.0, "bets": 0, "won": 0, "em": 0.0, "ek": 0.0, "live": False})
+        g["n"] += 1
+        g["pm"] += r["p_model"]
+        g["pk"] += r["p_market"]
+        g["live"] |= r["source"] == "live"
+        if r["bet_won"] is not None:
+            g["bets"] += 1
+            g["won"] += r["bet_won"]
+            g["em"] += r["bet_p_model"]
+            g["ek"] += r["bet_p_market"]
+    keys = sorted(weeks)
+    labels = [date.fromisoformat(k).strftime("%d.%m") for k in keys]
+    live_i = next((i for i, k in enumerate(keys) if weeks[k]["live"]), None)
+    if live_i == 0:
+        live_i = None  # только живые дни — отмечать начало «вживую» незачем
+    acc = [100 * weeks[k]["pm"] / weeks[k]["n"] for k in keys], [100 * weeks[k]["pk"] / weeks[k]["n"] for k in keys]
+    cum, won, em, ek = [], 0, 0.0, 0.0
+    for k in keys:
+        won += weeks[k]["won"]
+        em += weeks[k]["em"]
+        ek += weeks[k]["ek"]
+        cum.append((won, ek, em))
+    n = len(rows)
+    tot = {"n": n, "pm": 100 * sum(r["p_model"] for r in rows) / n, "pk": 100 * sum(r["p_market"] for r in rows) / n,
+           "better": 100 * sum(r["p_model"] > r["p_market"] for r in rows) / n,
+           "bets": sum(r["bet_won"] is not None for r in rows), "won": won, "ek": ek, "em": em,
+           "first": rows[0]["date"], "last": rows[-1]["date"], "live": sum(r["source"] == "live" for r in rows),
+           "parent": SKILL_PARENT.get(key)}
+    tot["history"] = n - tot["live"]
+    return {
+        "tot": tot,
+        "acc": line_chart(labels, [{"name": "Модель", "cls": "s-model", "values": acc[0]},
+                                   {"name": "Рынок", "cls": "s-market", "values": acc[1]}],
+                          lambda v: f"{v:.0f}%", vline=live_i),
+        "bets": line_chart(labels, [{"name": "Реально угадано", "cls": "s-real", "values": [c[0] for c in cum]},
+                                    {"name": "Ожидал рынок", "cls": "s-market", "values": [c[1] for c in cum]},
+                                    {"name": "Обещала модель", "cls": "s-model", "values": [c[2] for c in cum]}],
+                           lambda v: f"{v:.0f}", vline=live_i),
+    }
+
+
+# 2026-09-26 (просьба Alex): когда обновлялись данные. Время — из job_runs
+# (jobmark.py, пишут сами скрипты), а пока его нет — из самих данных.
+# (ключ, подпись, как часто по крону, следующий запуск по расписанию: (часы или None=каждые 2 ч, минута))
+FRESH_JOBS = [
+    ("weather_edge", "Цены и прогнозы", timedelta(hours=2), (None, 0)),
+    ("weather_poly_resolve", "Итоги маркетов", timedelta(hours=2), (None, 5)),
+    ("weather_paper", "Ставки и расчёт кошельков", timedelta(hours=2), (None, 10)),
+    ("weather_ml_train", "Обучение моделей", timedelta(days=1), (5, 20)),
+    ("weather_ml_skill", "«Насколько модель права»", timedelta(days=1), (5, 50)),
+    ("weather_trades_history", "Настоящие сделки", timedelta(days=1), (4, 30)),
+]
+
+
+def _next_run(now, hour, minute):
+    if hour is None:  # каждые 2 часа в чётные часы
+        t = now.replace(minute=minute, second=0, microsecond=0)
+        while t <= now or t.hour % 2:
+            t += timedelta(hours=1)
+        return t
+    t = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    return t if t > now else t + timedelta(days=1)
+
+
+def _when(dt, now):
+    d = dt.astimezone(VIEWER_TZ)
+    if d.date() == now.date():
+        return f"сегодня {d:%H:%M}"
+    if d.date() == now.date() - timedelta(days=1):
+        return f"вчера {d:%H:%M}"
+    return f"{d:%d.%m %H:%M}"
+
+
+def wallet_updates(conn):
+    """2026-09-27 (просьба Alex): когда у кошелька последний раз что-то менялось —
+    закрылась ставка (settled_at) или появилась новая (placed_at, иначе время снимка).
+    Время в базе с разными поясами — сравниваем как даты, не как строки."""
+    out = {}
+
+    def upd(w, kind, ts):
+        if not ts:
+            return
+        try:
+            dt = datetime.fromisoformat(ts)
+        except ValueError:
+            return
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        cur = out.setdefault(w, {})
+        if kind not in cur or dt > cur[kind]:
+            cur[kind] = dt
+
+    for tbl, wcol, bet_ts in (("paper_trades", "wallet", "COALESCE(placed_at, snapshot_ts)"),
+                              ("paper_obs_trades", "'obs'", "placed_at")):
+        if table_exists(conn, tbl):
+            for r in conn.execute(f"SELECT {wcol}, settled_at, {bet_ts} FROM {tbl} "
+                                  f"WHERE status IN ('open', 'resting', 'won', 'lost', 'void')"):
+                upd(r[0], "settled", r[1])
+                upd(r[0], "bet", r[2])
+    res = {}
+    fmt = lambda dt: dt.astimezone(VIEWER_TZ).strftime("%d.%m %H:%M")
+    for w, d in out.items():
+        kind = max(d, key=d.get)
+        res[w] = {"when": fmt(d[kind]), "what": "закрыта ставка" if kind == "settled" else "новая ставка",
+                  "settled": fmt(d["settled"]) if "settled" in d else None, "bet": fmt(d["bet"]) if "bet" in d else None}
+    return res
+
+
+def active_alerts(conn):
+    """Активные предупреждения (weather_alerts.py) + сторож базы (db_watchdog.sh, 24 часа)."""
+    out = []
+    f = DB_PATH.parent.parent / "ALERT_DB_LOCKED"
+    try:
+        if time.time() - f.stat().st_mtime < 86400:
+            out.append({"msg": f.read_text().strip(), "since": datetime.fromtimestamp(f.stat().st_mtime, VIEWER_TZ).strftime("%d.%m %H:%M")})
+    except OSError:
+        pass
+    if not table_exists(conn, "alerts"):
+        return out
+    for r in conn.execute("SELECT message, first_seen FROM alerts WHERE resolved_at IS NULL ORDER BY first_seen"):
+        out.append({"msg": r["message"], "since": datetime.fromisoformat(r["first_seen"]).astimezone(VIEWER_TZ).strftime("%d.%m %H:%M")})
+    return out
+
+
+def data_freshness(conn):
+    now = datetime.now(VIEWER_TZ)
+    runs = {}
+    if table_exists(conn, "job_runs"):
+        runs = {r["job"]: r["finished_at"] for r in conn.execute("SELECT job, finished_at FROM job_runs")}
+    fallback = {}
+    if table_exists(conn, "snapshots"):
+        fallback["weather_edge"] = conn.execute("SELECT MAX(ts_utc) FROM snapshots").fetchone()[0]
+    if table_exists(conn, "weather_poly_outcomes"):
+        fallback["weather_poly_resolve"] = conn.execute("SELECT MAX(resolved_at) FROM weather_poly_outcomes").fetchone()[0]
+    try:
+        fallback["weather_ml_train"] = json.loads((DB_PATH.parent.parent / "ml" / "meta.json").read_text())["trained_at"]
+    except (OSError, ValueError, KeyError):
+        pass
+    out = []
+    for job, label, every, (hh, mm) in FRESH_JOBS:
+        raw = runs.get(job) or fallback.get(job)
+        item = {"label": label, "when": None, "stale": False, "next": f"{_next_run(now, hh, mm):%H:%M}"}
+        if raw:
+            try:
+                dt = datetime.fromisoformat(raw)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                item["when"] = _when(dt, now)
+                # «задерживается» — только по настоящей метке запуска: запасное время из данных
+                # (например, последний пришедший итог) может быть старым и при работающем кроне
+                item["stale"] = job in runs and now - dt > every + timedelta(minutes=40)
+            except ValueError:
+                pass
+        out.append(item)
+    return out
+
+
+def spark(rows, start=100.0, w=160, h=44):
+    """Мини-график баланса для карточки кошелька: путь SVG или None (меньше 2 точек)."""
+    by_day = {}
+    for d, pnl in rows:
+        by_day[d] = by_day.get(d, 0.0) + pnl
+    vals, bal = [start], start
+    for d in sorted(by_day):
+        bal += by_day[d]
+        vals.append(bal)
+    if len(vals) < 2:
+        return None
+    lo, hi = min(vals + [start]), max(vals + [start])
+    span = (hi - lo) or 1.0
+    X = lambda i: 2 + (w - 4) * i / (len(vals) - 1)
+    Y = lambda v: 3 + (h - 6) * (1 - (v - lo) / span)
+    return {"w": w, "h": h, "path": smooth_path([(round(X(i), 1), round(Y(v), 1)) for i, v in enumerate(vals)]),
+            "base": round(Y(start), 1), "end": (round(X(len(vals) - 1), 1), round(Y(vals[-1]), 1)), "up": vals[-1] >= start}
+
+
+@app.get("/paper", response_class=HTMLResponse)
+def paper(request: Request, w: str = ""):
+    """Три таблицы (просьба Alex, 2026-09-23): ждём результата / результаты
+    с объяснением / почему не ставили. Ставка после результата уходит из
+    "ждём" в "результаты"; сам город продолжает торговаться дальше."""
+    conn = db()
+    wallets, waiting, results, skips = [], [], [], []
+    outcomes = {}
+    if table_exists(conn, "weather_poly_outcomes"):
+        outcomes = {(r["city"], r["local_date"]): (r["win_lo"], r["win_hi"])
+                    for r in conn.execute("SELECT city, local_date, win_lo, win_hi FROM weather_poly_outcomes")}
+    has_reason = False
+    if table_exists(conn, "paper_trades"):
+        rows = conn.execute("SELECT * FROM paper_trades ORDER BY local_date DESC, city").fetchall()
+        has_reason = "reason" in rows[0].keys() if rows else False
+        for key, label in PAPER_WALLETS.items():
+            wr = [r for r in rows if r["wallet"] == key]
+            card = _wallet_card(label, wr, nofill=sum(r["status"] == "nofill" for r in wr),
+                                skipped=sum(r["status"] == "skip" for r in wr))
+            card["key"] = key
+            wallets.append(card)
+        for r in rows:
+            wallet = WALLET_INFO.get(r["wallet"], (None, PAPER_WALLETS.get(r["wallet"], r["wallet"])))[1]
+            if r["status"] in ("skip", "nofill"):
+                skips.append({"local_date": r["local_date"], "city": r["city"], "wallet": wallet, "wkey": r["wallet"],
+                              "kind": "сигнала нет" if r["status"] == "skip" else "не смогли купить",
+                              "reason": r["reason"] if has_reason else None})
+                continue
+            bucket = paper_bucket(r["bucket_lo"], r["bucket_hi"], r["unit"])
+            is_no = "side" in r.keys() and r["side"] == "no"
+            item = {"local_date": r["local_date"], "city": r["city"], "wallet": wallet, "wkey": r["wallet"],
+                    "what": f"против {bucket}" if is_no else f"на {bucket}", "price": r["price"], "stake": r["stake"], "fee": _fee(r),
+                    "model_p": r["model_p"], "market_p": r["market_p"]}
+            # 2026-09-25 (просьба Alex): сколько выиграем / проиграем по каждой открытой ставке
+            sh = (r["want_shares"] if r["status"] == "resting" else r["shares"]) or 0.0
+            item["shares"] = sh
+            item["cost"] = r["stake"] + _fee(r)
+            item["win_amt"] = sh - item["cost"]
+            item["chance"] = r["market_p"]
+            item["bought"] = r["status"] == "open"
+            if r["status"] == "resting":
+                item["what"] = (f"заявка на {bucket} по {r['limit_price']*100:.1f}¢, куплено "
+                                f"{(r['shares'] or 0):.0f} из {r['want_shares']:.0f} долей")
+                item["closes"] = "ждём продавца до 12:00 местного"
+                waiting.append(item)
+            elif r["status"] == "open":
+                item["closes"] = expected_close(r["city"], r["local_date"])
+                waiting.append(item)
+            else:
+                win = outcomes.get((r["city"], r["local_date"]))
+                actual = paper_bucket(win[0], win[1], r["unit"]) if win else "?"
+                item["result"] = _pnl(r)
+                if is_no:
+                    item["why"] = (f"Было {actual}, а не {bucket} — как и ставили" if r["status"] == "won"
+                                   else "Маркет отменён — вернули половину" if r["status"] == "void"
+                                   else f"Было ровно {actual} — против этого и ставили")
+                else:
+                    item["why"] = (f"Было {actual} — ровно то, на что ставили" if r["status"] == "won"
+                                   else "Маркет отменён — вернули половину" if r["status"] == "void"
+                                   else f"Было {actual}, а ставили на {bucket}")
+                results.append(item)
+    if table_exists(conn, "paper_obs_trades"):
+        obs = conn.execute("SELECT * FROM paper_obs_trades ORDER BY placed_at DESC").fetchall()
+        label = WALLET_INFO["obs"][1]
+        card = _wallet_card(label, obs, nofill=sum(r["status"] == "nofill" for r in obs))
+        card["key"] = "obs"
+        wallets.append(card)
+        for r in obs:
+            unit = "°F" if r["unit"] == "fahrenheit" else "°C"
+            bucket = paper_bucket(r["bucket_lo"], r["bucket_hi"], r["unit"])
+            if r["status"] == "nofill":
+                skips.append({"local_date": r["local_date"], "city": r["city"], "wallet": label, "wkey": "obs",
+                              "kind": "не смогли купить",
+                              "reason": (f"станция уже показала {r['obs_max']:.0f}{unit}, значит {bucket} невозможно; "
+                                         + (r["reason"] if "reason" in r.keys() and r["reason"] else ""))})
+                continue
+            item = {"local_date": r["local_date"], "city": r["city"], "wallet": label, "wkey": "obs",
+                    "what": f"против {bucket} (станция уже {r['obs_max']:.0f}{unit})",
+                    "price": r["price"], "stake": r["stake"], "fee": _fee(r), "model_p": None, "market_p": None}
+            if r["status"] == "open":
+                item["closes"] = expected_close(r["city"], r["local_date"])
+                item["shares"] = r["shares"] or 0.0
+                item["cost"] = r["stake"] + _fee(r)
+                item["win_amt"] = item["shares"] - item["cost"]
+                item["chance"] = r["price"]  # против варианта: шанс по рынку ≈ цена купленной доли
+                item["bought"] = True
+                waiting.append(item)
+            else:
+                win = outcomes.get((r["city"], r["local_date"]))
+                actual = paper_bucket(win[0], win[1], r["unit"]) if win else "?"
+                item["result"] = _pnl(r)
+                item["why"] = (f"Было {actual} — {bucket} и правда не случилось" if r["status"] == "won"
+                               else f"Было {actual} — официальный итог разошёлся с замером станции")
+                results.append(item)
+    # 2026-09-25: аналитика счёта и данные рынка (идеи «инвест-платформы», просьба Alex)
+    settled_by_wallet, settle_events = {}, {}
+    for tbl, wcol in (("paper_trades", "wallet"), ("paper_obs_trades", "'obs'")):
+        if table_exists(conn, tbl):
+            for r in conn.execute(f"SELECT {wcol} AS wallet, local_date, stake, fee, payout, settled_at, city, status "
+                                  f"FROM {tbl} WHERE status IN ('won','lost','void')"):
+                settled_by_wallet.setdefault(r["wallet"], []).append((r["local_date"], _pnl(r)))
+                settle_events.setdefault(r["wallet"], []).append(
+                    (r["settled_at"] or r["local_date"], _pnl(r), r["city"], r["status"]))
+    # 2026-09-26 (просьба Alex): /paper — обзор всех кошельков, /paper?w=<ключ> — страница одного
+    known = set(PAPER_WALLETS) | {"obs"}
+    skills = {k: model_skill(conn, k) for k in known}
+    skill = skills.get(w)
+    fresh = data_freshness(conn)
+    alerts = active_alerts(conn)
+    upd = wallet_updates(conn)
+    conn.close()
+    for lst in (waiting, results, skips):
+        lst.sort(key=lambda t: (t["local_date"], t["city"]), reverse=True)
+    for c in wallets:
+        info = WALLET_INFO.get(c["key"], ("Другое", c["label"], ""))
+        c["group"], c["name"], c["desc"] = info
+        c["badge"] = WALLET_BADGE.get(c["key"], c["key"][:2].upper())
+        c["winrate"] = round(100 * c["won"] / c["n"]) if c["n"] else None
+    for lst in (waiting, results, skips):
+        for t in lst:
+            t["city_ru"] = CITY_RU.get(t["city"], t["city"].replace("_", " ").title())
+    main = next((c for c in wallets if c["key"] == MAIN_WALLET), None)
+    groups = [(g, [c for c in wallets if c["group"] == g]) for g in WALLET_GROUPS]
+    groups = [(g, cs) for g, cs in groups if cs]
+    # 2026-09-25 (просьба Alex — переделать страницу целиком): страница всегда
+    # про ОДИН кошелёк (по умолчанию главный), остальные — сравнение внизу.
+    for c in wallets:
+        c["upd"] = upd.get(c["key"])
+        c["start"] = WALLET_START.get(c["key"], PAPER_START_BALANCE)
+        c["balance"] = c["start"] + c["pnl"]
+        c["spark"] = spark(settled_by_wallet.get(c["key"], []), c["start"])
+        sk = skills.get(c["key"])
+        c["skill"] = sk["tot"] if sk else None
+    sel = w if any(c["key"] == w for c in wallets) else None
+    cur = next((c for c in wallets if c["key"] == sel), None)
+    pick = lambda lst: [t for t in lst if t.get("wkey") == sel]
+    my_waiting = pick(waiting)
+    my_waiting.sort(key=lambda t: (not t.get("bought"), -(t.get("chance") or 0)))
+    closes = sorted(t["closes"] for t in my_waiting if t.get("bought") and t.get("closes"))
+    if cur:
+        cur["cash"] = cur["balance"] - cur["in_play"]
+    goal = {"n": main["n"] if main else 0, "need": REAL_MONEY_THRESHOLD}
+    goal["pct"] = min(100, round(100 * goal["n"] / goal["need"]))
+    return TEMPLATES.TemplateResponse(
+        "paper.html",
+        {"request": request, "main": main, "cur": cur, "groups": groups, "wallets": wallets, "sel": sel,
+         "scen": scenarios(my_waiting), "skill": skill, "fresh": fresh, "alerts": alerts, "closes": (closes[0], closes[-1]) if closes else None,
+         "chart": balance_chart(settle_events.get(sel, []), cur["start"] if cur else PAPER_START_BALANCE), "goal": goal,
+         "waiting": my_waiting, "results": pick(results), "skips": pick(skips)[:150],
+         "start": cur["start"] if cur else PAPER_START_BALANCE, "doc": WALLET_DOCS.get(sel) if sel else None},
+    )
+
+
+# 2026-09-26 (просьба Alex): страница «Обучение модели» — что делало ночное
+# обучение (ml_train_log, пишет weather_ml_report.py из weather_ml_live --train).
+FC_MODEL_RU = {
+    "ecmwf_ifs025": "ECMWF (Европа)", "ecmwf_aifs025_single": "ECMWF AI (Европа)", "ukmo_seamless": "UK Met Office",
+    "meteofrance_seamless": "Météo-France", "icon_seamless": "ICON (Германия)", "gfs_seamless": "GFS (США)",
+    "gem_seamless": "GEM (Канада)", "jma_seamless": "JMA (Япония)", "cma_grapes_global": "CMA (Китай)",
+    "ncep_nbm_conus": "NBM (США)", "knmi_seamless": "KNMI (Нидерланды)", "metno_seamless": "MET Norway",
+    "dmi_seamless": "DMI (Дания)", "meteoswiss_icon_ch1": "MeteoSwiss", "italia_meteo_arpae_icon_2i": "ItaliaMeteo",
+    "bom_access_global": "BOM (Австралия)",
+}
+FEATURE_RU = {
+    "city_id": "город", "lat": "широта города", "lon": "долгота города", "doy_sin": "время года", "doy_cos": "время года (2)",
+    "fc_mean": "среднее 16 погодных моделей", "fc_std": "насколько модели расходятся", "fc_min": "самый холодный прогноз",
+    "fc_max": "самый тёплый прогноз", "fv_cloud_cover": "прогноз облачности днём", "fv_dew_point_2m": "прогноз точки росы",
+    "fv_precipitation": "прогноз осадков", "fv_relative_humidity_2m": "прогноз влажности", "fv_shortwave_radiation": "прогноз солнца",
+    "fv_wind_dir_cos": "прогноз направления ветра", "fv_wind_dir_sin": "прогноз направления ветра (2)",
+    "fv_wind_speed_10m": "прогноз скорости ветра", "obs_t": "утренняя температура на станции", "obs_dew": "утренняя точка росы",
+    "obs_spread": "утром: температура минус точка росы", "obs_tmin": "ночной минимум", "obs_vs_fc": "утренний замер против прогноза",
+    "obs_alti": "давление утром", "obs_wind": "ветер утром", "obs_wind_sin": "направление ветра утром",
+    "obs_wind_cos": "направление ветра утром (2)", "obs_cloud": "облака утром", "obs_dt3h": "как менялась температура за 3 ч",
+    "obs_dalti3h": "как менялось давление за 3 ч", "prev_actual_vs_fc": "вчерашний максимум против прогноза",
+    "mix_vs_fc": "микс моделей против среднего", "prev_err": "вчерашняя ошибка прогноза",
+    "mkt_mean_vs_fc": "мнение рынка: ожидаемый максимум", "mkt_std": "мнение рынка: неуверенность",
+    "mkt_top_p": "мнение рынка: шанс лидера",
 }
 
 
-@app.get("/macro", response_class=HTMLResponse)
-def macro(request: Request):
+def feature_ru(name):
+    if name in FEATURE_RU:
+        return FEATURE_RU[name]
+    if name.startswith("fc_"):
+        return "прогноз " + FC_MODEL_RU.get(name[3:], name[3:])
+    return name
+
+
+@app.get("/training", response_class=HTMLResponse)
+def training(request: Request):
     conn = db()
-    metrics = []
-    if table_exists(conn, "macro_snapshots"):
-        rows = conn.execute(
-            """
-            SELECT s.* FROM macro_snapshots s
-            INNER JOIN (
-                SELECT metric, MAX(ts_utc) AS max_ts FROM macro_snapshots GROUP BY metric
-            ) latest ON s.metric = latest.metric AND s.ts_utc = latest.max_ts
-            ORDER BY s.metric, s.bucket_lo
-            """
-        ).fetchall()
-        by_metric = {}
-        for r in rows:
-            m = by_metric.setdefault(
-                r["metric"],
-                {
-                    "metric": METRIC_LABELS.get(r["metric"], r["metric"]),
-                    "target_period": r["target_period"],
-                    "model_mean": r["model_mean"],
-                    "model_std": r["model_std"],
-                    "event_vol": r["event_vol"],
-                    "buckets": [],
-                },
-            )
-            m["buckets"].append(
-                {"lo": r["bucket_lo"], "hi": r["bucket_hi"], "market_p": r["market_p"], "model_p": r["model_p"], "edge": r["edge"]}
-            )
-        metrics = list(by_metric.values())
-        for m in metrics:
-            m["best_abs_edge"] = max(abs(b["edge"]) for b in m["buckets"])
-
-    macro_results = []
-    if table_exists(conn, "macro_outcomes"):
-        macro_results = compute_macro_results(conn)
-
+    runs = []
+    if table_exists(conn, "ml_train_log"):
+        for r in conn.execute("SELECT trained_at, ok, details FROM ml_train_log ORDER BY trained_at DESC LIMIT 60"):
+            try:
+                d = json.loads(r["details"])
+            except ValueError:
+                continue
+            d["ok"] = bool(r["ok"])
+            d["when"] = datetime.fromisoformat(r["trained_at"]).astimezone(VIEWER_TZ).strftime("%d.%m %H:%M")
+            for it in d.get("importance", []):
+                it["ru"] = feature_ru(it["name"])
+            runs.append(d)
     conn.close()
-    return TEMPLATES.TemplateResponse(
-        "macro.html", {"request": request, "metrics": metrics, "macro_results": macro_results}
-    )
-
-
-def compute_musk_calibration(conn):
-    rows = conn.execute(
-        """
-        SELECT s.ts_utc, s.target_period, s.bucket_lo, s.bucket_hi, s.market_p, s.model_p, o.actual_value
-        FROM musk_tweets_snapshots s
-        JOIN musk_tweets_outcomes o ON s.target_period = o.target_period
-        """
-    ).fetchall()
-    by_case = {}
-    for r in rows:
-        by_case.setdefault(r["target_period"], []).append(r)
-    n = 0
-    model_hits = 0
-    market_hits = 0
-    for grp in by_case.values():
-        last_ts = max(r["ts_utc"] for r in grp)
-        latest = [r for r in grp if r["ts_utc"] == last_ts]
-        actual = latest[0]["actual_value"]
-        model_pick = max(latest, key=lambda r: r["model_p"])
-        market_pick = max(latest, key=lambda r: r["market_p"])
-        n += 1
-        if model_pick["bucket_lo"] < actual <= model_pick["bucket_hi"]:
-            model_hits += 1
-        if market_pick["bucket_lo"] < actual <= market_pick["bucket_hi"]:
-            market_hits += 1
-    return {"n": n, "model_hit_rate": model_hits / n if n else None, "market_hit_rate": market_hits / n if n else None}
-
-
-@app.get("/musk", response_class=HTMLResponse)
-def musk(request: Request):
+    last = runs[0] if runs else None
+    if last and last.get("importance"):
+        top = max(i["pct"] for i in last["importance"]) or 1
+        for i in last["importance"]:
+            i["bar"] = round(100 * i["pct"] / top)
     conn = db()
-    buckets = []
-    meta = None
-    if table_exists(conn, "musk_tweets_snapshots"):
-        latest_ts = conn.execute("SELECT MAX(ts_utc) AS ts FROM musk_tweets_snapshots").fetchone()["ts"]
-        if latest_ts:
-            rows = conn.execute(
-                "SELECT * FROM musk_tweets_snapshots WHERE ts_utc = ? ORDER BY bucket_lo", (latest_ts,)
-            ).fetchall()
-            if rows:
-                meta = {
-                    "target_period": rows[0]["target_period"],
-                    "actual_so_far": rows[0]["actual_so_far"],
-                    "days_elapsed": rows[0]["days_elapsed"],
-                    "days_remaining": rows[0]["days_remaining"],
-                    "model_mean": rows[0]["model_mean"],
-                    "model_std": rows[0]["model_std"],
-                }
-                for r in rows:
-                    buckets.append(
-                        {"lo": r["bucket_lo"], "hi": r["bucket_hi"], "market_p": r["market_p"],
-                         "model_p": r["model_p"], "edge": r["edge"]}
-                    )
+    alerts = active_alerts(conn)
     conn.close()
-    return TEMPLATES.TemplateResponse("musk.html", {"request": request, "buckets": buckets, "meta": meta})
-
-
-@app.get("/esports", response_class=HTMLResponse)
-def esports(request: Request):
-    conn = db()
-    matches = []
-    if table_exists(conn, "esports_snapshots"):
-        latest_ts = conn.execute("SELECT MAX(ts_utc) AS ts FROM esports_snapshots").fetchone()["ts"]
-        if latest_ts:
-            rows = conn.execute(
-                "SELECT * FROM esports_snapshots WHERE ts_utc = ? ORDER BY poly_slug", (latest_ts,)
-            ).fetchall()
-            by_slug = {}
-            for r in rows:
-                m = by_slug.setdefault(
-                    r["poly_slug"],
-                    {
-                        "game": r["game"],
-                        "home_team": r["home_team"],
-                        "away_team": r["away_team"],
-                        "commence_time": r["commence_time"],
-                        "event_vol": r["event_vol"],
-                        "outcomes": {},
-                    },
-                )
-                m["outcomes"][r["outcome"]] = {"market_p": r["market_p"], "pinnacle_p": r["pinnacle_p"], "edge": r["edge"]}
-            matches = list(by_slug.values())
-            for m in matches:
-                m["best_abs_edge"] = max(abs(o["edge"]) for o in m["outcomes"].values())
-            matches.sort(key=lambda m: m["best_abs_edge"], reverse=True)
-
-    esports_results = []
-    if table_exists(conn, "esports_outcomes"):
-        esports_results = compute_esports_results(conn)
-
-    conn.close()
-    return TEMPLATES.TemplateResponse(
-        "esports.html", {"request": request, "matches": matches, "esports_results": esports_results}
-    )
-
-
-@app.get("/arbitrage", response_class=HTMLResponse)
-def arbitrage(request: Request):
-    conn = db()
-    matches = []
-    if table_exists(conn, "kalshi_snapshots"):
-        latest_ts = conn.execute("SELECT MAX(ts_utc) AS ts FROM kalshi_snapshots").fetchone()["ts"]
-        if latest_ts:
-            rows = conn.execute(
-                "SELECT * FROM kalshi_snapshots WHERE ts_utc = ? ORDER BY home_team", (latest_ts,)
-            ).fetchall()
-            by_game = {}
-            for r in rows:
-                m = by_game.setdefault(
-                    (r["home_team"], r["away_team"], r["commence_time"]),
-                    {
-                        "league": r["league"],
-                        "home_team": r["home_team"],
-                        "away_team": r["away_team"],
-                        "commence_time": r["commence_time"],
-                        "outcomes": {},
-                    },
-                )
-                m["outcomes"][r["outcome"]] = {"market_p": r["market_p"], "kalshi_p": r["kalshi_p"], "edge": r["edge"]}
-            matches = list(by_game.values())
-            for m in matches:
-                m["best_abs_edge"] = max(abs(o["edge"]) for o in m["outcomes"].values())
-            matches.sort(key=lambda m: m["best_abs_edge"], reverse=True)
-    conn.close()
-    return TEMPLATES.TemplateResponse("arbitrage.html", {"request": request, "matches": matches})
+    return TEMPLATES.TemplateResponse("training.html", {"request": request, "last": last, "runs": runs, "alerts": alerts})
