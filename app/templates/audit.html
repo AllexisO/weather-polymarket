@@ -1,0 +1,289 @@
+{% extends "base.html" %}
+{% block title %}Проверка — weather-lab{% endblock %}
+{% block content %}
+{#
+  2026-09-27 (просьба Alex — «всё это на сайте»): автоматическая проверка кошельков, моделей и базы.
+  Считает weather_audit.py по крону (каждые 2 ч; ночью — с целостностью базы), здесь — последний результат.
+#}
+{% macro money(v) -%}{{ '−' if v < -0.005 else ('+' if v > 0.005 else '') }}${{ '%.2f' | format(v | abs) }}{%- endmacro %}
+<style>
+  body:has(.bk) .main-col { background: #0A0A0B; }
+  body:has(.bk) main { max-width: 1120px; }
+  .bk {
+    --bk-card: #1C1C1E; --bk-raise: #262628; --bk-line: #2E2E31; --bk-text: #F4F4F5; --bk-muted: #A1A1AA; --bk-faint: #71717A;
+    --bk-accent: #FFD58A; --bk-pos: #A3E39A; --bk-neg: #F4A77F; --ink: #101012;
+    --bk-font: "Onest", -apple-system, "Segoe UI", Roboto, sans-serif;
+    color: var(--bk-text); font-family: var(--bk-font); font-size: 15px; line-height: 1.55;
+  }
+  .bk .num { font-variant-numeric: tabular-nums; } .bk .muted { color: var(--bk-muted); }
+  .bk .pos { color: var(--bk-pos); } .bk .neg { color: var(--bk-neg); }
+  .bk a { color: var(--bk-accent); text-underline-offset: 3px; }
+  .top { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 8px 24px; margin-bottom: 20px; }
+  .top h1 { margin: 0; font-size: 26px; font-weight: 700; letter-spacing: -.02em; }
+  .top p { margin: 4px 0 0; color: var(--bk-muted); font-size: 14px; max-width: 720px; }
+  .sec { margin: 0 0 30px; }
+  .sec h2 { margin: 0 0 12px; font-size: 19px; font-weight: 600; }
+  .pane { background: var(--bk-card); border: 1px solid var(--bk-line); border-radius: 18px; padding: 20px 22px; }
+  .scroll { overflow-x: auto; }
+
+  .verdict { display: flex; gap: 16px; align-items: flex-start; padding: 20px 22px; border-radius: 18px; margin-bottom: 18px; }
+  .verdict.ok { background: rgba(163, 227, 154, .10); border: 1px solid rgba(163, 227, 154, .35); }
+  .verdict.bad { background: rgba(244, 167, 127, .10); border: 1px solid rgba(244, 167, 127, .45); }
+  .verdict .dot { width: 14px; height: 14px; border-radius: 50%; margin-top: 7px; flex-shrink: 0; }
+  .verdict.warn { background: rgba(255, 213, 138, .08); border: 1px solid rgba(255, 213, 138, .4); }
+  .verdict.warn .dot { background: var(--bk-accent); }
+  .verdict.ok .dot { background: var(--bk-pos); } .verdict.bad .dot { background: var(--bk-neg); }
+  .verdict h2 { margin: 0; font-size: 20px; font-weight: 700; }
+  .verdict p { margin: 4px 0 0; color: var(--bk-muted); }
+  .verdict ul { margin: 8px 0 0; padding-left: 18px; font-size: 14px; }
+
+  /* последние запуски проверки — полоска из делений */
+  .hist { display: flex; gap: 3px; height: 26px; margin: 4px 0 26px; }
+  .hist i { flex: 1; border-radius: 3px; background: var(--bk-pos); opacity: .85; }
+  .hist i.bad { background: var(--bk-neg); } .hist i.deep { box-shadow: inset 0 -4px 0 rgba(0, 0, 0, .35); }
+  .hist-l { display: flex; justify-content: space-between; font-size: 12px; color: var(--bk-muted); }
+
+  .tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 30px; }
+  .tile { border-radius: 16px; padding: 14px 16px 16px; color: var(--ink); }
+  .tile span { display: block; font-size: 13px; opacity: .72; }
+  .tile b { display: block; font-size: 26px; font-weight: 600; margin-top: 8px; letter-spacing: -.01em; }
+  .tile small { display: block; font-size: 12.5px; opacity: .75; margin-top: 2px; }
+  .t1 { background: #D3DDFB; } .t2 { background: #C7F4E2; } .t3 { background: #FFD58A; } .t4 { background: #F4C7B0; }
+
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; margin-bottom: 30px; }
+  .bk table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  .bk th { text-align: left; font: 500 12.5px var(--bk-font); color: var(--bk-muted); padding: 0 12px 8px 0; border-bottom: 1px solid var(--bk-line); white-space: nowrap; text-transform: none; letter-spacing: 0; }
+  .bk td { font-family: var(--bk-font); padding: 10px 12px 10px 0; border-bottom: 1px solid var(--bk-line); vertical-align: top; }
+  .bk tbody tr:hover { background: transparent; }
+  .bk tr:last-child td { border-bottom: 0; }
+  .bk td.r, .bk th.r { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .st { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; padding: 2px 10px; border-radius: 999px; white-space: nowrap; }
+  .st::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+  .st.ok { background: rgba(163, 227, 154, .14); color: var(--bk-pos); }
+  .st.warn { background: rgba(255, 213, 138, .14); color: var(--bk-accent); }
+  .st.bad { background: rgba(244, 167, 127, .14); color: var(--bk-neg); }
+  .st.none { background: var(--bk-raise); color: var(--bk-muted); }
+  .checks { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr)); gap: 8px 20px; list-style: none; margin: 0 0 14px; padding: 0; }
+  .checks li { display: flex; gap: 10px; font-size: 14px; }
+  .checks li::before { content: "✓"; color: var(--bk-pos); font-weight: 700; }
+  .checks.warn li { color: var(--bk-accent); }
+  .checks.warn li::before { content: "!"; width: 18px; height: 18px; border-radius: 50%; display: inline-grid; place-items: center; font-size: 12px;
+    background: rgba(255, 213, 138, .16); color: var(--bk-accent); flex-shrink: 0; margin-top: 2px; }
+  /* 2026-09-28 (просьба Alex): каждая проверка — свой большой блок, внутри — вложенные карточки */
+  .bigblock { background: var(--bk-card); border: 1px solid var(--bk-line); border-radius: 22px; padding: 20px 20px 22px; margin-bottom: 26px; }
+  .bb-h { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-start; gap: 8px 16px; margin-bottom: 16px; }
+  .bb-h h2 { margin: 0; font-size: 20px; font-weight: 700; }
+  .bb-h p { margin: 4px 0 0; font-size: 13.5px; max-width: 640px; }
+  .bb-h > span { font-size: 13px; }
+  .bigblock .pane, .bigblock .ng { background: #141416; border-color: var(--bk-line); }
+  .bigblock .sec { margin-bottom: 22px; }
+  .bigblock .sec:last-child { margin-bottom: 0; }
+  .bigblock .two { margin-bottom: 22px; }
+  .bigblock .sec h2, .bigblock .two h2 { font-size: 16px; }
+  .bigblock .hist { margin-bottom: 22px; }
+  /* вечерняя проверка */
+  .night { margin-bottom: 26px; }
+  .night-h { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 4px 12px; margin-bottom: 12px; }
+  .night-h h2 { margin: 0; font-size: 19px; font-weight: 600; }
+  .night-h span { font-size: 13px; }
+  .ntabs { display: flex; flex-wrap: wrap; gap: 6px; }
+  .ntab { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--bk-line);
+    background: var(--bk-raise); color: var(--bk-muted); font: 500 13.5px var(--bk-font); cursor: pointer; }
+  .ntab small { font-size: 11.5px; opacity: .8; }
+  .ntab.on { background: #F4F4F5; color: #0A0A0B; border-color: #F4F4F5; font-weight: 600; }
+  .ntab:focus-visible { outline: 2px solid var(--bk-accent); outline-offset: 2px; }
+  .nd { width: 8px; height: 8px; border-radius: 50%; background: var(--bk-pos); }
+  .nd.warn { background: var(--bk-accent); } .nd.bad { background: var(--bk-neg); }
+  .bk [hidden] { display: none !important; }
+  .nfix { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 8px; }
+  .nfix li { font-size: 14px; padding-left: 14px; border-left: 3px solid var(--bk-neg); }
+  .nfix li.warn { border-left-color: var(--bk-accent); }
+  .nfix .fix { display: block; font-size: 13px; color: var(--bk-muted); margin-top: 2px; }
+  .ngroups { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); gap: 10px; align-items: start; }
+  .ng { padding: 12px 16px; }
+  .ng summary { display: flex; justify-content: space-between; align-items: center; gap: 10px; cursor: pointer; list-style: none; min-height: 32px; }
+  .ng summary::-webkit-details-marker { display: none; }
+  .ng ul { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 8px; }
+  .ng li { display: flex; gap: 10px; font-size: 13.5px; }
+  .ng li .mk { width: 18px; height: 18px; border-radius: 50%; display: inline-grid; place-items: center; font-size: 11px; font-weight: 700; flex-shrink: 0; margin-top: 1px;
+    background: rgba(163, 227, 154, .14); color: var(--bk-pos); }
+  .ng li.warn .mk { background: rgba(255, 213, 138, .16); color: var(--bk-accent); }
+  .ng li.bad .mk { background: rgba(244, 167, 127, .18); color: var(--bk-neg); }
+  .ng li small { display: block; color: var(--bk-muted); font-size: 12.5px; }
+  .viol { margin: 4px 0 0; padding-left: 18px; font-size: 12.5px; color: var(--bk-neg); }
+  .note { margin: 12px 0 0; font-size: 13px; color: var(--bk-muted); }
+  .empty { color: var(--bk-muted); padding: 40px 0; text-align: center; }
+  @media (max-width: 860px) { .tiles { grid-template-columns: 1fr 1fr; } .two { grid-template-columns: 1fr; } }
+  @media (max-width: 600px) { .pane { padding: 16px; } }
+</style>
+
+<div class="bk">
+  <div class="top">
+    <div>
+      <h1>Проверка</h1>
+      <p>Две проверки: три раза в день — готова ли система к ночи и к ставкам, и каждые 2 часа — все ставки, модели, данные и база. Только чтение.</p>
+    </div>
+  </div>
+
+  {% if night %}
+  <section class="bigblock night" aria-labelledby="s-night">
+    <div class="night-h bb-h"><div><h2 id="s-night">Проверки в течение дня</h2>
+      <p class="muted">Утро — «ночь прошла?», день — «утренние решения приняты?», вечер — «ночь пройдёт?»</p></div>
+      <div class="ntabs" role="tablist" aria-label="Утро, день, вечер">
+        {% for n in night %}<button type="button" role="tab" id="t-{{ n.mode }}" aria-controls="p-{{ n.mode }}" aria-selected="{{ 'true' if n.active else 'false' }}"
+          class="ntab{{ ' on' if n.active else '' }}">{{ n.mode_name }} <small>{{ n.at }}</small>{% if not n.empty %}<i class="nd {{ 'bad' if n.bad else ('warn' if n.warn else 'ok') }}" aria-hidden="true"></i>{% endif %}</button>{% endfor %}
+      </div></div>
+    {% for n in night %}
+    {% set Q = {'morning': 'Ночь прошла?', 'midday': 'Утренние решения приняты?', 'evening': 'Ночь пройдёт?'} %}
+    <div class="npanel" role="tabpanel" id="p-{{ n.mode }}" aria-labelledby="t-{{ n.mode }}"{% if not n.active %} hidden{% endif %}>
+      {% if n.empty %}
+      <div class="pane empty">{{ n.mode_name }}: {{ Q[n.mode] }} — первая проверка будет в {{ n.at }}.</div>
+      {% else %}
+      <p class="muted" style="margin: 0 0 10px; font-size: 13px;">{{ Q[n.mode] }} · {{ n.when }} · {{ n.checks | length }} проверок за {{ n.took_s }} с</p>
+      <div class="verdict {{ 'bad' if n.bad else ('warn' if n.warn else 'ok') }}"{% if n.bad %} role="alert"{% endif %}><span class="dot" aria-hidden="true"></span><div>
+        <h2>{% if n.bad %}Проблем: {{ n.bad }}{% if n.mode == 'evening' %} — ночью может сломаться{% endif %}{% elif n.warn %}Всё работает, но есть на что посмотреть: {{ n.warn }}{% else %}{{ {'morning': 'Ночь прошла без проблем', 'midday': 'Утренние решения приняты', 'evening': 'Всё готово к ночи'}[n.mode] }}{% endif %}</h2>
+        {% if n.problems %}<ul class="nfix">{% for x in n.problems %}<li class="{{ x.level }}"><b>{{ x.title }}</b> — {{ x.detail }}{% if x.fix %}<span class="fix">Что делать: {{ x.fix }}</span>{% endif %}</li>{% endfor %}</ul>
+        {% else %}<p>Код, ставки, крон, база, внешние сервисы и модели в порядке.</p>{% endif %}
+      </div></div>
+      <div class="ngroups">
+        {% for g, xs, cnt in n.groups %}
+        <details class="pane ng"{% if cnt %} open{% endif %}>
+          <summary><b>{{ g }}</b><span class="st {{ 'ok' if not cnt else ('bad' if xs | selectattr('level', 'equalto', 'bad') | list else 'warn') }}">{{ 'всё ok' if not cnt else cnt ~ ' ' ~ ('проблема' if cnt == 1 else 'проблемы') }}</span></summary>
+          <ul>{% for x in xs %}<li class="{{ x.level }}"><span class="mk" aria-hidden="true">{{ '✓' if x.level == 'ok' else ('!' if x.level == 'warn' else '✕') }}</span><span><b>{{ x.title }}</b>{% if x.detail %}<small>{{ x.detail }}</small>{% endif %}</span></li>{% endfor %}</ul>
+        </details>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+    {% endfor %}
+    <p class="note">Каждый день: утро 07:00, день 13:00, вечер 23:30. Запустить вручную после исправления: <code>./night_check.sh morning</code> / <code>midday</code> / <code>evening</code> — плашка на сайте уйдёт при следующей проверке тревог (до 30 мин).</p>
+  </section>
+  <script>
+  (function () {
+    var tabs = document.querySelectorAll('.ntab');
+    tabs.forEach(function (t) {
+      t.addEventListener('click', function () {
+        tabs.forEach(function (x) { var on = x === t; x.classList.toggle('on', on); x.setAttribute('aria-selected', on ? 'true' : 'false');
+          document.getElementById(x.getAttribute('aria-controls')).hidden = !on; });
+      });
+    });
+  })();
+  </script>
+  {% endif %}
+
+  <section class="bigblock" aria-labelledby="s-auto">
+    <div class="bb-h"><div><h2 id="s-auto">Проверка каждые 2 часа</h2>
+      <p class="muted">Каждая ставка против правил кошелька и официальных итогов, модели, данные, база, крон. Ночью в 03:45 — ещё и целостность файла базы.</p></div>
+      {% if a %}<span class="muted num">проверено {{ a.when }} · за {{ a.took_s }} с</span>{% endif %}</div>
+  {% if not a %}
+  <div class="pane empty">Проверка ещё ни разу не запускалась — появится после первого запуска по крону.</div>
+  {% else %}
+
+  {% if a.n_violations %}
+  <div class="verdict bad" role="alert"><span class="dot" aria-hidden="true"></span><div>
+    <h2>Найдено нарушений: {{ a.n_violations }}</h2>
+    <ul>{% for v in a.violations[:12] %}<li>{{ v }}</li>{% endfor %}{% if a.n_violations > 12 %}<li>и ещё {{ a.n_violations - 12 }} — по кошелькам ниже</li>{% endif %}</ul>
+  </div></div>
+  {% else %}
+  <div class="verdict ok"><span class="dot" aria-hidden="true"></span><div>
+    <h2>Нарушений нет</h2>
+    <p>{{ a.n_bets }} ставок сверены с правилами и итогами; модели, данные и база в порядке{% if a.attention %}. Требует внимания: {{ a.attention | length }} — ниже{% endif %}.</p>
+  </div></div>
+  {% endif %}
+
+  {% if history | length > 1 %}
+  <div class="hist" role="img" aria-label="Последние {{ history | length }} проверок">{% for h in history %}<i class="{{ '' if h.ok else 'bad' }}{{ ' deep' if h.deep else '' }}" title="{{ h.when }}: {{ 'без нарушений' if h.ok else 'есть нарушения' }}{{ ' · с целостностью базы' if h.deep else '' }}"></i>{% endfor %}</div>
+  <div class="hist-l" style="margin-top: -22px; margin-bottom: 26px;"><span>{{ history[0].when }}</span><span>последние {{ history | length }} проверок</span><span>{{ history[-1].when }}</span></div>
+  {% endif %}
+
+  <div class="tiles">
+    <div class="tile t1"><span>Ставок проверено</span><b class="num">{{ a.n_bets }}</b><small>нарушений: {{ a.n_violations }}</small></div>
+    <div class="tile t2"><span>Запусков крона за сутки</span><b class="num">{{ a.cron.runs }}</b><small>с ошибкой: {{ a.cron.fails }}</small></div>
+    {% set ag = a.data.agree %}
+    <div class="tile t3"><span>Факт станции = итог Polymarket</span><b class="num">{{ '%.1f' | format(100 * ag[0] / ag[1]) if ag[1] else '—' }}%</b><small>{{ ag[0] }} из {{ ag[1] }} за 30 дней</small></div>
+    <div class="tile t4"><span>Требует внимания</span><b class="num">{{ a.attention | length }}</b><small>не ошибки кода</small></div>
+  </div>
+
+  {% if a.attention %}
+  <section class="sec"><h2>Требует внимания</h2>
+    <div class="pane"><ul class="checks warn" style="margin: 0; grid-template-columns: 1fr;">{% for x in a.attention %}<li>{{ x }}</li>{% endfor %}</ul>
+      <p class="note">Это не ошибки кода, а то, что стоит решить: кошелёк без денег, пропуски данных, сбои крона.</p></div>
+  </section>
+  {% endif %}
+
+  <div class="two">
+    <section class="pane">
+      <h2>База данных</h2>
+      <table><tbody>
+        <tr><td>Целостность файла</td><td>{% if a.db.quick_check == 'ok' %}<span class="st ok">ok</span>{% elif a.db.quick_check %}<span class="st bad">{{ a.db.quick_check }}</span>{% else %}<span class="st none">ещё не проверялась</span>{% endif %}</td>
+          <td class="muted">{% if a.db.qc_when %}{{ a.db.qc_when }}, за {{ a.db.quick_check_s }} с{% endif %}</td></tr>
+        <tr><td>Режим записи</td><td><span class="st {{ 'ok' if a.db.journal == 'wal' else 'bad' }}">{{ a.db.journal | upper }}</span></td><td class="muted">чтение не мешает записи</td></tr>
+        <tr><td>Размер</td><td class="num">{{ a.db.size_txt }}</td><td></td></tr>
+        <tr><td>Активные тревоги</td><td><span class="st {{ 'ok' if not a.cron.alerts else 'bad' }}">{{ a.cron.alerts }}</span></td><td class="muted"><a href="/status">здоровье системы →</a></td></tr>
+        <tr><td>Резервные копии</td><td><span class="st bad">нет</span></td><td class="muted">решение за Alex</td></tr>
+      </tbody></table>
+    </section>
+    <section class="pane">
+      <h2>Данные</h2>
+      <table><tbody>
+        <tr><td>Последний снимок цен</td><td class="num">{{ a.data.last_snap_when or '—' }}</td><td class="muted">{{ a.data.last_snap_cities }} городов</td></tr>
+        <tr><td>Снимков за 26 ч</td><td><span class="st {{ 'warn' if a.data.gaps else 'ok' }}">{{ a.data.snap_hours }}</span></td><td class="muted">{{ 'пропуски: ' ~ (a.data.gaps | join('; ')) if a.data.gaps else 'без пропусков' }}</td></tr>
+        {% for d, n in a.data.fact_n.items() %}<tr><td>Факт и итоги за {{ d[8:10] }}.{{ d[5:7] }}</td><td><span class="st {{ 'ok' if n >= 48 and a.data.out_n[d] >= 48 else 'warn' }}">{{ n }} / {{ a.data.out_n[d] }}</span></td><td class="muted">из 48 городов</td></tr>{% endfor %}
+        <tr><td>Сделки собраны по</td><td class="num">{{ a.data.trades_last_day or '—' }}</td><td class="muted">только закрытые маркеты</td></tr>
+        {% if a.data.train %}<tr><td>Ночное обучение</td><td><span class="st {{ 'ok' if a.data.train.ok else 'bad' }}">{{ 'проверки пройдены' if a.data.train.ok else 'не все проверки' }}</span></td>
+          <td class="muted">{{ a.data.train.when }}{% if a.data.train.verdict %} · экзамен: {{ a.data.train.verdict.label }}{% endif %} · <a href="/training">подробно →</a></td></tr>{% endif %}
+      </tbody></table>
+    </section>
+  </div>
+
+  <section class="sec"><h2>Модели</h2>
+    <div class="pane scroll">
+      <table>
+        <thead><tr><th>Модель</th><th class="r">Городов с прогнозом за сутки</th><th class="r">Снимков</th><th>Шансы в 0–1 и в сумме 1</th></tr></thead>
+        <tbody>{% for m in a.models %}
+          <tr><td>{{ m.name }}</td><td class="r">{{ m.cities }}</td><td class="r">{{ m.snaps }}</td>
+            <td>{% if m.bad_sum or m.bad_range %}<span class="st bad">нарушений {{ m.bad_sum + m.bad_range }}</span>{% elif m.snaps %}<span class="st ok">без нарушений</span>{% else %}<span class="st none">нет прогнозов</span>{% endif %}</td></tr>
+        {% endfor %}</tbody>
+      </table>
+      <p class="note">Обучаемые модели считают прогноз в 08:00 по местному времени города, поэтому за сутки их меньше, чем снимков формул. EMOS — только 6 исходных городов.</p>
+    </div>
+  </section>
+
+  <section class="sec"><h2>Кошельки</h2>
+    <div class="pane">
+      <ul class="checks">
+        <li>Перевес не меньше порога кошелька</li><li>Цена рынка в пределах 3–95¢</li><li>Покупка не дороже «шанс − порог»</li>
+        <li>Комиссия 0,05 × p × (1 − p) на долю</li><li>Доли × цена = ставка</li><li>Итог совпадает с официальным результатом</li>
+        <li>Выплата: $1 за долю или 0</li><li>Одна ставка на город в день</li><li>Нет зависших ставок и заявок</li>
+        <li>Ни разу не поставили больше, чем было на счёте</li><li>copy: накануне и не дороже их цены + 2¢</li><li>Замеры: только против невозможных вариантов</li>
+      </ul>
+      <div class="scroll">
+      <table>
+        <thead><tr><th>Кошелёк</th><th class="r">Свободно</th><th class="r">В ставках</th><th class="r">Ставок</th><th class="r">Закрыто</th><th class="r">Итог</th><th class="r">Доходность</th><th>Проверка</th></tr></thead>
+        <tbody>{% for w in a.wallets %}
+          <tr><td>{% if w.main %}<b>{{ w.name }}</b>{% else %}{{ w.name }}{% endif %}{% if w.violations %}<ul class="viol">{% for v in w.violations[:5] %}<li>{{ v }}</li>{% endfor %}</ul>{% endif %}</td>
+            <td class="r {{ 'neg' if w.cash < 2 and w.key not in ['obs', 'obs_fmi'] else '' }}">${{ '%.2f' | format(w.cash) }}</td>
+            <td class="r">${{ '%.2f' | format(w.in_play) }}</td>
+            <td class="r">{{ w.bets }}</td><td class="r">{{ w.closed }}</td>
+            <td class="r {{ 'pos' if w.pnl > 0.005 else ('neg' if w.pnl < -0.005 else '') }}">{{ money(w.pnl) if w.closed else '—' }}</td>
+            <td class="r {{ 'pos' if w.roi and w.roi > 0.05 else ('neg' if w.roi and w.roi < -0.05 else '') }}">{{ ('%+.1f' | format(w.roi)) ~ '%' if w.roi is not none else '—' }}</td>
+            <td>{% if w.n_viol %}<span class="st bad">нарушений {{ w.n_viol }}</span>{% else %}<span class="st ok">ok</span>{% endif %}</td></tr>
+        {% endfor %}</tbody>
+      </table>
+      </div>
+      <p class="note">Подробно по каждому кошельку — на странице <a href="/paper">кошельков</a>, все ставки — на <a href="/bets">«Ставках»</a>.</p>
+    </div>
+  </section>
+
+  <section class="sec"><h2>Крон</h2>
+    <div class="pane">
+      <p style="margin: 0;">За сутки <b class="num">{{ a.cron.runs }}</b> запусков, с ошибкой <b class="num {{ 'neg' if a.cron.fails else '' }}">{{ a.cron.fails }}</b>.{% if a.cron.since_when %} <span class="muted">Учёт каждого запуска ведётся с {{ a.cron.since_when }}.</span>{% endif %}</p>
+      {% if a.cron.failed %}<ul class="viol">{% for f in a.cron.failed %}<li>{{ f }}</li>{% endfor %}</ul>{% endif %}
+      {% if a.cron.fixed %}<ul class="viol" style="color: var(--bk-pos)">{% for f in a.cron.fixed %}<li>✓ {{ f }}</li>{% endfor %}</ul>{% endif %}
+      <p class="note">Расписание, длительность и ошибки каждого скрипта — на странице <a href="/status">«Здоровье системы»</a>.</p>
+    </div>
+  </section>
+  {% endif %}
+  </section>
+</div>
+{% endblock %}

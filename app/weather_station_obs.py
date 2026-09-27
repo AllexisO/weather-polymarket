@@ -22,6 +22,7 @@ https://mesonet.agron.iastate.edu/request/download.phtml
 станциями и повтор с ожиданием.
 """
 
+from jobmark import item_guard
 import csv
 import io
 import os
@@ -107,54 +108,55 @@ def run():
     ensure_schema(conn)
     now = datetime.now(timezone.utc)
     for i, (city, cfg) in enumerate(OBS_CITIES.items()):
-        station = cfg["iem"]
-        first, last = conn.execute(
-            "SELECT MIN(valid_utc), MAX(valid_utc) FROM station_obs WHERE station = ?", (station,)
-        ).fetchone()
-        ranges = []
-        if first and datetime.fromisoformat(first).replace(tzinfo=timezone.utc) > HISTORY_START + timedelta(days=1):
-            ranges.append((HISTORY_START, datetime.fromisoformat(first).replace(tzinfo=timezone.utc) + timedelta(days=1)))
-        start = datetime.fromisoformat(last).replace(tzinfo=timezone.utc) - timedelta(days=2) if last else HISTORY_START
-        ranges.append((start, now + timedelta(days=1)))
-        rows = []
-        try:
-            for j, (a, b) in enumerate(ranges):
-                if i or j:
-                    time.sleep(IEM_DELAY_S)
-                rows += fetch_obs(station, a, b)
-        except requests.RequestException as e:
-            print(f"{city}: ошибка — {e}", file=sys.stderr)
-            continue
-        conn.executemany(
-            "INSERT OR IGNORE INTO station_obs (city, station, valid_utc, tmpf, drct, sknt, skyc1, dwpf, alti) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            [(city, station, r["valid"], num(r["tmpf"]), num(r["drct"]), num(r["sknt"]), r.get("skyc1"),
-              num(r.get("dwpf")), num(r.get("alti")))
-             for r in rows if r.get("valid")],
-        )
-        conn.commit()
+        with item_guard(city, conn):
+            station = cfg["iem"]
+            first, last = conn.execute(
+                "SELECT MIN(valid_utc), MAX(valid_utc) FROM station_obs WHERE station = ?", (station,)
+            ).fetchone()
+            ranges = []
+            if first and datetime.fromisoformat(first).replace(tzinfo=timezone.utc) > HISTORY_START + timedelta(days=1):
+                ranges.append((HISTORY_START, datetime.fromisoformat(first).replace(tzinfo=timezone.utc) + timedelta(days=1)))
+            start = datetime.fromisoformat(last).replace(tzinfo=timezone.utc) - timedelta(days=2) if last else HISTORY_START
+            ranges.append((start, now + timedelta(days=1)))
+            rows = []
+            try:
+                for j, (a, b) in enumerate(ranges):
+                    if i or j:
+                        time.sleep(IEM_DELAY_S)
+                    rows += fetch_obs(station, a, b)
+            except requests.RequestException as e:
+                print(f"{city}: ошибка — {e}", file=sys.stderr)
+                continue
+            conn.executemany(
+                "INSERT OR IGNORE INTO station_obs (city, station, valid_utc, tmpf, drct, sknt, skyc1, dwpf, alti) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [(city, station, r["valid"], num(r["tmpf"]), num(r["drct"]), num(r["sknt"]), r.get("skyc1"),
+                  num(r.get("dwpf")), num(r.get("alti")))
+                 for r in rows if r.get("valid")],
+            )
+            conn.commit()
 
-        # Дневной максимум по МЕСТНОЙ дате, только по полностью закончившимся дням.
-        tz = ZoneInfo(cfg["tz"])
-        today_local = datetime.now(tz).date().isoformat()
-        by_date = {}
-        for r in conn.execute("SELECT valid_utc, tmpf FROM station_obs WHERE station = ? AND tmpf IS NOT NULL", (station,)):
-            d = datetime.fromisoformat(r["valid_utc"]).replace(tzinfo=timezone.utc).astimezone(tz).date().isoformat()
-            if d < today_local:
-                by_date.setdefault(d, []).append(r["tmpf"])
-        daily = []
-        for d, vals in by_date.items():
-            mx = max(vals)
-            if cfg["unit"] == "celsius":
-                # METAR вне США — целые °C, IEM отдаёт их переведёнными в °F;
-                # переводим обратно и округляем до исходного целого.
-                mx = round((mx - 32) * 5 / 9)
-            daily.append((city, d, cfg["unit"], mx, len(vals), now.isoformat()))
-        conn.executemany(
-            "INSERT OR REPLACE INTO weather_station_daily (city, local_date, unit, actual_max, n_obs, resolved_at) VALUES (?, ?, ?, ?, ?, ?)",
-            daily,
-        )
-        conn.commit()
-        print(f"{city} ({station}): {len(rows)} сводок, {len(daily)} дней")
+            # Дневной максимум по МЕСТНОЙ дате, только по полностью закончившимся дням.
+            tz = ZoneInfo(cfg["tz"])
+            today_local = datetime.now(tz).date().isoformat()
+            by_date = {}
+            for r in conn.execute("SELECT valid_utc, tmpf FROM station_obs WHERE station = ? AND tmpf IS NOT NULL", (station,)):
+                d = datetime.fromisoformat(r["valid_utc"]).replace(tzinfo=timezone.utc).astimezone(tz).date().isoformat()
+                if d < today_local:
+                    by_date.setdefault(d, []).append(r["tmpf"])
+            daily = []
+            for d, vals in by_date.items():
+                mx = max(vals)
+                if cfg["unit"] == "celsius":
+                    # METAR вне США — целые °C, IEM отдаёт их переведёнными в °F;
+                    # переводим обратно и округляем до исходного целого.
+                    mx = round((mx - 32) * 5 / 9)
+                daily.append((city, d, cfg["unit"], mx, len(vals), now.isoformat()))
+            conn.executemany(
+                "INSERT OR REPLACE INTO weather_station_daily (city, local_date, unit, actual_max, n_obs, resolved_at) VALUES (?, ?, ?, ?, ?, ?)",
+                daily,
+            )
+            conn.commit()
+            print(f"{city} ({station}): {len(rows)} сводок, {len(daily)} дней")
     conn.close()
 
 

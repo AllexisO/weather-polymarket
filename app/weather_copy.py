@@ -14,6 +14,7 @@ $2. Итог считает weather_paper.py (settle — все открытые
 Крон: каждую минуту (быстрее крон не умеет). Запуск: python weather_copy.py
 """
 
+from jobmark import item_guard
 import json
 import os
 import sqlite3
@@ -132,17 +133,24 @@ def main():
         # 2026-09-26: опрос параллельно — проверка раз в минуту (задержка повтора съедает заработок:
         # на проверке через 0.5 мин +1.0%, 1 мин +0.1%, 2.5 мин −1.1%, 5 мин −2.3%)
         try:
-            return w, requests.get(f"{DATA_API}/trades", params={"user": w, "limit": 50}, timeout=20).json()
+            data = requests.get(f"{DATA_API}/trades", params={"user": w, "limit": 50}, timeout=20).json()
         except (requests.RequestException, ValueError) as e:
             print(f"{w[:10]}: ошибка — {e}")
             return w, []
+        # 2026-09-27: Data API иногда отвечает объектом-ошибкой ({"error": ...}) вместо списка сделок —
+        # раньше скрипт падал на первом таком трейдере и не проверял остальных; теперь пропускаем только его
+        if not isinstance(data, list):
+            print(f"{w[:10]}: Polymarket ответил не списком сделок — {str(data)[:150]}")
+            return w, []
+        return w, [t for t in data if isinstance(t, dict)]
 
     from concurrent.futures import ThreadPoolExecutor
     with ThreadPoolExecutor(8) as pool:
         feeds = list(pool.map(fetch, sharps))
     for w, trades in feeds:
-        for t in sorted(trades, key=lambda x: x.get("timestamp", 0)):
-            placed += bool(try_copy(conn, w, t, now))
+        with item_guard(w[:10], conn):
+            for t in sorted(trades, key=lambda x: x.get("timestamp", 0)):
+                placed += bool(try_copy(conn, w, t, now))
     print(f"повтор: проверено трейдеров {len(sharps)}, новых ставок {placed}")
     from jobmark import mark
     mark(conn, "weather_copy")

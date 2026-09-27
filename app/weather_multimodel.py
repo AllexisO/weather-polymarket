@@ -38,6 +38,7 @@ ECMWF/ICON один в один) отбрасываются по совпаде�
 live_bucket_probs().
 """
 
+from jobmark import item_guard
 import os
 import sqlite3
 import sys
@@ -242,28 +243,29 @@ def run():
     ensure_schema(conn)
     tomorrow = (datetime.now(timezone.utc).date() + timedelta(days=1)).isoformat()
     for city, cfg in CITIES.items():
-        last = conn.execute(
-            "SELECT MAX(local_date) FROM mm_forecasts WHERE city = ? AND lead = 'day1'", (city,)
-        ).fetchone()[0]
-        start = (date.fromisoformat(last) - timedelta(days=3)).isoformat() if last else HISTORY_START.isoformat()
-        try:
-            by_model = _fetch_daily_max(PREVIOUS_RUNS_API, "temperature_2m_previous_day1", cfg,
-                                        start_date=start, end_date=tomorrow)
-        except requests.RequestException as e:
-            print(f"{city}: ошибка — {e}", file=sys.stderr)
-            continue
-        store(conn, city, "day1", by_model)
-        updated = backfill_snapshots(conn, city, cfg["unit"])
-        today = datetime.now(ZoneInfo(cfg["tz"])).date().isoformat()
-        params = fit(conn, city, cfg["unit"], today)
-        if params:
-            top = sorted(params["models"].items(), key=lambda kv: -kv[1]["w"])[:3]
-            share = sum(p["w"] for p in params["models"].values())
-            desc = ", ".join(f"{m} {100 * p['w'] / share:.0f}%" for m, p in top)
-            print(f"{city}: {len(by_model)} моделей, sigma={params['sigma']:.2f} (n={params['n']}), "
-                  f"главные веса: {desc}; бэктест-строк: {updated}")
-        else:
-            print(f"{city}: {len(by_model)} моделей, истории пока мало")
+        with item_guard(city, conn):
+            last = conn.execute(
+                "SELECT MAX(local_date) FROM mm_forecasts WHERE city = ? AND lead = 'day1'", (city,)
+            ).fetchone()[0]
+            start = (date.fromisoformat(last) - timedelta(days=3)).isoformat() if last else HISTORY_START.isoformat()
+            try:
+                by_model = _fetch_daily_max(PREVIOUS_RUNS_API, "temperature_2m_previous_day1", cfg,
+                                            start_date=start, end_date=tomorrow)
+            except requests.RequestException as e:
+                print(f"{city}: ошибка — {e}", file=sys.stderr)
+                continue
+            store(conn, city, "day1", by_model)
+            updated = backfill_snapshots(conn, city, cfg["unit"])
+            today = datetime.now(ZoneInfo(cfg["tz"])).date().isoformat()
+            params = fit(conn, city, cfg["unit"], today)
+            if params:
+                top = sorted(params["models"].items(), key=lambda kv: -kv[1]["w"])[:3]
+                share = sum(p["w"] for p in params["models"].values())
+                desc = ", ".join(f"{m} {100 * p['w'] / share:.0f}%" for m, p in top)
+                print(f"{city}: {len(by_model)} моделей, sigma={params['sigma']:.2f} (n={params['n']}), "
+                      f"главные веса: {desc}; бэктест-строк: {updated}")
+            else:
+                print(f"{city}: {len(by_model)} моделей, истории пока мало")
     conn.close()
 
 

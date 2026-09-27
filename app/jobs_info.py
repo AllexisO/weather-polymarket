@@ -26,6 +26,8 @@ JOBS = [
     ("weather_price_history", "История цен", "weather_price_history.py", "04:50", 26 * 60, "weather_price_history.log"),
     ("weather_ml_train", "Ночное обучение модели", "weather_ml_live.py", "05:20", 26 * 60, "weather_ml_train.log"),
     ("weather_ml_skill", "«Насколько модель права»", "weather_ml_skill.py", "05:50", 26 * 60, "weather_ml_skill.log"),
+    ("weather_audit", "Проверка кошельков, моделей и базы", "weather_audit.py", "каждые 2 ч, :15; в 03:45 — с целостностью базы", 160, "weather_audit.log"),
+    ("weather_night_check", "Проверки утро / день / вечер", "weather_night_check.py", "07:00, 13:00, 23:30", 11 * 60, "weather_night_check.log"),
     ("weather_alerts", "Проверки и тревоги", "weather_alerts.py", "каждые 30 мин", 70, "weather_alerts.log"),
 ]
 

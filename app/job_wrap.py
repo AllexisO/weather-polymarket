@@ -16,6 +16,7 @@ from urllib.parse import urlparse
 
 APP = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, APP)
+import jobmark  # noqa: E402
 from jobmark import log_run  # noqa: E402
 from jobs_info import KEY_BY_SCRIPT  # noqa: E402
 
@@ -63,7 +64,9 @@ def main():
     finally:
         sys.stdout.flush()
         log_run(os.environ.get("POLY_LAB_DB", "/data/db/polymarket_lab.sqlite3"), job, rc,
-                started, datetime.now(timezone.utc), _calls["om"])
+                started, datetime.now(timezone.utc), _calls["om"], len(jobmark.ITEM_ERRORS))
+        if jobmark.ITEM_ERRORS:
+            print(f"ИТОГ: пропущено из-за ошибок — {len(jobmark.ITEM_ERRORS)}", flush=True)
     sys.exit(rc)
 
 

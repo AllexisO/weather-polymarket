@@ -39,6 +39,8 @@
   .feed { list-style: none; margin: 0; padding: 6px 20px; background: var(--bk-card); border: 1px solid var(--bk-line); border-radius: 18px; }
   .feed li { display: grid; grid-template-columns: 48px 36px minmax(0, 1fr); gap: 12px; align-items: start; padding: 13px 0; border-bottom: 1px solid var(--bk-line); }
   .feed li:last-child { border-bottom: 0; }
+  /* 2026-09-27: display: grid у строк перебивал атрибут hidden — фильтр ничего не прятал */
+  .bk [hidden] { display: none !important; }
   .hm { font-size: 13.5px; color: var(--bk-muted); font-variant-numeric: tabular-nums; padding-top: 7px; }
   .ic { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; background: color-mix(in srgb, var(--c) 16%, transparent); color: var(--c); }
   .ic svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
@@ -85,6 +87,7 @@
     </ul>
   </section>
   {% endfor %}
+  <div class="empty" id="none" hidden>За 3 дня таких событий нет.</div>
   <p class="foot">Числа на кнопках — за последние сутки. Частые скрипты (живые замеры, запасной опрос сделок, проверки, быстрый снимок, итоги и расчёт кошельков) в ленту не пишутся, пока не упадут — их результат виден как «пришли итоги» и «открыто / закрыто ставок». Подробный учёт запусков ведётся с 27.09.</p>
   {% else %}
   <div class="empty">За 3 дня событий нет.</div>
@@ -93,14 +96,22 @@
 <script>
 (function () {
   var btns = document.querySelectorAll('.filters button');
-  btns.forEach(function (b) {
-    b.addEventListener('click', function () {
-      var f = b.dataset.f;
+  function apply(b) {
+    var f = b.dataset.f;
       btns.forEach(function (x) { x.setAttribute('aria-pressed', x === b ? 'true' : 'false'); });
       document.querySelectorAll('.feed li').forEach(function (li) { li.hidden = f !== 'all' && li.dataset.k !== f; });
       document.querySelectorAll('.day').forEach(function (d) { d.hidden = !d.querySelector('li:not([hidden])'); });
+      var none = document.getElementById('none'); if (none) none.hidden = !!document.querySelector('.day:not([hidden])');
+  }
+  btns.forEach(function (b) {
+    b.addEventListener('click', function () {
+      apply(b);
+      try { history.replaceState(null, '', b.dataset.f === 'all' ? location.pathname : '#' + b.dataset.f); } catch (e) {}
     });
   });
+  // фильтр по ссылке: /events#train, #data, #fail ...
+  var h = location.hash.slice(1), start = h && document.querySelector('.filters button[data-f="' + h.replace(/[^a-z]/g, '') + '"]');
+  if (start) apply(start);
 })();
 </script>
 {% endblock %}

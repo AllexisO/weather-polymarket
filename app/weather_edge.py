@@ -14,6 +14,7 @@ snapshots (не upsert — история снимков копится спец
 видеть, как расхождение менялось в течение дня).
 """
 
+from jobmark import item_guard
 import json
 import math
 import os
@@ -329,167 +330,168 @@ def run():
         print(f"{city}: EMOS a={p['a']:.2f} b={p['b']:.2f} spread_scale={p['spread_scale']:.2f} (n={p['n']})")
 
     for i_city, (city, cfg) in enumerate(CITIES.items()):
-        if i_city:
-            time.sleep(CITY_PAUSE_S)
-        tz = ZoneInfo(cfg["tz"])
-        today_local = datetime.now(tz)
-        bias = city_bias.get(city, 0.0)
-        emos = emos_params.get(city)
+        with item_guard(city, conn):
+            if i_city:
+                time.sleep(CITY_PAUSE_S)
+            tz = ZoneInfo(cfg["tz"])
+            today_local = datetime.now(tz)
+            bias = city_bias.get(city, 0.0)
+            emos = emos_params.get(city)
 
-        ensembles = {}
-        for model in ENSEMBLE_MODELS:
-            try:
-                ensembles[model] = fetch_ensemble_daily_max(cfg["lat"], cfg["lon"], cfg["tz"], cfg["unit"], model)
-            except requests.RequestException as e:
-                print(f"{city}: ошибка запроса ({model}) — {e}", file=sys.stderr)
-        if not any(ensembles.values()):
-            continue
-
-        wn2_ensemble = []
-        if city in WN2_CITIES:
-            try:
-                wn2_ensemble = fetch_ensemble_daily_max(cfg["lat"], cfg["lon"], cfg["tz"], cfg["unit"], WEATHERNEXT2_MODEL)
-            except requests.RequestException as e:
-                print(f"{city}: ошибка запроса (WeatherNext 2) — {e}", file=sys.stderr)
-
-        try:
-            market = fetch_polymarket_buckets(cfg["poly_slug"], today_local)
-        except requests.RequestException as e:
-            print(f"{city}: ошибка запроса (Polymarket) — {e}", file=sys.stderr)
-            continue
-
-        if market is None or not market["buckets"]:
-            print(f"{city}: маркет на сегодня не найден", file=sys.stderr)
-            continue
-
-        # Пул сырых членов GFS+ICON — вход для EMOS (см. weather_bias.py).
-        # Пулим оба источника вместе: EMOS-регрессия обучена на такой же
-        # пуле (compute_ensemble_moments восстанавливает его из истории).
-        # Микс ~16 моделей с весами по городу — отдельный трек (mm_*),
-        # см. weather_multimodel.py. Ошибка сети здесь не должна ломать
-        # основной снимок.
-        mm_probs = None
-        try:
-            mm = live_bucket_probs(conn, city, cfg, market["buckets"])
-            if mm is not None:
-                mm_probs, mm_mu, _ = mm
-                print(f"{city}: микс моделей — прогноз максимума {mm_mu:.1f}")
-        except requests.RequestException as e:
-            print(f"{city}: ошибка запроса (микс моделей) — {e}", file=sys.stderr)
-
-        ml_probs = ml2_probs = ml3_probs = ml3c_probs = ml4_probs = ml4c_probs = ml4e_probs = ml4ec_probs = None
-        try:
-            from weather_ml_live import bucket_probs as ml_bucket_probs
-            ml_res = ml_bucket_probs(conn, city, cfg, market["buckets"],
-                                     metars_by_icao.get(OBS_CITIES[city]["icao"], []))
-            if ml_res is not None:
-                ml_probs, ml_mu, ml2_probs, ml3_probs, ml4_probs, ml4e_probs = ml_res
-                ml3c_probs = ml4c_probs = None
-                from weather_ml_live import blend_with_market
-                if ml3_probs:
-                    ml3c_probs = blend_with_market(ml3_probs, [b["market_p"] for b in market["buckets"]])
-                if ml4_probs:
-                    ml4c_probs = blend_with_market(ml4_probs, [b["market_p"] for b in market["buckets"]])
-                if ml4e_probs:
-                    ml4ec_probs = blend_with_market(ml4e_probs, [b["market_p"] for b in market["buckets"]])
-                print(f"{city}: обучаемая модель — прогноз максимума {ml_mu:.1f}")
-        except Exception as e:  # отдельный трек: его ошибка не должна ломать снимок
-            print(f"{city}: ошибка обучаемой модели — {e}", file=sys.stderr)
-
-        pooled = [v for members in ensembles.values() for v in members]
-        emos_mean = emos_std = None
-        if emos is not None and pooled:
-            raw_mean = sum(pooled) / len(pooled)
-            raw_var = sum((v - raw_mean) ** 2 for v in pooled) / len(pooled)
-            emos_mean = emos["a"] + emos["b"] * raw_mean
-            emos_std = emos["spread_scale"] * (raw_var ** 0.5)
-
-        rows = []
-        for i_b, b in enumerate(market["buckets"]):
-            mp, ensemble_n = blended_model_prob(ensembles, b["lo"], b["hi"], bias)
-            if mp is None:
+            ensembles = {}
+            for model in ENSEMBLE_MODELS:
+                try:
+                    ensembles[model] = fetch_ensemble_daily_max(cfg["lat"], cfg["lon"], cfg["tz"], cfg["unit"], model)
+                except requests.RequestException as e:
+                    print(f"{city}: ошибка запроса ({model}) — {e}", file=sys.stderr)
+            if not any(ensembles.values()):
                 continue
-            edge = mp - b["market_p"]
-            # WeatherNext 2 — отдельная, ничем не поправленная колонка
-            # (см. WEATHERNEXT2_MODEL): своя вероятность, свой edge.
-            wn2_mp = model_prob(wn2_ensemble, b["lo"], b["hi"])
-            wn2_edge = (wn2_mp - b["market_p"]) if wn2_mp is not None else None
-            wn2_n = len(wn2_ensemble) if wn2_ensemble else None
-            # EMOS — тоже отдельная колонка (по тем же причинам, что и
-            # WeatherNext 2): свежий, непроверенный метод, смешивать с
-            # основным прогнозом сразу — потерять возможность честно
-            # понять, помог ли он.
-            emos_mp = emos_edge = None
-            if emos_mean is not None:
-                emos_mp = emos_bucket_prob(emos_mean, emos_std, b["lo"], b["hi"])
-                emos_edge = emos_mp - b["market_p"]
-            rows.append(
-                (
-                    now.isoformat(),
-                    city,
-                    today_local.date().isoformat(),
-                    today_local.hour,
-                    cfg["unit"],
-                    b["lo"],
-                    b["hi"],
-                    b["market_p"],
-                    mp,
-                    edge,
-                    market["event_vol"],
-                    ensemble_n,
-                    wn2_mp,
-                    wn2_edge,
-                    wn2_n,
-                    emos_mp,
-                    emos_edge,
-                    b["best_ask"],
-                    mm_probs[i_b] if mm_probs else None,
-                    (mm_probs[i_b] - b["market_p"]) if mm_probs else None,
-                    ml_probs[i_b] if ml_probs else None,
-                    (ml_probs[i_b] - b["market_p"]) if ml_probs else None,
-                    ml2_probs[i_b] if ml2_probs else None,
-                    (ml2_probs[i_b] - b["market_p"]) if ml2_probs else None,
-                    ml3_probs[i_b] if ml3_probs else None,
-                    (ml3_probs[i_b] - b["market_p"]) if ml3_probs else None,
-                    ml3c_probs[i_b] if ml3c_probs else None,
-                    (ml3c_probs[i_b] - b["market_p"]) if ml3c_probs else None,
-                    ml4_probs[i_b] if ml4_probs else None,
-                    (ml4_probs[i_b] - b["market_p"]) if ml4_probs else None,
-                    ml4c_probs[i_b] if ml4c_probs else None,
-                    (ml4c_probs[i_b] - b["market_p"]) if ml4c_probs else None,
-                    ml4e_probs[i_b] if ml4e_probs else None,
-                    (ml4e_probs[i_b] - b["market_p"]) if ml4e_probs else None,
-                    ml4ec_probs[i_b] if ml4ec_probs else None,
-                    (ml4ec_probs[i_b] - b["market_p"]) if ml4ec_probs else None,
-                )
-            )
-        conn.executemany(
-            """
-            INSERT INTO snapshots
-            (ts_utc, city, local_date, local_hour, unit, bucket_lo, bucket_hi, market_p, model_p, edge, event_vol, ensemble_n,
-             wn2_model_p, wn2_edge, wn2_ensemble_n, emos_model_p, emos_edge, best_ask, mm_model_p, mm_edge, ml_model_p, ml_edge, ml2_model_p, ml2_edge, ml3_model_p, ml3_edge, ml3c_model_p, ml3c_edge, ml4_model_p, ml4_edge, ml4c_model_p, ml4c_edge,
-             ml4e_model_p, ml4e_edge, ml4ec_model_p, ml4ec_edge)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            rows,
-        )
-        conn.commit()
 
-        unit_sym = "°F" if cfg["unit"] == "fahrenheit" else "°C"
-        best = max(rows, key=lambda r: abs(r[9])) if rows else None
-        if best:
-            print(f"{city} ({today_local.hour:02d}:00 местных): макс |edge|={best[9]:+.3f} "
-                  f"в бакете {best[5]}-{best[6]}{unit_sym} (модель={best[8]:.2f}, рынок={best[7]:.2f})")
-        wn2_rows = [r for r in rows if r[13] is not None]
-        wn2_best = max(wn2_rows, key=lambda r: abs(r[13])) if wn2_rows else None
-        if wn2_best:
-            print(f"{city} WeatherNext2: макс |edge|={wn2_best[13]:+.3f} "
-                  f"в бакете {wn2_best[5]}-{wn2_best[6]}{unit_sym} (модель={wn2_best[12]:.2f}, рынок={wn2_best[7]:.2f})")
-        emos_rows = [r for r in rows if r[16] is not None]
-        emos_best = max(emos_rows, key=lambda r: abs(r[16])) if emos_rows else None
-        if emos_best:
-            print(f"{city} EMOS: макс |edge|={emos_best[16]:+.3f} "
-                  f"в бакете {emos_best[5]}-{emos_best[6]}{unit_sym} (модель={emos_best[15]:.2f}, рынок={emos_best[7]:.2f})")
+            wn2_ensemble = []
+            if city in WN2_CITIES:
+                try:
+                    wn2_ensemble = fetch_ensemble_daily_max(cfg["lat"], cfg["lon"], cfg["tz"], cfg["unit"], WEATHERNEXT2_MODEL)
+                except requests.RequestException as e:
+                    print(f"{city}: ошибка запроса (WeatherNext 2) — {e}", file=sys.stderr)
+
+            try:
+                market = fetch_polymarket_buckets(cfg["poly_slug"], today_local)
+            except requests.RequestException as e:
+                print(f"{city}: ошибка запроса (Polymarket) — {e}", file=sys.stderr)
+                continue
+
+            if market is None or not market["buckets"]:
+                print(f"{city}: маркет на сегодня не найден", file=sys.stderr)
+                continue
+
+            # Пул сырых членов GFS+ICON — вход для EMOS (см. weather_bias.py).
+            # Пулим оба источника вместе: EMOS-регрессия обучена на такой же
+            # пуле (compute_ensemble_moments восстанавливает его из истории).
+            # Микс ~16 моделей с весами по городу — отдельный трек (mm_*),
+            # см. weather_multimodel.py. Ошибка сети здесь не должна ломать
+            # основной снимок.
+            mm_probs = None
+            try:
+                mm = live_bucket_probs(conn, city, cfg, market["buckets"])
+                if mm is not None:
+                    mm_probs, mm_mu, _ = mm
+                    print(f"{city}: микс моделей — прогноз максимума {mm_mu:.1f}")
+            except requests.RequestException as e:
+                print(f"{city}: ошибка запроса (микс моделей) — {e}", file=sys.stderr)
+
+            ml_probs = ml2_probs = ml3_probs = ml3c_probs = ml4_probs = ml4c_probs = ml4e_probs = ml4ec_probs = None
+            try:
+                from weather_ml_live import bucket_probs as ml_bucket_probs
+                ml_res = ml_bucket_probs(conn, city, cfg, market["buckets"],
+                                         metars_by_icao.get(OBS_CITIES[city]["icao"], []))
+                if ml_res is not None:
+                    ml_probs, ml_mu, ml2_probs, ml3_probs, ml4_probs, ml4e_probs = ml_res
+                    ml3c_probs = ml4c_probs = None
+                    from weather_ml_live import blend_with_market
+                    if ml3_probs:
+                        ml3c_probs = blend_with_market(ml3_probs, [b["market_p"] for b in market["buckets"]])
+                    if ml4_probs:
+                        ml4c_probs = blend_with_market(ml4_probs, [b["market_p"] for b in market["buckets"]])
+                    if ml4e_probs:
+                        ml4ec_probs = blend_with_market(ml4e_probs, [b["market_p"] for b in market["buckets"]])
+                    print(f"{city}: обучаемая модель — прогноз максимума {ml_mu:.1f}")
+            except Exception as e:  # отдельный трек: его ошибка не должна ломать снимок
+                print(f"{city}: ошибка обучаемой модели — {e}", file=sys.stderr)
+
+            pooled = [v for members in ensembles.values() for v in members]
+            emos_mean = emos_std = None
+            if emos is not None and pooled:
+                raw_mean = sum(pooled) / len(pooled)
+                raw_var = sum((v - raw_mean) ** 2 for v in pooled) / len(pooled)
+                emos_mean = emos["a"] + emos["b"] * raw_mean
+                emos_std = emos["spread_scale"] * (raw_var ** 0.5)
+
+            rows = []
+            for i_b, b in enumerate(market["buckets"]):
+                mp, ensemble_n = blended_model_prob(ensembles, b["lo"], b["hi"], bias)
+                if mp is None:
+                    continue
+                edge = mp - b["market_p"]
+                # WeatherNext 2 — отдельная, ничем не поправленная колонка
+                # (см. WEATHERNEXT2_MODEL): своя вероятность, свой edge.
+                wn2_mp = model_prob(wn2_ensemble, b["lo"], b["hi"])
+                wn2_edge = (wn2_mp - b["market_p"]) if wn2_mp is not None else None
+                wn2_n = len(wn2_ensemble) if wn2_ensemble else None
+                # EMOS — тоже отдельная колонка (по тем же причинам, что и
+                # WeatherNext 2): свежий, непроверенный метод, смешивать с
+                # основным прогнозом сразу — потерять возможность честно
+                # понять, помог ли он.
+                emos_mp = emos_edge = None
+                if emos_mean is not None:
+                    emos_mp = emos_bucket_prob(emos_mean, emos_std, b["lo"], b["hi"])
+                    emos_edge = emos_mp - b["market_p"]
+                rows.append(
+                    (
+                        now.isoformat(),
+                        city,
+                        today_local.date().isoformat(),
+                        today_local.hour,
+                        cfg["unit"],
+                        b["lo"],
+                        b["hi"],
+                        b["market_p"],
+                        mp,
+                        edge,
+                        market["event_vol"],
+                        ensemble_n,
+                        wn2_mp,
+                        wn2_edge,
+                        wn2_n,
+                        emos_mp,
+                        emos_edge,
+                        b["best_ask"],
+                        mm_probs[i_b] if mm_probs else None,
+                        (mm_probs[i_b] - b["market_p"]) if mm_probs else None,
+                        ml_probs[i_b] if ml_probs else None,
+                        (ml_probs[i_b] - b["market_p"]) if ml_probs else None,
+                        ml2_probs[i_b] if ml2_probs else None,
+                        (ml2_probs[i_b] - b["market_p"]) if ml2_probs else None,
+                        ml3_probs[i_b] if ml3_probs else None,
+                        (ml3_probs[i_b] - b["market_p"]) if ml3_probs else None,
+                        ml3c_probs[i_b] if ml3c_probs else None,
+                        (ml3c_probs[i_b] - b["market_p"]) if ml3c_probs else None,
+                        ml4_probs[i_b] if ml4_probs else None,
+                        (ml4_probs[i_b] - b["market_p"]) if ml4_probs else None,
+                        ml4c_probs[i_b] if ml4c_probs else None,
+                        (ml4c_probs[i_b] - b["market_p"]) if ml4c_probs else None,
+                        ml4e_probs[i_b] if ml4e_probs else None,
+                        (ml4e_probs[i_b] - b["market_p"]) if ml4e_probs else None,
+                        ml4ec_probs[i_b] if ml4ec_probs else None,
+                        (ml4ec_probs[i_b] - b["market_p"]) if ml4ec_probs else None,
+                    )
+                )
+            conn.executemany(
+                """
+                INSERT INTO snapshots
+                (ts_utc, city, local_date, local_hour, unit, bucket_lo, bucket_hi, market_p, model_p, edge, event_vol, ensemble_n,
+                 wn2_model_p, wn2_edge, wn2_ensemble_n, emos_model_p, emos_edge, best_ask, mm_model_p, mm_edge, ml_model_p, ml_edge, ml2_model_p, ml2_edge, ml3_model_p, ml3_edge, ml3c_model_p, ml3c_edge, ml4_model_p, ml4_edge, ml4c_model_p, ml4c_edge,
+                 ml4e_model_p, ml4e_edge, ml4ec_model_p, ml4ec_edge)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                rows,
+            )
+            conn.commit()
+
+            unit_sym = "°F" if cfg["unit"] == "fahrenheit" else "°C"
+            best = max(rows, key=lambda r: abs(r[9])) if rows else None
+            if best:
+                print(f"{city} ({today_local.hour:02d}:00 местных): макс |edge|={best[9]:+.3f} "
+                      f"в бакете {best[5]}-{best[6]}{unit_sym} (модель={best[8]:.2f}, рынок={best[7]:.2f})")
+            wn2_rows = [r for r in rows if r[13] is not None]
+            wn2_best = max(wn2_rows, key=lambda r: abs(r[13])) if wn2_rows else None
+            if wn2_best:
+                print(f"{city} WeatherNext2: макс |edge|={wn2_best[13]:+.3f} "
+                      f"в бакете {wn2_best[5]}-{wn2_best[6]}{unit_sym} (модель={wn2_best[12]:.2f}, рынок={wn2_best[7]:.2f})")
+            emos_rows = [r for r in rows if r[16] is not None]
+            emos_best = max(emos_rows, key=lambda r: abs(r[16])) if emos_rows else None
+            if emos_best:
+                print(f"{city} EMOS: макс |edge|={emos_best[16]:+.3f} "
+                      f"в бакете {emos_best[5]}-{emos_best[6]}{unit_sym} (модель={emos_best[15]:.2f}, рынок={emos_best[7]:.2f})")
 
     from jobmark import mark
     mark(conn, "weather_edge")

@@ -30,6 +30,7 @@
 weather_edge.py и weather_poly_resolve.py.
 """
 
+from jobmark import item_guard
 import json
 import os
 import sqlite3
@@ -47,7 +48,8 @@ START_BALANCE = 100.0
 # 2026-09-27 (решение Alex): повтору за сильными трейдерами — $300. Он покупает сразу по многим
 # городам на 2 дня вперёд, и $100 кончались (39 ставок) — пропускал сигналы. Сравниваем кошельки
 # по доходности в % от поставленного, а не в долларах.
-START_BY_WALLET = {"copy": 300.0}
+# 2026-09-28 (решение Alex): v1 (ml) — тоже $300: при $100 деньги кончились ($1.85), кошелёк перестал ставить
+START_BY_WALLET = {"copy": 300.0, "ml": 300.0}
 
 
 def start_balance(wallet):
@@ -329,137 +331,138 @@ def place(conn, now, only=None):
             print(f"{wallet}: в снимках ещё нет колонки {field} — пропускаем")
             continue
         for city in CITIES:
-            days = conn.execute(
-                """
-                SELECT s.local_date, MIN(s.ts_utc) AS ts FROM snapshots s
-                LEFT JOIN paper_trades t ON t.wallet = ? AND t.city = s.city AND t.local_date = s.local_date
-                WHERE s.city = ? AND s.ts_utc >= ? AND s.local_hour < 12 AND t.id IS NULL
-                """ + (f" AND s.{field} IS NOT NULL" if wallet in NEEDS_FIELD else "") + """
-                GROUP BY s.local_date
-                """,
-                (wallet, city, START_TS.get(wallet) or
-                 (ML_START_TS if wallet in NEEDS_FIELD else (MAKER_START_TS if maker else PAPER_START_TS))),
-            ).fetchall()
-            days = [{"local_date": d["local_date"], "ts": d["ts"], "table": "snapshots"} for d in days]
-            if wallet in FAST_WALLETS and has_fast and field in fast_cols:
-                fast = conn.execute(
-                    f"""SELECT s.local_date, MIN(s.ts_utc) AS ts FROM snapshots_fast s
-                        LEFT JOIN paper_trades t ON t.wallet = ? AND t.city = s.city AND t.local_date = s.local_date
-                        WHERE s.city = ? AND s.ts_utc >= ? AND s.local_hour < 12 AND t.id IS NULL AND s.{field} IS NOT NULL
-                        GROUP BY s.local_date""",
-                    (wallet, city, START_TS.get(wallet) or ML_START_TS)).fetchall()
-                by_date = {d["local_date"]: d for d in days}
-                for f in fast:
-                    cur = by_date.get(f["local_date"])
-                    if cur is None or f["ts"] < cur["ts"]:
-                        by_date[f["local_date"]] = {"local_date": f["local_date"], "ts": f["ts"], "table": "snapshots_fast"}
-                days = sorted(by_date.values(), key=lambda x: x["local_date"])
-            for d in days:
-                if maker and datetime.now().timestamp() >= cutoff_ts(city, d["local_date"]):
-                    continue  # полдень в городе уже прошёл — заявку ставить поздно
-                buckets = conn.execute(
-                    f"SELECT * FROM {d['table']} WHERE city = ? AND local_date = ? AND ts_utc = ?",
-                    (city, d["local_date"], d["ts"]),
+            with item_guard(f"{wallet} {city}", conn):
+                days = conn.execute(
+                    """
+                    SELECT s.local_date, MIN(s.ts_utc) AS ts FROM snapshots s
+                    LEFT JOIN paper_trades t ON t.wallet = ? AND t.city = s.city AND t.local_date = s.local_date
+                    WHERE s.city = ? AND s.ts_utc >= ? AND s.local_hour < 12 AND t.id IS NULL
+                    """ + (f" AND s.{field} IS NOT NULL" if wallet in NEEDS_FIELD else "") + """
+                    GROUP BY s.local_date
+                    """,
+                    (wallet, city, START_TS.get(wallet) or
+                     (ML_START_TS if wallet in NEEDS_FIELD else (MAKER_START_TS if maker else PAPER_START_TS))),
                 ).fetchall()
-                if wallet in BIAS_REQUIRED and city not in calibrated:
-                    record_skip(conn, wallet, city, d["local_date"], d["ts"], "skip",
-                                "у основной модели ещё нет поправки на ошибку по этому городу "
-                                "(нужно 15 дней истории) — сырой прогноз не используем")
-                    continue
-                buckets = [b for b in buckets if b[field] is not None]
-                if no_side:
-                    # «нет» на бакет: шансы и цена — со стороны «нет»; дальше та же логика выбора
-                    buckets = [dict(b, **{field: 1 - b[field], "market_p": 1 - b["market_p"]}) for b in buckets]
-                if not buckets:
-                    record_skip(conn, wallet, city, d["local_date"], d["ts"], "skip",
-                                "в утреннем снимке у этой модели не было оценки (мало истории по городу или модель ещё не была подключена)")
-                    continue
-                if wallet in SHIFT_WALLETS:
-                    unit = buckets[0]["unit"]
-                    shift = center_c(buckets, field, unit) - center_c(buckets, "market_p", unit)
-                    if abs(shift) < SHIFT_WALLETS[wallet]:
+                days = [{"local_date": d["local_date"], "ts": d["ts"], "table": "snapshots"} for d in days]
+                if wallet in FAST_WALLETS and has_fast and field in fast_cols:
+                    fast = conn.execute(
+                        f"""SELECT s.local_date, MIN(s.ts_utc) AS ts FROM snapshots_fast s
+                            LEFT JOIN paper_trades t ON t.wallet = ? AND t.city = s.city AND t.local_date = s.local_date
+                            WHERE s.city = ? AND s.ts_utc >= ? AND s.local_hour < 12 AND t.id IS NULL AND s.{field} IS NOT NULL
+                            GROUP BY s.local_date""",
+                        (wallet, city, START_TS.get(wallet) or ML_START_TS)).fetchall()
+                    by_date = {d["local_date"]: d for d in days}
+                    for f in fast:
+                        cur = by_date.get(f["local_date"])
+                        if cur is None or f["ts"] < cur["ts"]:
+                            by_date[f["local_date"]] = {"local_date": f["local_date"], "ts": f["ts"], "table": "snapshots_fast"}
+                    days = sorted(by_date.values(), key=lambda x: x["local_date"])
+                for d in days:
+                    if maker and datetime.now().timestamp() >= cutoff_ts(city, d["local_date"]):
+                        continue  # полдень в городе уже прошёл — заявку ставить поздно
+                    buckets = conn.execute(
+                        f"SELECT * FROM {d['table']} WHERE city = ? AND local_date = ? AND ts_utc = ?",
+                        (city, d["local_date"], d["ts"]),
+                    ).fetchall()
+                    if wallet in BIAS_REQUIRED and city not in calibrated:
                         record_skip(conn, wallet, city, d["local_date"], d["ts"], "skip",
-                                    f"центр модели совпадает с рынком (разница {abs(shift):.1f}°C, нужно от "
-                                    f"{SHIFT_WALLETS[wallet]:.1f}°C) — в такие дни v1 на истории проигрывала")
+                                    "у основной модели ещё нет поправки на ошибку по этому городу "
+                                    "(нужно 15 дней истории) — сырой прогноз не используем")
                         continue
-                b = max(buckets, key=lambda r: r[field] - r["market_p"])
-                label = ("против " if no_side else "") + fmt_bucket(b["bucket_lo"], b["bucket_hi"], b["unit"])
-                edge = b[field] - b["market_p"]
-                min_edge = EDGE_BY_WALLET.get(wallet, MIN_EDGE)
-                if edge < min_edge:
-                    record_skip(conn, wallet, city, d["local_date"], d["ts"], "skip",
-                                f"нет перевеса: лучший вариант {label} — модель {b[field]*100:.0f}%, "
-                                f"рынок {b['market_p']*100:.0f}%, разница {edge*100:.0f} п.п. (нужно от {min_edge*100:.0f})")
-                    continue
-                if not (MIN_PRICE <= b["market_p"] <= MAX_PRICE):
-                    record_skip(conn, wallet, city, d["local_date"], d["ts"], "skip",
-                                f"лучший вариант {label} стоит {cents(b['market_p'])} — вне допустимых "
-                                f"{MIN_PRICE*100:.0f}–{MAX_PRICE*100:.0f}¢ (слишком дешёвые почти никогда не выигрывают)")
-                    continue
-                stake = STAKE
-                if wallet in STAKE_BY_EDGE:
-                    mult, bank, lo_s, hi_s = STAKE_BY_EDGE[wallet]
-                    stake = round(max(lo_s, min(hi_s, bank * mult * edge / (1 - b["market_p"]))), 2)
-                if cash(conn, wallet) < stake:
-                    record_skip(conn, wallet, city, d["local_date"], d["ts"], "skip", f"в кошельке меньше ${stake:.2f}")
-                    continue
-                max_price = min(MAX_PRICE, b[field] - min_edge)
-                if maker:
+                    buckets = [b for b in buckets if b[field] is not None]
+                    if no_side:
+                        # «нет» на бакет: шансы и цена — со стороны «нет»; дальше та же логика выбора
+                        buckets = [dict(b, **{field: 1 - b[field], "market_p": 1 - b["market_p"]}) for b in buckets]
+                    if not buckets:
+                        record_skip(conn, wallet, city, d["local_date"], d["ts"], "skip",
+                                    "в утреннем снимке у этой модели не было оценки (мало истории по городу или модель ещё не была подключена)")
+                        continue
+                    if wallet in SHIFT_WALLETS:
+                        unit = buckets[0]["unit"]
+                        shift = center_c(buckets, field, unit) - center_c(buckets, "market_p", unit)
+                        if abs(shift) < SHIFT_WALLETS[wallet]:
+                            record_skip(conn, wallet, city, d["local_date"], d["ts"], "skip",
+                                        f"центр модели совпадает с рынком (разница {abs(shift):.1f}°C, нужно от "
+                                        f"{SHIFT_WALLETS[wallet]:.1f}°C) — в такие дни v1 на истории проигрывала")
+                            continue
+                    b = max(buckets, key=lambda r: r[field] - r["market_p"])
+                    label = ("против " if no_side else "") + fmt_bucket(b["bucket_lo"], b["bucket_hi"], b["unit"])
+                    edge = b[field] - b["market_p"]
+                    min_edge = EDGE_BY_WALLET.get(wallet, MIN_EDGE)
+                    if edge < min_edge:
+                        record_skip(conn, wallet, city, d["local_date"], d["ts"], "skip",
+                                    f"нет перевеса: лучший вариант {label} — модель {b[field]*100:.0f}%, "
+                                    f"рынок {b['market_p']*100:.0f}%, разница {edge*100:.0f} п.п. (нужно от {min_edge*100:.0f})")
+                        continue
+                    if not (MIN_PRICE <= b["market_p"] <= MAX_PRICE):
+                        record_skip(conn, wallet, city, d["local_date"], d["ts"], "skip",
+                                    f"лучший вариант {label} стоит {cents(b['market_p'])} — вне допустимых "
+                                    f"{MIN_PRICE*100:.0f}–{MAX_PRICE*100:.0f}¢ (слишком дешёвые почти никогда не выигрывают)")
+                        continue
+                    stake = STAKE
+                    if wallet in STAKE_BY_EDGE:
+                        mult, bank, lo_s, hi_s = STAKE_BY_EDGE[wallet]
+                        stake = round(max(lo_s, min(hi_s, bank * mult * edge / (1 - b["market_p"]))), 2)
+                    if cash(conn, wallet) < stake:
+                        record_skip(conn, wallet, city, d["local_date"], d["ts"], "skip", f"в кошельке меньше ${stake:.2f}")
+                        continue
+                    max_price = min(MAX_PRICE, b[field] - min_edge)
+                    if maker:
+                        try:
+                            m = find_market(city, d["local_date"], b["bucket_lo"], b["bucket_hi"])
+                            lim = place_limit(m, json.loads(m["clobTokenIds"])[0], STAKE, max_price) if m else None
+                        except (requests.RequestException, ValueError, KeyError) as e:
+                            print(f"{wallet}: {city} ошибка стакана — {e}")
+                            continue
+                        if lim is None or lim["reason"]:
+                            record_skip(conn, wallet, city, d["local_date"], d["ts"], "nofill",
+                                        f"сигнал на {label}, но " + (lim["reason"] if lim else "маркет уже закрыт"))
+                            continue
+                        conn.execute(
+                            """
+                            INSERT OR IGNORE INTO paper_trades
+                            (wallet, city, local_date, snapshot_ts, unit, bucket_lo, bucket_hi, model_p, market_p, price, stake,
+                             status, shares, fee, book_json, limit_price, want_shares, queue_ahead, condition_id, token_id, placed_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'resting', 0, 0, ?, ?, ?, ?, ?, ?, ?)
+                            """,
+                            (wallet, city, d["local_date"], d["ts"], b["unit"], b["bucket_lo"], b["bucket_hi"], b[field],
+                             b["market_p"], lim["limit"], lim["shares"] * lim["limit"], lim["book"], lim["limit"], lim["shares"], lim["queue_ahead"],
+                             m["conditionId"], json.loads(m["clobTokenIds"])[0], datetime.now().astimezone().isoformat()),
+                        )
+                        conn.commit()
+                        print(f"{wallet}: {city} {d['local_date']} своя заявка на {label} по {lim['limit']*100:.1f}¢, "
+                              f"{lim['shares']:.1f} долей, в очереди перед нами {lim['queue_ahead']:.0f}")
+                        continue
                     try:
-                        m = find_market(city, d["local_date"], b["bucket_lo"], b["bucket_hi"])
-                        lim = place_limit(m, json.loads(m["clobTokenIds"])[0], STAKE, max_price) if m else None
+                        ex = buy_yes(city, d["local_date"], b["bucket_lo"], b["bucket_hi"], max_price, 1 if no_side else 0, stake)
                     except (requests.RequestException, ValueError, KeyError) as e:
                         print(f"{wallet}: {city} ошибка стакана — {e}")
                         continue
-                    if lim is None or lim["reason"]:
-                        record_skip(conn, wallet, city, d["local_date"], d["ts"], "nofill",
-                                    f"сигнал на {label}, но " + (lim["reason"] if lim else "маркет уже закрыт"))
-                        continue
+                    filled = ex["cost"] >= MIN_FILL
+                    reason = None if filled else (
+                        f"сигнал на {label} (модель {b[field]*100:.0f}%, рынок {b['market_p']*100:.0f}%), но "
+                        + (ex["reason"] or f"купить можно было меньше чем на ${MIN_FILL:.0f}"))
                     conn.execute(
                         """
                         INSERT OR IGNORE INTO paper_trades
                         (wallet, city, local_date, snapshot_ts, unit, bucket_lo, bucket_hi, model_p, market_p, price, stake,
-                         status, shares, fee, book_json, limit_price, want_shares, queue_ahead, condition_id, token_id, placed_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'resting', 0, 0, ?, ?, ?, ?, ?, ?, ?)
+                         status, reason, shares, fee, book_json, side, placed_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
-                        (wallet, city, d["local_date"], d["ts"], b["unit"], b["bucket_lo"], b["bucket_hi"], b[field],
-                         b["market_p"], lim["limit"], lim["shares"] * lim["limit"], lim["book"], lim["limit"], lim["shares"], lim["queue_ahead"],
-                         m["conditionId"], json.loads(m["clobTokenIds"])[0], datetime.now().astimezone().isoformat()),
+                        (wallet, city, d["local_date"], d["ts"], b["unit"], b["bucket_lo"], b["bucket_hi"],
+                         b[field], b["market_p"], ex["avg"], ex["cost"] if filled else 0.0,
+                         "open" if filled else "nofill", reason, ex["shares"] if filled else 0.0,
+                         ex["fee"] if filled else 0.0, ex["book"], "no" if no_side else "yes",
+                         # 2026-09-27: время покупки — для ленты ставок (/bets)
+                         datetime.now(timezone.utc).isoformat()),
                     )
                     conn.commit()
-                    print(f"{wallet}: {city} {d['local_date']} своя заявка на {label} по {lim['limit']*100:.1f}¢, "
-                          f"{lim['shares']:.1f} долей, в очереди перед нами {lim['queue_ahead']:.0f}")
-                    continue
-                try:
-                    ex = buy_yes(city, d["local_date"], b["bucket_lo"], b["bucket_hi"], max_price, 1 if no_side else 0, stake)
-                except (requests.RequestException, ValueError, KeyError) as e:
-                    print(f"{wallet}: {city} ошибка стакана — {e}")
-                    continue
-                filled = ex["cost"] >= MIN_FILL
-                reason = None if filled else (
-                    f"сигнал на {label} (модель {b[field]*100:.0f}%, рынок {b['market_p']*100:.0f}%), но "
-                    + (ex["reason"] or f"купить можно было меньше чем на ${MIN_FILL:.0f}"))
-                conn.execute(
-                    """
-                    INSERT OR IGNORE INTO paper_trades
-                    (wallet, city, local_date, snapshot_ts, unit, bucket_lo, bucket_hi, model_p, market_p, price, stake,
-                     status, reason, shares, fee, book_json, side, placed_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (wallet, city, d["local_date"], d["ts"], b["unit"], b["bucket_lo"], b["bucket_hi"],
-                     b[field], b["market_p"], ex["avg"], ex["cost"] if filled else 0.0,
-                     "open" if filled else "nofill", reason, ex["shares"] if filled else 0.0,
-                     ex["fee"] if filled else 0.0, ex["book"], "no" if no_side else "yes",
-                     # 2026-09-27: время покупки — для ленты ставок (/bets)
-                     datetime.now(timezone.utc).isoformat()),
-                )
-                conn.commit()
-                placed += filled
-                if filled:
-                    print(f"{wallet}: {city} {d['local_date']} купили {ex['shares']:.1f} долей {label} по {ex['avg']:.3f} "
-                          f"на ${ex['cost']:.2f} + комиссия ${ex['fee']:.2f} (модель {b[field]:.2f}, рынок {b['market_p']:.2f})")
-                else:
-                    print(f"{wallet}: {city} {d['local_date']} не купили — {reason}")
+                    placed += filled
+                    if filled:
+                        print(f"{wallet}: {city} {d['local_date']} купили {ex['shares']:.1f} долей {label} по {ex['avg']:.3f} "
+                              f"на ${ex['cost']:.2f} + комиссия ${ex['fee']:.2f} (модель {b[field]:.2f}, рынок {b['market_p']:.2f})")
+                    else:
+                        print(f"{wallet}: {city} {d['local_date']} не купили — {reason}")
     return placed
 
 

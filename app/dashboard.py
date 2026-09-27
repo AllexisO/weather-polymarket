@@ -262,7 +262,8 @@ PAPER_WALLETS = {
 }
 PAPER_START_BALANCE = 100.0
 # свой старт у кошелька (как weather_paper.START_BY_WALLET; совпадение проверяет preflight.py)
-WALLET_START = {"copy": 300.0}
+WALLET_START = {"copy": 300.0, "ml": 300.0}  # как weather_paper.START_BY_WALLET (preflight сверяет)
+PAPER_STAKE = 2.0  # ставка кошельков (weather_paper.STAKE): меньше на счёте — новых ставок нет
 # 2026-09-25 (просьба Alex — "много кошельков, не понять что к чему"):
 # одна главная модель наверху, остальные — компактно, по группам, с
 # пояснением в одну строку. Таблицы ставок по умолчанию — только главная.
@@ -797,28 +798,42 @@ def system_health(conn):
     runs = {r["job"]: _dt(r["finished_at"]) for r in conn.execute("SELECT job, finished_at FROM job_runs")} \
         if table_exists(conn, "job_runs") else {}
     has_log = table_exists(conn, "job_log")
+    from fixes import is_fixed, last_fixes
+    fx = last_fixes(conn)
     jobs, om_by_job = [], []
     for key, label, script, sched, max_age, log in JOBS:
         j = {"key": key, "label": label, "script": script, "sched": sched, "state": "unknown",
-             "ok_ago": None, "ok_when": None, "last": None, "fails": 0, "runs": 0, "err": None, "om": 0, "dur": None}
+             "ok_ago": None, "ok_when": None, "last": None, "fails": 0, "runs": 0, "err": None, "om": 0, "dur": None,
+             "fixed_n": 0, "fix_note": None}
         ok = runs.get(key)
         if ok:
             j["ok_ago"], j["ok_when"] = _ago(ok, now), _when(ok, now.astimezone(VIEWER_TZ))
         if has_log:
-            last = conn.execute("SELECT rc, duration_s, finished_at FROM job_log WHERE job = ? "
+            has_ie = "item_errors" in [r[1] for r in conn.execute("PRAGMA table_info(job_log)")]
+            last = conn.execute(f"SELECT rc, duration_s, finished_at{', item_errors' if has_ie else ', 0 AS item_errors'} FROM job_log WHERE job = ? "
                                 "ORDER BY finished_at DESC LIMIT 1", (key,)).fetchone()
+            # 2026-09-28: падения до отметки «исправлено» (fixes.py) — не проблема, показываем как исправленные
+            bad_rows = conn.execute("SELECT finished_at FROM job_log WHERE job = ? AND finished_at >= ? AND rc != 0",
+                                    (key, day_ago)).fetchall()
+            j["fixed_n"] = sum(1 for (t,) in bad_rows if is_fixed(fx, key, t))
+            j["fix_note"] = fx[key][1] if key in fx and j["fixed_n"] else None
             agg = conn.execute("SELECT COUNT(*) n, SUM(rc != 0) f, SUM(om_calls) om, AVG(duration_s) d "
                                "FROM job_log WHERE job = ? AND finished_at >= ?", (key, day_ago)).fetchone()
             j["runs"], j["fails"], j["om"] = agg["n"], agg["f"] or 0, agg["om"] or 0
             j["dur"] = agg["d"]
             if last:
-                j["last"] = {"rc": last["rc"], "dur": last["duration_s"]}
+                j["last"] = {"rc": last["rc"], "dur": last["duration_s"], "item_errors": last["item_errors"] or 0}
         late = ok is None or now - ok > timedelta(minutes=max_age)
-        failed = j["last"] is not None and j["last"]["rc"] != 0
+        last_fixed = j["last"] is not None and last is not None and is_fixed(fx, key, last["finished_at"])
+        failed = j["last"] is not None and j["last"]["rc"] != 0 and not last_fixed
         if failed:
             j["state"] = "fail"
             j["err"] = ("остановлен по пределу времени" if j["last"]["rc"] in (124, 137, 143)
                         else _log_error(log)) or f"код выхода {j['last']['rc']}"
+        elif j["last"] and j["last"]["item_errors"] and not last_fixed:
+            # 2026-09-27: отработал, но часть городов / трейдеров / дней пропущена из-за ошибок (item_guard)
+            j["state"] = "partial"
+            j["err"] = f"пропущено из-за ошибок: {j['last']['item_errors']} — подробности в логе: " + (_log_error(log) or "см. data/logs/")
         elif ok is None:
             j["state"] = "unknown"
         elif late:
@@ -871,6 +886,8 @@ def system_health(conn):
     for j in jobs:
         if j["state"] == "fail":
             problems.append(f"«{j['label']}»: последний запуск с ошибкой")
+        elif j["state"] == "partial":
+            problems.append(f"«{j['label']}»: последний запуск с пропусками ({j['last']['item_errors']})")
         elif j["state"] == "late":
             problems.append(f"«{j['label']}» опаздывает — последний успех {j['ok_ago'] or 'не было'}")
     # «скрипт опаздывает» из тревог уже есть в строках выше — не дублируем
@@ -881,7 +898,7 @@ def system_health(conn):
         problems.append(f"Мало места на диске: свободно {storage['free']}")
     if om["pct"] > 90:
         problems.append(f"Open-Meteo: за сутки {om_total} запросов — близко к лимиту")
-    counts = {s: sum(j["state"] == s for j in jobs) for s in ("ok", "late", "fail", "unknown")}
+    counts = {s: sum(j["state"] == s for j in jobs) for s in ("ok", "late", "fail", "unknown", "partial")}
     return {"problems": problems, "jobs": jobs, "counts": counts, "alerts_now": alerts_now,
             "alerts_week": alerts_week, "storage": storage, "watchdog": watchdog, "stop": stop,
             "copier": copier, "preflight": preflight, "om": om,
@@ -896,6 +913,21 @@ def status(request: Request):
     finally:
         conn.close()
     return TEMPLATES.TemplateResponse("status.html", {"request": request, "h": h})
+
+
+def last_move(events):
+    """2026-09-27 (просьба Alex): на сколько изменился баланс при последнем расчёте ставок —
+    ▲/▼ рядом с балансом. Один расчёт = ставки, закрытые в одну и ту же минуту.
+    events: (settled_at, итог $, город, статус)."""
+    ev = [(_dt(t), v) for t, v, *_ in events if t]
+    ev = [(t, v) for t, v in ev if t]
+    if not ev:
+        return None
+    last = max(t for t, _v in ev).replace(second=0, microsecond=0)
+    batch = [v for t, v in ev if t.replace(second=0, microsecond=0) == last]
+    total = sum(batch)
+    return {"pnl": total, "n": len(batch), "dir": "up" if total > 0.005 else ("down" if total < -0.005 else "flat"),
+            "when": last.astimezone(VIEWER_TZ).strftime("%d.%m %H:%M")}
 
 
 WEEKDAY_RU = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
@@ -1073,6 +1105,10 @@ def paper(request: Request, w: str = ""):
         c["start"] = WALLET_START.get(c["key"], PAPER_START_BALANCE)
         c["balance"] = c["start"] + c["pnl"]
         c["spark"] = spark(settled_by_wallet.get(c["key"], []), c["start"])
+        c["move"] = last_move(settle_events.get(c["key"], []))
+        # 2026-09-27 (просьба Alex): сколько осталось на новые ставки — чтобы не пропустить, что кошелёк встал
+        c["cash"] = c["balance"] - c["in_play"]
+        c["low_cash"] = c["cash"] < PAPER_STAKE
         sk = skills.get(c["key"])
         c["skill"] = sk["tot"] if sk else None
     sel = w if any(c["key"] == w for c in wallets) else None
@@ -1081,8 +1117,6 @@ def paper(request: Request, w: str = ""):
     my_waiting = pick(waiting)
     my_waiting.sort(key=lambda t: (not t.get("bought"), -(t.get("chance") or 0)))
     closes = sorted(t["closes"] for t in my_waiting if t.get("bought") and t.get("closes"))
-    if cur:
-        cur["cash"] = cur["balance"] - cur["in_play"]
     goal = {"n": main["n"] if main else 0, "need": REAL_MONEY_THRESHOLD}
     goal["pct"] = min(100, round(100 * goal["n"] / goal["need"]))
     return TEMPLATES.TemplateResponse(
@@ -1247,8 +1281,11 @@ def all_bets(conn):
     return out
 
 
+MONTH_RU = ["январь", "февраль", "март", "апрель", "май", "июнь", "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь"]
+
+
 @app.get("/bets", response_class=HTMLResponse)
-def bets_page(request: Request, w: str = ""):
+def bets_page(request: Request, w: str = "", m: str = ""):
     conn = db()
     try:
         bets = all_bets(conn)
@@ -1260,38 +1297,64 @@ def bets_page(request: Request, w: str = ""):
     now = datetime.now(timezone.utc)
     nv = now.astimezone(VIEWER_TZ)
     day_ago = now - timedelta(days=1)
+    # коротко: сегодня — только время, иначе «вчера 20:10» / дата (на телефоне длинное не влезает)
+    short = lambda t: f"{t.astimezone(VIEWER_TZ):%H:%M}" if t.astimezone(VIEWER_TZ).date() == nv.date() else _when(t, nv)
     opened = [b for b in bets if b["status"] in ("open", "resting")]
     for b in opened:
         c = b["close"]
         b["close_badge"] = c.astimezone(VIEWER_TZ) if c else None
         b["close_txt"] = _when(c, nv) if c else "—"
-        b["placed_txt"] = _when(b["placed"], nv) if b["placed"] else "—"
+        b["placed_txt"] = short(b["placed"]) if b["placed"] else "—"
     opened.sort(key=lambda b: (b["close"] or now + timedelta(days=9), b["w"]["name"]))
     closed = sorted([b for b in bets if b["settled"]], key=lambda b: b["settled"], reverse=True)
     for b in closed:
-        b["settled_txt"] = _when(b["settled"], nv)
+        b["settled_txt"] = short(b["settled"])
     week_ago = now - timedelta(days=7)
     closed_week = [b for b in closed if b["settled"] >= week_ago]
     # «только что» — последние события: открытия и закрытия вперемешку
     ev = [(b["placed"], "open", b) for b in bets if b["placed"]] + [(b["settled"], "closed", b) for b in closed]
     ev.sort(key=lambda x: x[0], reverse=True)
-    latest = [{"kind": k if k == "open" else ("in" if b["pnl"] > 0.005 else "out"), "b": b, "when": _when(t, nv)} for t, k, b in ev[:4]]
+    latest = [{"kind": k if k == "open" else ("in" if b["pnl"] > 0.005 else "out"), "b": b, "when": short(t)} for t, k, b in ev[:4]]
     # движение денег за 14 дней: поставлено (по дню покупки) и вернулось (по дню расчёта)
-    days = [(nv - timedelta(days=i)).date() for i in range(13, -1, -1)]
+    # 2026-09-27 (просьба Alex): период — последние 14 дней или выбранный месяц (m=ГГГГ-ММ)
+    first_day = min((b["placed"].astimezone(VIEWER_TZ).date() for b in bets if b["placed"]), default=nv.date())
+    months, y, mo = [], first_day.year, first_day.month
+    while (y, mo) <= (nv.year, nv.month):
+        months.append({"key": f"{y}-{mo:02d}", "name": f"{MONTH_RU[mo - 1]} {y}"})
+        y, mo = (y + 1, 1) if mo == 12 else (y, mo + 1)
+    month = next((x for x in months if x["key"] == m), None)
+    if month:
+        y, mo = map(int, month["key"].split("-"))
+        d0 = date(y, mo, 1)
+        d1 = min((date(y + (mo == 12), mo % 12 + 1, 1) - timedelta(days=1)), nv.date())
+        days = [d0 + timedelta(days=i) for i in range((d1 - d0).days + 1)]
+    else:
+        days = [(nv - timedelta(days=i)).date() for i in range(13, -1, -1)]
     staked = {d: 0.0 for d in days}
     back = {d: 0.0 for d in days}
+    # 2026-09-27 (просьба Alex): по нажатию на день — сколько в плюс и сколько в минус
+    det = {d: {"open_n": 0, "won_n": 0, "won": 0.0, "lost_n": 0, "lost": 0.0} for d in days}
     for b in bets:
         if b["placed"]:
             d = b["placed"].astimezone(VIEWER_TZ).date()
             if d in staked:
                 staked[d] += b["cost"]
+                det[d]["open_n"] += 1
         if b["settled"]:
             d = b["settled"].astimezone(VIEWER_TZ).date()
             if d in back:
                 back[d] += b["pnl"] + b["cost"]
+                if b["pnl"] > 0.005:
+                    det[d]["won_n"] += 1
+                    det[d]["won"] += b["pnl"]
+                elif b["pnl"] < -0.005:
+                    det[d]["lost_n"] += 1
+                    det[d]["lost"] += b["pnl"]
     top = max([*staked.values(), *back.values(), 0.01])
     flow = [{"wd": WEEKDAY_RU[d.weekday()], "date": f"{d:%d.%m}", "staked": staked[d], "back": back[d],
-             "hs": round(100 * staked[d] / top), "hb": round(100 * back[d] / top)} for d in days]
+             "hs": round(100 * staked[d] / top), "hb": round(100 * back[d] / top), **det[d],
+             "net": det[d]["won"] + det[d]["lost"], "day": d.day,
+             "label": (not month) or d.day in (1, 5, 10, 15, 20, 25) or d == days[-1]} for d in days]
     kpi = {
         "open24_n": sum(1 for b in bets if b["placed"] and b["placed"] >= day_ago),
         "open24_usd": sum(b["cost"] for b in bets if b["placed"] and b["placed"] >= day_ago),
@@ -1302,7 +1365,7 @@ def bets_page(request: Request, w: str = ""):
     }
     return TEMPLATES.TemplateResponse("bets.html", {
         "request": request, "opened": opened, "closed": closed_week, "latest": latest, "flow": flow, "kpi": kpi,
-        "wallets": wallets, "sel": w, "sel_name": dict(wallets).get(w)})
+        "wallets": wallets, "sel": w, "sel_name": dict(wallets).get(w), "months": months, "month": month})
 
 
 # ---- /events: что делает система — обучение, данные, итоги, тревоги (2026-09-27, просьба Alex) ----
@@ -1332,16 +1395,27 @@ def system_events(conn, days=3):
         if t and t >= since:
             ev.append({"t": t, "kind": kind, "title": title, "detail": detail, "link": link})
 
+    from fixes import is_fixed, last_fixes
+    fx = last_fixes(conn)
     if table_exists(conn, "job_log"):
-        for r in conn.execute("SELECT job, started_at, finished_at, rc, duration_s, om_calls FROM job_log WHERE finished_at >= ?",
+        ie = ", item_errors" if "item_errors" in [c[1] for c in conn.execute("PRAGMA table_info(job_log)")] else ", 0 AS item_errors"
+        for r in conn.execute(f"SELECT job, started_at, finished_at, rc, duration_s, om_calls{ie} FROM job_log WHERE finished_at >= ?",
                               (since.isoformat(),)):
             t = _dt(r["finished_at"])
             dur = f"{r['duration_s']:.0f} с" if r["duration_s"] < 90 else f"{r['duration_s'] / 60:.0f} мин"
             if r["job"] not in label:
                 continue  # ручные запуски (проверки, пробное обучение) — не события системы
-            if r["rc"] != 0:
+            if (r["rc"] != 0 or r["item_errors"]) and is_fixed(fx, r["job"], r["finished_at"]):
+                # 2026-09-28: исправленные ошибки — в истории остаются, но зелёным и с тем, что сделали (fixes.py)
+                what = "упал" if r["rc"] != 0 else f"отработал с пропусками ({r['item_errors']})"
+                add(t, "ok", f"Исправлено: «{label.get(r['job'], r['job'])}» {what}",
+                    f"исправлено {fx[r['job']][0].astimezone(VIEWER_TZ):%d.%m %H:%M}: {fx[r['job']][1]}")
+            elif r["rc"] != 0:
                 why = "остановлен по пределу времени" if r["rc"] in (124, 137, 143) else f"код выхода {r['rc']}"
                 add(t, "fail", f"Ошибка: «{label.get(r['job'], r['job'])}»", f"{why} · шёл {dur} · подробности на странице «Здоровье системы»", "/status")
+            elif r["item_errors"]:
+                add(t, "fail", f"С пропусками: «{label.get(r['job'], r['job'])}»",
+                    f"отработал, но пропущено из-за ошибок: {r['item_errors']} — остальное обработано · подробности на странице «Здоровье системы»", "/status")
             elif r["job"] in JOB_DONE and r["job"] not in FREQUENT_JOBS and r["job"] != "weather_ml_train":
                 extra = f" · запросов к Open-Meteo: {r['om_calls']}" if r["om_calls"] else ""
                 add(t, "data", JOB_DONE.get(r["job"], f"Отработал «{label.get(r['job'], r['job'])}»"), f"за {dur}{extra}")
@@ -1422,3 +1496,102 @@ def events_page(request: Request):
     finally:
         conn.close()
     return TEMPLATES.TemplateResponse("events.html", {"request": request, "days": days, "counts": counts})
+
+
+# ---- /audit: проверка кошельков, моделей и базы (2026-09-27, просьба Alex) ----
+# Считает weather_audit.py по крону (audit_log); здесь — только показ последнего результата.
+@app.get("/audit", response_class=HTMLResponse)
+def audit_page(request: Request):
+    conn = db()
+    last, history = None, []
+    try:
+        if table_exists(conn, "audit_log"):
+            rows = conn.execute("SELECT run_at, ok, deep, details FROM audit_log ORDER BY run_at DESC LIMIT 36").fetchall()
+            if rows:
+                last = json.loads(rows[0]["details"])
+            nv = datetime.now(VIEWER_TZ)
+            history = [{"ok": bool(r["ok"]), "deep": bool(r["deep"]), "when": _when(_dt(r["run_at"]), nv)} for r in reversed(rows)]
+    finally:
+        conn.close()
+    if last:
+        nv = datetime.now(VIEWER_TZ)
+        last["when"] = _when(_dt(last["run_at"]), nv)
+        for w in last["wallets"]:
+            w["name"] = _wallet_meta(w["key"])["name"]
+            w["main"] = w["key"] == "ml3"
+        last["wallets"].sort(key=lambda w: (not w["main"], -w["n_viol"], w["name"]))
+        db_ = last["db"]
+        db_["size_txt"] = _size(db_.get("size", 0))
+        if db_.get("quick_check_at"):
+            db_["qc_when"] = _when(_dt(db_["quick_check_at"]), nv)
+        tr = last["data"].get("train")
+        if tr:
+            tr["when"] = _when(_dt(tr["at"]), nv)
+            tr["verdict"] = exam_verdict(tr.get("exam"))
+        if last["data"].get("last_snap"):
+            last["data"]["last_snap_when"] = _when(_dt(last["data"]["last_snap"]), nv)
+        if last["cron"].get("since"):
+            last["cron"]["since_when"] = _when(_dt(last["cron"]["since"]), nv)
+    # 2026-09-28: вечерняя проверка перед ночью (weather_night_check.py, 23:30)
+    night = None
+    conn = db()
+    try:
+        if table_exists(conn, "night_check"):
+            # 2026-09-28: три проверки в день — последняя каждого режима; вкладки «Утро / День / Вечер»
+            has_mode = "mode" in [r[1] for r in conn.execute("PRAGMA table_info(night_check)")]
+            night = []
+            for mode, name, at in (("morning", "Утро", "07:00"), ("midday", "День", "13:00"), ("evening", "Вечер", "23:30")):
+                r = conn.execute("SELECT details FROM night_check " + ("WHERE mode = ? " if has_mode else "WHERE ? = 'evening' ")
+                                 + "ORDER BY run_at DESC LIMIT 1", (mode,)).fetchone()
+                n = {"mode": mode, "mode_name": name, "at": at, "empty": True}
+                if r:
+                    n = json.loads(r["details"])
+                    n.update(mode=mode, mode_name=name, at=at, empty=False, when=_when(_dt(n["run_at"]), datetime.now(VIEWER_TZ)))
+                    groups = {}
+                    for x in n["checks"]:
+                        groups.setdefault(x["group"], []).append(x)
+                    n["groups"] = [(g, xs, sum(x["level"] != "ok" for x in xs)) for g, xs in groups.items()]
+                    n["problems"] = [x for x in n["checks"] if x["level"] != "ok"]
+                    n["_t"] = n["run_at"]
+                night.append(n)
+            latest = max((n for n in night if not n["empty"]), key=lambda n: n["_t"], default=None)
+            for n in night:
+                n["active"] = latest is not None and n["mode"] == latest["mode"]
+    finally:
+        conn.close()
+    return TEMPLATES.TemplateResponse("audit.html", {"request": request, "a": last, "history": history, "night": night})
+
+
+# ---- счётчики боковой панели (2026-09-27, панель «Меню и инструменты», просьба Alex) ----
+_NAV_CACHE = {"t": 0.0, "v": None}
+
+
+def nav_counts():
+    """Кошельков, открытых ставок, активных тревог, итог последней проверки — для панели на всех страницах.
+    Кэш 60 с; база занята или ошибка — панель просто без счётчиков."""
+    if _NAV_CACHE["v"] is not None and time.time() - _NAV_CACHE["t"] < 60:
+        return _NAV_CACHE["v"]
+    v = {"wallets": len(set(PAPER_WALLETS) | set(OBS_WALLETS)), "open": None, "alerts": 0, "audit": None}
+    try:
+        conn = db()
+        try:
+            n = 0
+            if table_exists(conn, "paper_trades"):
+                n += conn.execute("SELECT COUNT(*) FROM paper_trades WHERE status IN ('open', 'resting')").fetchone()[0]
+            if table_exists(conn, "paper_obs_trades"):
+                n += conn.execute("SELECT COUNT(*) FROM paper_obs_trades WHERE status = 'open'").fetchone()[0]
+            v["open"] = n
+            v["alerts"] = len(active_alerts(conn))
+            if table_exists(conn, "audit_log"):
+                r = conn.execute("SELECT ok, details FROM audit_log ORDER BY run_at DESC LIMIT 1").fetchone()
+                if r:
+                    v["audit"] = 0 if r["ok"] else json.loads(r["details"]).get("n_violations", 1)
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        pass
+    _NAV_CACHE.update(t=time.time(), v=v)
+    return v
+
+
+TEMPLATES.env.globals["nav_counts"] = nav_counts

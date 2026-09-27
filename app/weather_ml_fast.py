@@ -19,6 +19,7 @@ Open-Meteo не нужен (прогнозы уже в базе).
 Запуск: python weather_ml_fast.py [--no-bets]
 """
 
+from jobmark import item_guard
 import os
 import sqlite3
 import sys
@@ -56,13 +57,14 @@ def main():
     ensure_schema(conn)
     due = []
     for city, cfg in CITIES.items():
-        now_local = datetime.now(ZoneInfo(cfg["tz"]))
-        d = now_local.date().isoformat()
-        if now_local.hour != HOUR or city not in OBS_CITIES:
-            continue
-        if conn.execute("SELECT 1 FROM snapshots_fast WHERE city = ? AND local_date = ?", (city, d)).fetchone():
-            continue
-        due.append((city, cfg, now_local))
+        with item_guard(city, conn):
+            now_local = datetime.now(ZoneInfo(cfg["tz"]))
+            d = now_local.date().isoformat()
+            if now_local.hour != HOUR or city not in OBS_CITIES:
+                continue
+            if conn.execute("SELECT 1 FROM snapshots_fast WHERE city = ? AND local_date = ?", (city, d)).fetchone():
+                continue
+            due.append((city, cfg, now_local))
     print(f"городов, где сейчас 08:xx и быстрого снимка ещё нет: {len(due)}")
     if due:
         metars = {}

@@ -20,6 +20,7 @@ gamma-api бесплатен и без лимита. Пишем в weather_poly_
 строка на (city, local_date), без перезаписи.
 """
 
+from jobmark import item_guard
 import json
 import os
 import sqlite3
@@ -82,34 +83,35 @@ def run():
 
     total = 0
     for city, cfg in CITIES.items():
-        today_local = datetime.now(ZoneInfo(cfg["tz"])).date().isoformat()
-        pending = [
-            r["local_date"]
-            for r in conn.execute(
-                """
-                SELECT DISTINCT s.local_date FROM snapshots s
-                LEFT JOIN weather_poly_outcomes p ON s.city = p.city AND s.local_date = p.local_date
-                WHERE s.city = ? AND p.city IS NULL AND s.local_date < ?
-                ORDER BY s.local_date
-                """,
-                (city, today_local),
-            )
-        ]
-        for d in pending:
-            try:
-                win = fetch_winning_bucket(cfg["poly_slug"], date.fromisoformat(d))
-            except requests.RequestException as e:
-                print(f"{city} {d}: ошибка запроса — {e}", file=sys.stderr)
-                continue
-            if win is None:
-                continue
-            conn.execute(
-                "INSERT OR IGNORE INTO weather_poly_outcomes (city, local_date, win_lo, win_hi, resolved_at) VALUES (?, ?, ?, ?, ?)",
-                (city, d, win[0], win[1], now.isoformat()),
-            )
-            conn.commit()
-            total += 1
-            print(f"{city} {d}: выиграл бакет {win[0]}..{win[1]}")
+        with item_guard(city, conn):
+            today_local = datetime.now(ZoneInfo(cfg["tz"])).date().isoformat()
+            pending = [
+                r["local_date"]
+                for r in conn.execute(
+                    """
+                    SELECT DISTINCT s.local_date FROM snapshots s
+                    LEFT JOIN weather_poly_outcomes p ON s.city = p.city AND s.local_date = p.local_date
+                    WHERE s.city = ? AND p.city IS NULL AND s.local_date < ?
+                    ORDER BY s.local_date
+                    """,
+                    (city, today_local),
+                )
+            ]
+            for d in pending:
+                try:
+                    win = fetch_winning_bucket(cfg["poly_slug"], date.fromisoformat(d))
+                except requests.RequestException as e:
+                    print(f"{city} {d}: ошибка запроса — {e}", file=sys.stderr)
+                    continue
+                if win is None:
+                    continue
+                conn.execute(
+                    "INSERT OR IGNORE INTO weather_poly_outcomes (city, local_date, win_lo, win_hi, resolved_at) VALUES (?, ?, ?, ?, ?)",
+                    (city, d, win[0], win[1], now.isoformat()),
+                )
+                conn.commit()
+                total += 1
+                print(f"{city} {d}: выиграл бакет {win[0]}..{win[1]}")
 
     print(f"Резолвнуто по Polymarket: {total}")
     from jobmark import mark

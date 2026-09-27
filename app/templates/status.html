@@ -5,7 +5,7 @@
   2026-09-27 (просьба Alex): «Статус» переделан в «Здоровье системы» — всё ли работает:
   скрипты крона, тревоги, база и диск, ставки, лимит Open-Meteo. Данные — system_health() в dashboard.py.
 #}
-{% set STATE = {"ok": ("работает", "ok"), "late": ("опаздывает", "warn"), "fail": ("ошибка", "bad"), "unknown": ("нет данных", "none")} %}
+{% set STATE = {"ok": ("работает", "ok"), "late": ("опаздывает", "warn"), "fail": ("ошибка", "bad"), "unknown": ("нет данных", "none"), "partial": ("с пропусками", "warn")} %}
 <style>
   body:has(.bk) .main-col { background: #0A0A0B; }
   body:has(.bk) main { max-width: 1120px; }
@@ -68,6 +68,7 @@
   .jobs .sub { display: block; font-size: 12.5px; color: var(--bk-muted); font-weight: 400; }
   .jobs .err { display: block; margin-top: 4px; font-size: 12.5px; color: var(--bk-neg); word-break: break-word; }
   .jobs .r { text-align: right; white-space: nowrap; }
+  .fixd { display: block; font-size: 11.5px; color: var(--bk-pos); font-weight: 600; }
 
   /* тревоги */
   .al { list-style: none; margin: 0; padding: 0; }
@@ -122,8 +123,9 @@
       <div class="s">
         {% if h.counts.fail %}<b>{{ h.counts.fail }}</b> с ошибкой · {% endif %}
         {% if h.counts.late %}<b>{{ h.counts.late }}</b> опаздывают · {% endif %}
+        {% if h.counts.partial %}<b>{{ h.counts.partial }}</b> с пропусками · {% endif %}
         {% if h.counts.unknown %}<b>{{ h.counts.unknown }}</b> ещё без отметки{% endif %}
-        {% if not (h.counts.fail or h.counts.late or h.counts.unknown) %}ни ошибок, ни опозданий{% endif %}
+        {% if not (h.counts.fail or h.counts.late or h.counts.unknown or h.counts.partial) %}ни ошибок, ни опозданий{% endif %}
       </div>
     </div>
     <div class="kpi">
@@ -169,11 +171,12 @@
         {% set s = STATE[j.state] %}
         <tr>
           <td><span class="name">{{ j.label }}</span><span class="sub">{{ j.script }}</span>
-            {% if j.err %}<span class="err">{{ j.err }}</span>{% endif %}</td>
+            {% if j.err %}<span class="err">{{ j.err }}</span>{% endif %}
+            {% if j.fix_note %}<span class="err" style="color: var(--bk-pos)">✓ исправлено: {{ j.fix_note }}</span>{% endif %}</td>
           <td data-l="Когда">{{ j.sched }}</td>
           <td data-l="Последний успех" class="num">{{ j.ok_ago or '—' }}</td>
           <td data-l="Состояние"><span class="st {{ s[1] }}">{{ s[0] }}</span></td>
-          <td data-l="Запусков / ошибок" class="r num">{% if j.runs %}{{ j.runs }} / {% if j.fails %}<b style="color:var(--bk-neg)">{{ j.fails }}</b>{% else %}0{% endif %}{% else %}—{% endif %}</td>
+          <td data-l="Запусков / ошибок" class="r num">{% if j.runs %}{{ j.runs }} / {% if j.fails > j.fixed_n %}<b style="color:var(--bk-neg)">{{ j.fails - j.fixed_n }}</b>{% else %}0{% endif %}{% if j.fixed_n %}<span class="fixd" title="Исправлено: {{ j.fix_note }}">+{{ j.fixed_n }} исправлено</span>{% endif %}{% else %}—{% endif %}</td>
           <td data-l="Длится" class="r num">{% if j.dur is not none %}{% if j.dur < 90 %}{{ '%.0f' | format(j.dur) }} с{% else %}{{ '%.0f' | format(j.dur / 60) }} мин{% endif %}{% else %}—{% endif %}</td>
         </tr>
         {% endfor %}

@@ -56,6 +56,22 @@ def check(conn):
             pnl += (payout or 0) - stake - (fee or 0)
     if pnl < -LOSS_ALERT:
         found["loss_day"] = f"Главная модель за сутки: {pnl:+.2f}$ (порог −{LOSS_ALERT:.0f}$)"
+    # 2026-09-27: полная проверка системы (weather_audit.py → audit_log, страница /audit)
+    if conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'audit_log'").fetchone():
+        r = conn.execute("SELECT ok, details FROM audit_log ORDER BY run_at DESC LIMIT 1").fetchone()
+        if r and not r[0]:
+            n = json.loads(r[1]).get("n_violations", 0)
+            found["audit"] = f"Проверка системы нашла нарушений: {n} — подробности на странице «Проверка» (/audit)"
+    # 2026-09-28: вечерняя проверка перед ночью (weather_night_check.py, 23:30) — проблемы видно до сна
+    if conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'night_check'").fetchone():
+        # 2026-09-28: утро / день / вечер — последняя проверка каждого вида
+        has_mode = "mode" in [x[1] for x in conn.execute("PRAGMA table_info(night_check)")]
+        names = {"morning": "Утренняя", "midday": "Дневная", "evening": "Вечерняя"}
+        for mode in (names if has_mode else ["evening"]):
+            r = conn.execute("SELECT run_at, bad FROM night_check" + (" WHERE mode = ?" if has_mode else " WHERE ? = ?")
+                             + " ORDER BY run_at DESC LIMIT 1", (mode,) if has_mode else (1, 1)).fetchone()
+            if r and r[1] and now - datetime.fromisoformat(r[0]) < timedelta(hours=26):
+                found[f"night_check:{mode}"] = f"{names[mode]} проверка: проблем {r[1]} — что делать, на странице «Проверка» (/audit)"
     # 2026-09-27: та же проверка, что preflight.py (все кошельки прогоняются в памяти) —
     # поломка видна раньше, чем упадёт настоящий запуск кошельков
     try:

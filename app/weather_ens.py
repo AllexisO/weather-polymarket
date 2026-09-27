@@ -12,6 +12,7 @@
 Крон: каждые 2 часа. Запуск: python weather_ens.py
 """
 
+from jobmark import item_guard
 import os
 import sqlite3
 import statistics
@@ -45,32 +46,33 @@ def main():
     done = {(r[0], r[1]) for r in conn.execute("SELECT DISTINCT city, local_date FROM ens_forecasts")}
     n_ok = 0
     for city, cfg in OBS_CITIES.items():
-        tz = ZoneInfo(cfg["tz"])
-        now = datetime.now(tz)
-        d = now.date().isoformat()
-        if now.hour not in WINDOW or (city, d) in done or city not in CITIES:
-            continue
-        c = CITIES[city]
-        try:
-            r = requests.get(ENS_API, params={"latitude": c["lat"], "longitude": c["lon"], "daily": "temperature_2m_max",
-                                              "models": ",".join(MODELS), "timezone": cfg["tz"], "forecast_days": 1}, timeout=60)
-            r.raise_for_status()
-            daily = r.json()["daily"]
-        except (requests.RequestException, KeyError, ValueError) as e:
-            print(f"{city}: ошибка — {e}")
-            continue
-        fetched = datetime.now(timezone.utc).isoformat()
-        rows = []
-        for key, suffix in MODELS.items():
-            vals = [v[0] for k, v in daily.items() if k.startswith("temperature_2m_max") and k.endswith(suffix) and v and v[0] is not None]
-            if len(vals) < 5:
+        with item_guard(city, conn):
+            tz = ZoneInfo(cfg["tz"])
+            now = datetime.now(tz)
+            d = now.date().isoformat()
+            if now.hour not in WINDOW or (city, d) in done or city not in CITIES:
                 continue
-            rows.append((city, d, key, fetched, len(vals), statistics.fmean(vals), statistics.pstdev(vals),
-                         q(vals, 0.1), q(vals, 0.5), q(vals, 0.9)))
-        conn.executemany("INSERT OR REPLACE INTO ens_forecasts VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
-        conn.commit()
-        n_ok += bool(rows)
-        time.sleep(2)
+            c = CITIES[city]
+            try:
+                r = requests.get(ENS_API, params={"latitude": c["lat"], "longitude": c["lon"], "daily": "temperature_2m_max",
+                                                  "models": ",".join(MODELS), "timezone": cfg["tz"], "forecast_days": 1}, timeout=60)
+                r.raise_for_status()
+                daily = r.json()["daily"]
+            except (requests.RequestException, KeyError, ValueError) as e:
+                print(f"{city}: ошибка — {e}")
+                continue
+            fetched = datetime.now(timezone.utc).isoformat()
+            rows = []
+            for key, suffix in MODELS.items():
+                vals = [v[0] for k, v in daily.items() if k.startswith("temperature_2m_max") and k.endswith(suffix) and v and v[0] is not None]
+                if len(vals) < 5:
+                    continue
+                rows.append((city, d, key, fetched, len(vals), statistics.fmean(vals), statistics.pstdev(vals),
+                             q(vals, 0.1), q(vals, 0.5), q(vals, 0.9)))
+            conn.executemany("INSERT OR REPLACE INTO ens_forecasts VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
+            conn.commit()
+            n_ok += bool(rows)
+            time.sleep(2)
     print(f"ансамбли: записано городов {n_ok}")
     from jobmark import mark
     mark(conn, "weather_ens")

@@ -24,6 +24,7 @@
 загруженные дни). Бесплатно, без ключа.
 """
 
+from jobmark import item_guard
 import json
 import os
 import sqlite3
@@ -179,18 +180,19 @@ def run():
     conn.row_factory = sqlite3.Row
     ensure_schema(conn)
     for city, cfg in OBS_CITIES.items():
-        done = {r[0] for r in conn.execute("SELECT local_date FROM price_history_days WHERE city = ?", (city,))}
-        today = datetime.now(ZoneInfo(cfg["tz"])).date()
-        d, loaded = HISTORY_START, 0
-        while d < today:
-            if d.isoformat() not in done:
-                try:
-                    load_day(conn, city, cfg, d)
-                    loaded += 1
-                except requests.RequestException as e:
-                    print(f"{city} {d}: ошибка — {e}", file=sys.stderr)
-            d += timedelta(days=1)
-        print(f"{city}: загружено дней {loaded}", flush=True)
+        with item_guard(city, conn):
+            done = {r[0] for r in conn.execute("SELECT local_date FROM price_history_days WHERE city = ?", (city,))}
+            today = datetime.now(ZoneInfo(cfg["tz"])).date()
+            d, loaded = HISTORY_START, 0
+            while d < today:
+                if d.isoformat() not in done:
+                    try:
+                        load_day(conn, city, cfg, d)
+                        loaded += 1
+                    except requests.RequestException as e:
+                        print(f"{city} {d}: ошибка — {e}", file=sys.stderr)
+                d += timedelta(days=1)
+            print(f"{city}: загружено дней {loaded}", flush=True)
     conn.close()
 
 

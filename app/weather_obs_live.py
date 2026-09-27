@@ -49,6 +49,7 @@
 96-97°F). Ставка по 5-минутке там бы проиграла.
 """
 
+from jobmark import item_guard
 import json
 import math
 import os
@@ -303,20 +304,22 @@ def run():
 
     events_cache = {}
     for city, cfg in OBS_CITIES.items():
-        today, best = observed_max_today(by_station.get(cfg["icao"], []), cfg)
-        if best is not None:
-            bet_dead_buckets(conn, "obs", city, cfg, today, best[0], best[1], now, events_cache,
-                             f"станция уже {best[0]} (сводка {best[1]:%H:%M}Z)")
+        with item_guard(city, conn):
+            today, best = observed_max_today(by_station.get(cfg["icao"], []), cfg)
+            if best is not None:
+                bet_dead_buckets(conn, "obs", city, cfg, today, best[0], best[1], now, events_cache,
+                                 f"станция уже {best[0]} (сводка {best[1]:%H:%M}Z)")
     for city, fmisid in FMI_STATIONS.items():
-        cfg = OBS_CITIES[city]
-        try:
-            today, best = fmi_max_today(fmisid, cfg)
-        except (requests.RequestException, ValueError) as e:
-            print(f"obs_fmi: {city} ошибка FMI — {e}", file=sys.stderr)
-            continue
-        if best is not None:
-            bet_dead_buckets(conn, "obs_fmi", city, cfg, today, best[0], best[1], now, events_cache,
-                             f"10-мин замер FMI уже {best[0]} ({best[1]:%H:%M}Z)")
+        with item_guard(f"obs_fmi {city}", conn):
+            cfg = OBS_CITIES[city]
+            try:
+                today, best = fmi_max_today(fmisid, cfg)
+            except (requests.RequestException, ValueError) as e:
+                print(f"obs_fmi: {city} ошибка FMI — {e}", file=sys.stderr)
+                continue
+            if best is not None:
+                bet_dead_buckets(conn, "obs_fmi", city, cfg, today, best[0], best[1], now, events_cache,
+                                 f"10-мин замер FMI уже {best[0]} ({best[1]:%H:%M}Z)")
     for w in ("obs", "obs_fmi"):
         print(f"{w}: баланс ${cash(conn, w):.2f}")
     conn.close()

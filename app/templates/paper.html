@@ -36,6 +36,8 @@
 {% macro segbar(n, need, label) -%}{% set SEG = 30 %}{% set on = ((n / need * SEG) | round(0, 'ceil') | int) if n else 0 %}
 <div class="segbar" role="progressbar" aria-label="{{ label }}" aria-valuemin="0" aria-valuemax="{{ need }}" aria-valuenow="{{ n }}">{% for i in range(SEG) %}<i class="{{ 'on' if i < on else '' }}" style="--k: {{ i }}"></i>{% endfor %}</div>
 {%- endmacro %}
+{# ▲/▼ — как изменился баланс при последнем расчёте ставок (2026-09-27, просьба Alex) #}
+{% macro move(m) -%}{% if m %}<span class="mv {{ m.dir }}" title="Последний расчёт {{ m.when }}: {{ m.n }} {{ 'ставка' if m.n % 10 == 1 and m.n % 100 != 11 else ('ставки' if m.n % 10 in [2, 3, 4] and m.n % 100 not in [12, 13, 14] else 'ставок') }}, итог {{ money(m.pnl) }}">{{ '▲' if m.dir == 'up' else ('▼' if m.dir == 'down' else '•') }} {{ money(m.pnl) }}</span>{% endif %}{%- endmacro %}
 {% set all_groups = ([("Главная модель", [main])] if main else []) + groups %}
 
 <style>
@@ -81,16 +83,22 @@
 
 
   /* когда обновлялись данные */
-  .fresh { display: flex; flex-wrap: wrap; gap: 8px 10px; margin: -12px 0 28px; }
-  .fr { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--bk-line);
-    background: var(--bk-card); font-size: 12.5px; color: var(--bk-muted); }
-  .fr b { color: var(--bk-text); font-weight: 600; }
-  .bk a.fr { text-decoration: none; } .bk a.fr:hover { border-color: var(--bk-accent); } .fr u { color: var(--bk-accent); text-decoration: none; }
+  .fresh { background: var(--bk-card); border: 1px solid var(--bk-line); border-radius: 16px; padding: 14px 16px 16px; margin: -8px 0 28px; }
+  .fresh-h { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 4px 12px; margin-bottom: 10px; }
+  .fresh-h h2 { margin: 0; font-size: 14px; font-weight: 600; color: var(--bk-muted); }
+  .bk .fresh-h a { font-size: 13px; text-decoration: none; }
+  .fresh-g { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  @media (max-width: 760px) { .fresh-g { grid-template-columns: 1fr 1fr; } }
+  .fr { display: flex; flex-direction: column; gap: 2px; padding: 9px 12px; border-radius: 12px; background: var(--bk-raise); color: var(--bk-muted); font-size: 12.5px; text-decoration: none; min-width: 0; }
+  .fr-l { display: flex; align-items: center; gap: 7px; }
+  .fr b { color: var(--bk-text); font-weight: 600; font-size: 14px; }
+  .bk a.fr { text-decoration: none; color: var(--bk-muted); } .bk a.fr:hover { box-shadow: inset 0 0 0 1px var(--bk-accent); color: var(--bk-muted); }
+  .fr u { color: var(--bk-accent); text-decoration: none; font-size: 12px; }
   .fr i { width: 7px; height: 7px; border-radius: 50%; background: var(--bk-pos); flex-shrink: 0; }
   .fr.none i { background: var(--bk-faint); }
-  .fr.stale { border-color: rgba(255, 213, 138, .45); }
+  .fr.stale { box-shadow: inset 0 0 0 1px rgba(255, 213, 138, .45); }
   .fr.stale i { background: var(--bk-gold); }
-  .fr.stale em { font-style: normal; color: var(--bk-gold); font-weight: 600; }
+  .fr.stale em { font-style: normal; color: var(--bk-gold); font-weight: 600; font-size: 12px; }
 
   /* секции */
   .sec { margin: 0 0 36px; }
@@ -390,6 +398,40 @@
     .wk { grid-template-rows: 70px 70px auto; }
     .wk-v { font-size: 10.5px; }
   }
+  /* ▲/▼ последнего расчёта рядом с балансом */
+  .mv { display: inline-flex; align-items: center; gap: 3px; margin-left: 8px; padding: 2px 8px; border-radius: 999px; font-size: 12.5px;
+    font-weight: 600; font-variant-numeric: tabular-nums; vertical-align: 3px; white-space: nowrap; letter-spacing: 0; }
+  .mv.up { background: var(--bk-pos-bg); color: var(--bk-pos); }
+  .mv.down { background: var(--bk-neg-bg); color: var(--bk-neg); }
+  .mv.flat { background: var(--bk-raise); color: var(--bk-muted); }
+  .wal-bal { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+  .wal-bal .mv { margin-left: 0; font-size: 12px; }
+  .big .mv { font-size: 14px; padding: 4px 11px; vertical-align: 10px; }
+  /* сколько осталось на новые ставки */
+  .wal-cash { margin-top: 8px; font-size: 12.5px; color: var(--bk-muted); }
+  .wal-cash b { color: var(--bk-text); font-weight: 600; }
+  .wal-cash.low { color: var(--bk-neg); background: var(--bk-neg-bg); border-radius: 10px; padding: 6px 10px; font-weight: 600; }
+  .wal-cash.low b { color: var(--bk-neg); }
+  .cash-warn { margin-top: 14px; padding: 10px 14px; border-radius: 12px; background: var(--bk-neg-bg); color: var(--bk-neg); font-size: 14px; font-weight: 600; }
+  /* карточка кошелька: отдельные блоки (2026-09-27, просьба Alex) */
+  .wb-money { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; margin-top: 12px; border-radius: 12px; overflow: hidden; background: var(--bk-line); }
+  .wb-money div { background: var(--bk-raise); padding: 9px 12px; display: flex; flex-direction: column; justify-content: space-between; gap: 2px; }
+  .wb-money span, .wb-stats span, .wb-hist span { display: block; font-size: 11.5px; color: var(--bk-muted); }
+  .wb-money b { display: block; font-size: 16px; font-weight: 600; color: var(--bk-text); }
+  .wb-money p { grid-column: 1 / -1; margin: 0; padding: 7px 12px; background: var(--bk-neg-bg); color: var(--bk-neg); font-size: 12.5px; font-weight: 600; }
+  .wb-money.low div:first-child b { color: var(--bk-neg); }
+  .wb-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 10px; }
+  .wb-stats div { border: 1px solid var(--bk-line); border-radius: 10px; padding: 7px 10px; min-width: 0; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 0 8px; }
+  .wb-stats div span { display: inline; font-size: 12px; }
+  .wb-stats b { display: block; font-size: 14.5px; font-weight: 600; color: var(--bk-text); white-space: nowrap; }
+  .wb-stats b.pos { color: var(--bk-pos); } .wb-stats b.neg { color: var(--bk-neg); }
+  .wb-hist { margin-top: 10px; padding: 8px 12px; border-radius: 10px; background: var(--bk-raise); font-size: 13px; color: var(--bk-muted); }
+  .wb-hist b { color: var(--bk-text); font-weight: 600; }
+  .wb-note { margin-top: 8px; font-size: 12px; color: var(--bk-faint); }
+  .wb-foot { margin-top: auto; padding-top: 12px; display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+  .wb-foot .upd { margin-top: 0; }
+  .wb-verdict { font-size: 13px; font-weight: 600; }
+  .wb-verdict.pos { color: var(--bk-pos); } .wb-verdict.neg { color: var(--bk-neg); }
   .alerts { margin: 0 0 22px; padding: 14px 18px; border-radius: 14px; border: 1px solid rgba(244, 167, 127, .5); background: rgba(244, 167, 127, .1); }
   .alerts b { color: #F8C2A4; } .alerts ul { margin: 6px 0 0; padding-left: 18px; font-size: 14px; } .alerts li span { color: var(--bk-muted); }
 </style>
@@ -424,12 +466,20 @@
   </div>
   {% endif %}
   {% if fresh %}
-  <div class="fresh" aria-label="Когда обновлялись данные">
+  {# 2026-09-27 (просьба Alex): «когда обновлялись данные» — отдельным блоком, ячейками #}
+  <section class="fresh" aria-labelledby="s-fresh">
+    <div class="fresh-h"><h2 id="s-fresh">Когда обновлялись данные</h2><a href="/status">здоровье системы →</a></div>
+    <div class="fresh-g">
     {% for f in fresh %}
-    {% set tag = 'a href="/training"' if f.label == 'Обучение моделей' else 'span' %}
-    <{{ tag | safe }} class="fr{{ ' stale' if f.stale else '' }}{{ ' none' if not f.when else '' }}" title="Следующее обновление по расписанию — {{ f.next }}"><i aria-hidden="true"></i>{{ f.label }}: <b>{{ f.when or ('первый запуск ~' ~ f.next) }}</b>{% if f.stale %} <em>задерживается</em>{% endif %}{% if f.label == 'Обучение моделей' %} <u>подробно →</u>{% endif %}</{{ 'a' if f.label == 'Обучение моделей' else 'span' }}>
+    {% set is_train = f.label == 'Обучение моделей' %}
+    <{{ 'a href="/training"' | safe if is_train else 'div' }} class="fr{{ ' stale' if f.stale else '' }}{{ ' none' if not f.when else '' }}" title="Следующее обновление по расписанию — {{ f.next }}">
+      <span class="fr-l"><i aria-hidden="true"></i>{{ f.label }}</span>
+      <b class="num">{{ f.when or ('первый запуск ~' ~ f.next) }}</b>
+      {% if f.stale %}<em>задерживается</em>{% elif is_train %}<u>подробно →</u>{% endif %}
+    </{{ 'a' if is_train else 'div' }}>
     {% endfor %}
-  </div>
+    </div>
+  </section>
   {% endif %}
 
   {% if cur %}
@@ -439,13 +489,14 @@
     <div class="pane acct">
       <div>
         {% if main and cur.key == main.key %}<div class="acct-name" style="margin-bottom: 14px;"><span class="tag">главная модель</span></div>{% endif %}
-        <div class="big">{{ cash_big(cur.balance) }}<span>на счёте · старт ${{ '%.0f' | format(start) }}{% if cur.roi is not none %} · доходность <b class="num {{ 'pos' if cur.roi > 0.05 else ('neg' if cur.roi < -0.05 else '') }}">{{ '%+.1f' | format(cur.roi) }}%</b> от поставленного{% endif %}</span></div>
+        <div class="big">{{ cash_big(cur.balance) }}{{ move(cur.move) }}<span>на счёте · старт ${{ '%.0f' | format(start) }}{% if cur.roi is not none %} · доходность <b class="num {{ 'pos' if cur.roi > 0.05 else ('neg' if cur.roi < -0.05 else '') }}">{{ '%+.1f' | format(cur.roi) }}%</b> от поставленного{% endif %}</span></div>
         {% if cur.upd %}<div class="upd" title="{{ cur.upd.what | capitalize }} · последняя закрытая: {{ cur.upd.settled or 'ещё не было' }} · последняя новая: {{ cur.upd.bet or 'ещё не было' }}"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span class="num">{{ cur.upd.when }}</span></div>{% endif %}
         <div class="tiles">
-          <div class="tile t1"><span>Свободно</span><b class="num">${{ '%.2f' | format(cur.cash) }}</b></div>
+          <div class="tile t1"><span>Свободно для ставок</span><b class="num{{ ' neg' if cur.low_cash else '' }}">${{ '%.2f' | format(cur.cash) }}</b></div>
           <div class="tile t2"><span>В открытых ставках</span><b class="num">${{ '%.2f' | format(cur.in_play) }}</b></div>
           <div class="tile t3"><span>Итог закрытых ставок</span><b class="num {{ 'pos' if cur.pnl > 0.005 else ('neg' if cur.pnl < -0.005 else '') }}">{{ money(cur.pnl) }}</b></div>
         </div>
+        {% if cur.low_cash %}<div class="cash-warn" role="alert">⚠ Свободно ${{ '%.2f' | format(cur.cash) }} — меньше ставки $2: новых ставок не будет, пока не закроются открытые{% if cur.in_play > 0.005 %} (в них ${{ '%.2f' | format(cur.in_play) }}){% endif %}.</div>{% endif %}
       </div>
       {% if main and cur.key == main.key %}
       <div class="goal">
@@ -662,11 +713,11 @@
       <span class="tag">главная модель</span>
       <div class="feat-name">{{ main.name }}</div>
       <div class="feat-desc">{{ main.desc }}</div>
-      <div class="big">{{ cash_big(main.balance) }}<span>на счёте · итог <b class="num {{ 'pos' if main.pnl > 0.005 else ('neg' if main.pnl < -0.005 else '') }}">{{ money(main.pnl) }}</b></span></div>
+      <div class="big">{{ cash_big(main.balance) }}{{ move(main.move) }}<span>на счёте · итог <b class="num {{ 'pos' if main.pnl > 0.005 else ('neg' if main.pnl < -0.005 else '') }}">{{ money(main.pnl) }}</b></span></div>
       {% if main.upd %}<div class="upd" title="{{ main.upd.what | capitalize }} · последняя закрытая: {{ main.upd.settled or 'ещё не было' }} · последняя новая: {{ main.upd.bet or 'ещё не было' }}"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span class="num">{{ main.upd.when }}</span></div>{% endif %}
       <div class="feat-stats">
         <span>сыграно <b class="num">{{ main.n }}</b>{% if main.n %} · угадано <b class="num">{{ main.winrate }}%</b>{% endif %}{% if main.roi is not none %} · доходность <b class="num {{ 'pos' if main.roi > 0.05 else ('neg' if main.roi < -0.05 else '') }}">{{ '%+.1f' | format(main.roi) }}%</b> от поставленного{% endif %}</span>
-        <span>ждут результата <b class="num">{{ main.open }}</b> · в ставках <b class="num">${{ '%.2f' | format(main.in_play) }}</b></span>
+        <span>ждут результата <b class="num">{{ main.open }}</b> · в ставках <b class="num">${{ '%.2f' | format(main.in_play) }}</b> · свободно <b class="num{{ ' neg' if main.low_cash else '' }}">${{ '%.2f' | format(main.cash) }}</b>{% if main.low_cash %} — новых ставок не будет{% endif %}</span>
         {% if main.skill and main.skill.bets %}<span>на истории: угадано <b class="num">{{ main.skill.won }}</b> ставок при ожидании рынка <b class="num">{{ '%.0f' | format(main.skill.ek) }}</b></span>{% endif %}
       </div>
     </div>
@@ -688,18 +739,33 @@
   <div class="wal-grid">
     {% for c in cs %}
     <a class="wal" href="?w={{ c.key }}">
-      <div class="wal-top"><span class="wal-name">{{ c.name }}</span><span class="wal-bal">{{ cash_big(c.balance) }}</span></div>
+      <div class="wal-top"><span class="wal-name">{{ c.name }}</span><span class="wal-bal">{{ cash_big(c.balance) }}{{ move(c.move) }}</span></div>
       <div class="wal-desc">{{ c.desc }}</div>
       <div class="wal-mid">
         {% if c.spark %}<svg class="spark" viewBox="0 0 {{ c.spark.w }} {{ c.spark.h }}" preserveAspectRatio="none" aria-hidden="true"><line x1="0" x2="{{ c.spark.w }}" y1="{{ c.spark.base }}" y2="{{ c.spark.base }}"/><path pathLength="1" class="{{ 'up' if c.spark.up else 'down' }}" d="{{ c.spark.path }}"/><circle class="{{ 'up' if c.spark.up else 'down' }}" cx="{{ c.spark.end[0] }}" cy="{{ c.spark.end[1] }}" r="3"/></svg>
         {% else %}<span class="nospark">итогов ещё нет</span>{% endif %}
         <span class="wal-pnl num {{ 'pos' if c.pnl > 0.005 else ('neg' if c.pnl < -0.005 else '') }}">{{ money(c.pnl) }}</span>
       </div>
-      <div class="wal-meta">сыграно <b>{{ c.n }}</b>{% if c.n %} · угадано <b>{{ c.winrate }}%</b>{% endif %}{% if c.open %} · ждут <b>{{ c.open }}</b>{% endif %}</div>
-      {% if c.roi is not none %}<div class="wal-meta" title="Итог в процентах от всех денег, поставленных в закрытые ставки (с комиссией)">доходность <b class="{{ 'pos' if c.roi > 0.05 else ('neg' if c.roi < -0.05 else '') }}">{{ '%+.1f' | format(c.roi) }}%</b> от поставленного{% if c.start != 100 %} · старт ${{ '%.0f' | format(c.start) }}{% endif %}</div>
-      {% elif c.start != 100 %}<div class="wal-meta">старт <b>${{ '%.0f' | format(c.start) }}</b></div>{% endif %}
-      {% if c.skill and c.skill.bets and not c.skill.parent %}<div class="wal-skill">ставки: угадано <b>{{ c.skill.won }}</b>, рынок ждал <b>{{ '%.0f' | format(c.skill.ek) }}</b> <span class="{{ 'pos' if c.skill.won > c.skill.ek else 'neg' }}">{{ '▲' if c.skill.won > c.skill.ek else '▼' }} {{ 'лучше' if c.skill.won > c.skill.ek else 'хуже' }} рынка</span></div>{% endif %}
-      {% if c.upd %}<div class="upd corner" title="{{ c.upd.what | capitalize }} · последняя закрытая: {{ c.upd.settled or 'ещё не было' }} · последняя новая: {{ c.upd.bet or 'ещё не было' }}"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span class="num">{{ c.upd.when }}</span></div>{% endif %}
+      {# 2026-09-27 (просьба Alex): всё отдельными блоками — деньги, результаты, история; «лучше/хуже рынка» — всегда внизу слева #}
+      <div class="wb-money{{ ' low' if c.low_cash else '' }}" title="Свободно для новых ставок: баланс минус деньги в открытых ставках">
+        <div><span>Свободно для ставок</span><b class="num">${{ '%.2f' | format(c.cash) }}</b></div>
+        <div><span>В ставках</span><b class="num">${{ '%.2f' | format(c.in_play) }}</b></div>
+        {% if c.low_cash %}<p>⚠ меньше ставки $2 — новых ставок не будет</p>{% endif %}
+      </div>
+      <div class="wb-stats">
+        <div><span>Сыграно</span><b class="num">{{ c.n }}</b></div>
+        <div><span>Угадано</span><b class="num">{{ c.winrate ~ '%' if c.n else '—' }}</b></div>
+        <div><span>Ждут</span><b class="num">{{ c.open }}</b></div>
+        <div title="Итог в процентах от всех денег, поставленных в закрытые ставки (с комиссией)"><span>Доходность</span><b class="num {{ 'pos' if c.roi and c.roi > 0.05 else ('neg' if c.roi and c.roi < -0.05 else '') }}">{{ ('%+.1f' | format(c.roi)) ~ '%' if c.roi is not none else '—' }}</b></div>
+      </div>
+      {% if c.skill and c.skill.bets and not c.skill.parent %}
+      <div class="wb-hist"><span>На истории</span>угадано ставок <b class="num">{{ c.skill.won }}</b>, рынок ждал <b class="num">{{ '%.0f' | format(c.skill.ek) }}</b></div>
+      {% endif %}
+      {% if c.start != 100 %}<div class="wb-note">старт ${{ '%.0f' | format(c.start) }}</div>{% endif %}
+      <div class="wb-foot">
+        {% if c.skill and c.skill.bets and not c.skill.parent %}<span class="wb-verdict {{ 'pos' if c.skill.won > c.skill.ek else 'neg' }}">{{ '▲ лучше' if c.skill.won > c.skill.ek else '▼ хуже' }} рынка</span>{% else %}<span></span>{% endif %}
+        {% if c.upd %}<span class="upd" title="{{ c.upd.what | capitalize }} · последняя закрытая: {{ c.upd.settled or 'ещё не было' }} · последняя новая: {{ c.upd.bet or 'ещё не было' }}"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span class="num">{{ c.upd.when }}</span></span>{% endif %}
+      </div>
     </a>
     {% endfor %}
   </div>

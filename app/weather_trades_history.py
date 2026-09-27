@@ -70,6 +70,10 @@ def load_event(city, cfg, d):
     trades, offset = [], 0
     while True:
         batch = get(f"{DATA_API}/trades", {"eventId": ev["id"], "limit": 500, "offset": offset})
+        # 2026-09-27: Data API иногда отвечает объектом-ошибкой вместо списка — день не отмечаем загруженным,
+        # он догрузится следующей ночью (раньше такой ответ ронял весь запуск)
+        if batch and not isinstance(batch, list):
+            raise requests.RequestException(f"Polymarket ответил не списком сделок: {str(batch)[:150]}")
         if not batch:
             break
         trades += batch
@@ -118,16 +122,20 @@ def main():
     print(f"дней к загрузке: {len(jobs)}", flush=True)
 
     def work(job):
+        # 2026-09-27 (решение Alex: «даже если что-то упало — продолжаем»): любая ошибка по одному дню —
+        # день пропускается (не отмечается загруженным, догрузится следующей ночью), остальные идут дальше
         try:
             return job, load_event(*job)
-        except requests.RequestException as e:
+        except Exception as e:
             return job, e
 
     n_done = 0
     with ThreadPoolExecutor(6) as pool:
         for (city, cfg, d), res in pool.map(work, jobs):
             if isinstance(res, Exception):
-                print(f"{city} {d}: ошибка — {res}", file=sys.stderr)
+                import jobmark
+                jobmark.ITEM_ERRORS.append(f"{city} {d}: {type(res).__name__}: {res}")
+                print(f"{city} {d}: ошибка — {type(res).__name__}: {res} — пропускаю, догрузится следующей ночью", flush=True)
                 continue
             if res is None:
                 continue

@@ -15,6 +15,7 @@
         python weather_ml_data.py --obs-backfill — разово: dwpf/alti за всю историю
 """
 
+from jobmark import item_guard
 import csv
 import io
 import math
@@ -60,70 +61,72 @@ def obs_backfill(conn):
     """Точка росы и давление за всю историю — одним запросом на станцию."""
     end = datetime.now(timezone.utc) + timedelta(days=1)
     for i, (city, cfg) in enumerate(OBS_CITIES.items()):
-        if i:
-            time.sleep(6)
-        params = {"station": cfg["iem"], "data": ["dwpf", "alti"], "year1": HISTORY_START.year,
-                  "month1": HISTORY_START.month, "day1": HISTORY_START.day, "year2": end.year,
-                  "month2": end.month, "day2": end.day, "tz": "Etc/UTC", "format": "onlycomma",
-                  "latlon": "no", "missing": "M", "report_type": [3, 4]}
-        for attempt in range(4):
-            r = requests.get(IEM_ASOS, params=params, timeout=120)
-            if r.status_code == 429 or "Too many requests" in r.text[:200]:
-                time.sleep(12 * (attempt + 1))
-                continue
-            break
-        rows = list(csv.DictReader(io.StringIO(r.text)))
-        conn.executemany("UPDATE station_obs SET dwpf = ?, alti = ? WHERE station = ? AND valid_utc = ?",
-                         [(num(x["dwpf"]), num(x["alti"]), cfg["iem"], x["valid"]) for x in rows if x.get("valid")])
-        conn.commit()
-        print(f"{city}: точка росы/давление — {len(rows)} сводок", flush=True)
+        with item_guard(city, conn):
+            if i:
+                time.sleep(6)
+            params = {"station": cfg["iem"], "data": ["dwpf", "alti"], "year1": HISTORY_START.year,
+                      "month1": HISTORY_START.month, "day1": HISTORY_START.day, "year2": end.year,
+                      "month2": end.month, "day2": end.day, "tz": "Etc/UTC", "format": "onlycomma",
+                      "latlon": "no", "missing": "M", "report_type": [3, 4]}
+            for attempt in range(4):
+                r = requests.get(IEM_ASOS, params=params, timeout=120)
+                if r.status_code == 429 or "Too many requests" in r.text[:200]:
+                    time.sleep(12 * (attempt + 1))
+                    continue
+                break
+            rows = list(csv.DictReader(io.StringIO(r.text)))
+            conn.executemany("UPDATE station_obs SET dwpf = ?, alti = ? WHERE station = ? AND valid_utc = ?",
+                             [(num(x["dwpf"]), num(x["alti"]), cfg["iem"], x["valid"]) for x in rows if x.get("valid")])
+            conn.commit()
+            print(f"{city}: точка росы/давление — {len(rows)} сводок", flush=True)
 
 
 def fcst_vars(conn):
     """Прогнозные условия на день за сутки вперёд, 11-17 местного."""
     tomorrow = (datetime.now(timezone.utc).date() + timedelta(days=2)).isoformat()
     for city, cfg in OBS_CITIES.items():
-        last = conn.execute("SELECT MAX(local_date) FROM ml_fcst_vars WHERE city = ?", (city,)).fetchone()[0]
-        start = (date.fromisoformat(last) - timedelta(days=2)).isoformat() if last else HISTORY_START.isoformat()
-        hourly = ",".join(f"{v}_previous_day1" for v in FCST_VARS)
-        for attempt in range(3):
-            r = requests.get(PREVIOUS_RUNS_API, params={
-                "latitude": cfg["lat"], "longitude": cfg["lon"], "timezone": cfg["tz"], "models": FCST_MODEL,
-                "hourly": hourly, "start_date": start, "end_date": tomorrow}, timeout=60)
-            if r.status_code == 429:
-                time.sleep(30)
-                continue
-            break
-        if r.status_code != 200:
-            print(f"{city}: ошибка {r.status_code}", file=sys.stderr)
-            continue
-        h = r.json()["hourly"]
-        acc = {}
-        for i, t in enumerate(h["time"]):
-            if int(t[11:13]) not in PEAK_HOURS:
-                continue
-            for v in FCST_VARS:
-                x = h.get(f"{v}_previous_day1")[i] if h.get(f"{v}_previous_day1") else None
-                if x is None:
+        with item_guard(city, conn):
+            last = conn.execute("SELECT MAX(local_date) FROM ml_fcst_vars WHERE city = ?", (city,)).fetchone()[0]
+            start = (date.fromisoformat(last) - timedelta(days=2)).isoformat() if last else HISTORY_START.isoformat()
+            hourly = ",".join(f"{v}_previous_day1" for v in FCST_VARS)
+            for attempt in range(3):
+                r = requests.get(PREVIOUS_RUNS_API, params={
+                    "latitude": cfg["lat"], "longitude": cfg["lon"], "timezone": cfg["tz"], "models": FCST_MODEL,
+                    "hourly": hourly, "start_date": start, "end_date": tomorrow}, timeout=60)
+                if r.status_code == 429:
+                    time.sleep(30)
                     continue
-                a = acc.setdefault((t[:10], v), [])
-                a.append(x)
-        rows = []
-        for (d, v), xs in acc.items():
-            if v == "wind_direction_10m":
-                # направление — средний вектор, иначе 350° и 10° дали бы 180°
-                s = sum(math.sin(math.radians(x)) for x in xs)
-                c = sum(math.cos(math.radians(x)) for x in xs)
-                rows.append((city, d, "wind_dir_sin", s / len(xs)))
-                rows.append((city, d, "wind_dir_cos", c / len(xs)))
-            elif v == "precipitation":
-                rows.append((city, d, v, sum(xs)))
-            else:
-                rows.append((city, d, v, sum(xs) / len(xs)))
-        conn.executemany("INSERT OR REPLACE INTO ml_fcst_vars VALUES (?, ?, ?, ?)", rows)
-        conn.commit()
-        time.sleep(1.5)
-        print(f"{city}: прогнозные условия — {len({r[1] for r in rows})} дней", flush=True)
+                break
+            if r.status_code != 200:
+                print(f"{city}: ошибка {r.status_code}", file=sys.stderr)
+                continue
+            h = r.json()["hourly"]
+            acc = {}
+            for i, t in enumerate(h["time"]):
+                if int(t[11:13]) not in PEAK_HOURS:
+                    continue
+                for v in FCST_VARS:
+                    x = h.get(f"{v}_previous_day1")[i] if h.get(f"{v}_previous_day1") else None
+                    if x is None:
+                        continue
+                    a = acc.setdefault((t[:10], v), [])
+                    a.append(x)
+            rows = []
+            for (d, v), xs in acc.items():
+                if v == "wind_direction_10m":
+                    # направление — средний вектор, иначе 350° и 10° дали бы 180°
+                    s = sum(math.sin(math.radians(x)) for x in xs)
+                    c = sum(math.cos(math.radians(x)) for x in xs)
+                    rows.append((city, d, "wind_dir_sin", s / len(xs)))
+                    rows.append((city, d, "wind_dir_cos", c / len(xs)))
+                elif v == "precipitation":
+                    rows.append((city, d, v, sum(xs)))
+                else:
+                    rows.append((city, d, v, sum(xs) / len(xs)))
+            conn.executemany("INSERT OR REPLACE INTO ml_fcst_vars VALUES (?, ?, ?, ?)", rows)
+            conn.commit()
+            time.sleep(1.5)
+            print(f"{city}: прогнозные условия — {len({r[1] for r in rows})} дней", flush=True)
 
 
 if __name__ == "__main__":

@@ -28,7 +28,7 @@
     --pos-bg: rgba(163, 227, 154, 0.14);
     --neg-bg: rgba(244, 167, 127, 0.14);
     --accent-bg: rgba(255, 213, 138, 0.14);
-    --sidebar-w: 240px;
+    --sidebar-w: 236px;
     --font-ui: "Onest", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     --font-mono: "Onest", -apple-system, "Segoe UI", Roboto, sans-serif;  /* 2026-09-27 (просьба Alex): и цифры — Onest; ровные столбцы — через tabular-nums */
   }
@@ -73,79 +73,83 @@
   /* ---- shell layout: sidebar + content ---- */
   .nav-toggle-input { display: none; }
   .shell { display: flex; min-height: 100vh; align-items: stretch; }
+  /* 2026-09-27 (решение Alex): панель «Меню и инструменты» по макету Fundcy — карточка с отступом,
+     логотип-плитка, «свернуть», поиск, группы «Меню» / «Инструменты», белая плашка активного пункта, счётчики */
   .sidebar {
     width: var(--sidebar-w);
     flex-shrink: 0;
-    background: var(--bg-raised);
-    border-right: 1px solid var(--border);
-    padding: 20px 14px;
+    align-self: flex-start;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    padding: 10px 0 10px 10px;
+    transition: width 0.2s ease;
+  }
+  /* 2026-09-27 (просьба Alex): панель из отдельных блоков — шапка с поиском, «Меню», «Инструменты», paper trading */
+  /* 2026-09-27 (уточнение Alex): вся панель — один большой блок, внутри него отдельные блоки «Меню» и «Инструменты» */
+  .side-card {
+    height: 100%;
+    background: var(--panel);
+    border-radius: 20px;
+    padding: 16px 12px 12px;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 12px;
+    overflow-y: auto;
   }
-  .brand {
-    display: flex;
-    align-items: center;
-    padding: 4px 10px 20px;
-  }
-  .brand-link {
-    display: inline-flex;
-    align-items: center;
-    gap: 9px;
-    color: var(--text);
-    text-decoration: none;
-    font-weight: 700;
-    font-size: 15px;
-    letter-spacing: -0.01em;
-  }
-  .brand-dot {
-    width: 9px; height: 9px; border-radius: 50%;
-    background: var(--highlight);
-    box-shadow: 0 0 0 3px var(--accent-bg);
-    flex-shrink: 0;
-  }
-  .side-group-label {
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--muted);
-    padding: 14px 10px 6px;
-  }
-  .side-group-label:first-of-type { padding-top: 2px; }
+  .side-block { background: var(--bg-raised); border: 1px solid var(--border-soft); border-radius: 16px; padding: 12px 8px; display: flex; flex-direction: column; gap: 3px; }
+  .side-block.head { background: transparent; border: 0; padding: 0 2px; }
+  .side-block .side-group-label { padding: 2px 10px 8px; }
+  .side-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 2px 12px; }
+  .brand-link { display: inline-flex; align-items: center; gap: 10px; color: var(--text); text-decoration: none; font-weight: 700; font-size: 17px; letter-spacing: -0.01em; min-width: 0; }
+  .brand-mark { width: 30px; height: 30px; border-radius: 9px; background: var(--accent); color: #0A0A0B; display: grid; place-items: center; font-weight: 800; font-size: 14px; flex-shrink: 0; }
+  .side-collapse { width: 30px; height: 30px; border-radius: 8px; border: 1px solid var(--border); background: transparent; color: var(--muted);
+    display: grid; place-items: center; cursor: pointer; flex-shrink: 0; padding: 0; }
+  .side-collapse:hover { color: var(--text); border-color: var(--muted); }
+  .side-collapse svg, .side-search svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  .side-search { display: flex; align-items: center; gap: 8px; background: var(--track); border-radius: 12px; padding: 0 10px; color: var(--muted); }
+  .side-search input { flex: 1; min-width: 0; background: transparent; border: 0; color: var(--text); font: 400 13.5px var(--font-ui); padding: 9px 0; outline: none; }
+  .side-search input::placeholder { color: var(--muted); }
+  .side-search:focus-within { box-shadow: 0 0 0 2px var(--accent-strong); }
+  .side-search kbd { font: 600 11px var(--font-ui); background: var(--panel); border-radius: 6px; padding: 2px 6px; color: var(--muted); }
+  .side-group-label { font-size: 12px; color: var(--muted); padding: 12px 10px 6px; }
   .side-link {
     display: flex;
     align-items: center;
     gap: 11px;
     padding: 9px 10px;
-    border-radius: 8px;
+    border-radius: 12px;
     color: var(--muted);
     text-decoration: none;
-    font-size: 13.5px;
+    font-size: 14px;
     min-height: 40px;
   }
   .side-link:hover { color: var(--text); background: var(--panel); }
-  .side-link.active { color: var(--text); background: var(--accent-bg); font-weight: 600; }
-  .side-link.active .icon { color: var(--accent-strong); }
-  .side-link-icon { color: var(--muted); flex-shrink: 0; }
-  .side-foot {
-    margin-top: auto;
-    padding: 14px 10px 4px;
-    border-top: 1px solid var(--border-soft);
-  }
-  .paper-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 11px;
-    color: var(--muted);
-    line-height: 1.4;
-  }
-  .paper-badge::before {
-    content: "";
-    width: 6px; height: 6px; border-radius: 50%;
-    background: var(--pos);
-    flex-shrink: 0;
-  }
+  .side-link.active { background: var(--text); color: #0A0A0B; font-weight: 600; }
+  .side-link.active .icon { color: #0A0A0B; }
+  .side-link-icon { color: inherit; flex-shrink: 0; }
+  .side-link .lbl { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .side-n { margin-left: auto; min-width: 22px; height: 22px; padding: 0 7px; border-radius: 999px; display: grid; place-items: center;
+    font-size: 11.5px; font-weight: 600; background: var(--track); color: var(--muted); font-variant-numeric: tabular-nums; }
+  .side-link.active .side-n { background: #0A0A0B; color: var(--text); }
+  .side-n.good { color: var(--pos); } .side-n.bad { background: var(--neg); color: #0A0A0B; }
+  .side-spacer { flex: 1; min-height: 12px; }
+  .side-foot { border-radius: 16px; padding: 12px 14px; background: linear-gradient(135deg, rgba(255, 213, 138, .16), rgba(163, 227, 154, .12)); }
+  .paper-badge { display: block; font-size: 12.5px; color: var(--muted); line-height: 1.4; }
+  .paper-badge b { display: block; color: var(--text); font-size: 13.5px; }
+  .side-nav { display: flex; flex-direction: column; gap: 10px; }
+  .sidebar [hidden] { display: none !important; }
+  .side-empty { font-size: 12.5px; color: var(--muted); }
+  /* свёрнутая панель — только иконки (на компьютере; запоминается в браузере) */
+  .side-collapsed .sidebar { width: 86px; }
+  .side-collapsed .side-top { flex-direction: column; padding-bottom: 0; }
+  .side-collapsed .side-block { padding: 8px 4px; }
+  .side-collapsed .side-card { padding: 14px 8px; }
+  .side-collapsed .brand-link .brand-name, .side-collapsed .side-search, .side-collapsed .side-group-label,
+  .side-collapsed .side-link .lbl, .side-collapsed .side-n, .side-collapsed .side-foot { display: none; }
+  .side-collapsed .side-link { justify-content: center; padding: 10px 0; }
+  .side-collapsed .side-collapse svg { transform: scaleX(-1); }
+  .side-collapsed .side-link[data-dot]::after { content: ""; position: absolute; width: 7px; height: 7px; border-radius: 50%; background: var(--neg); transform: translate(11px, -10px); }
 
   .nav-scrim { display: none; }
 
@@ -181,15 +185,21 @@
   .card, .toc a, .status-link, .side-link { text-decoration: none; }
 
   @media (max-width: 900px) {
-    .sidebar {
+    .sidebar, .side-collapsed .sidebar {
       position: fixed;
       inset: 0 auto 0 0;
+      width: min(290px, 86vw);
       height: 100vh;
-      transform: translateX(-100%);
+      padding: 10px;
+      transform: translateX(-110%);
       transition: transform 0.2s ease;
       z-index: 50;
-      box-shadow: 0 0 0 1px var(--border);
     }
+    .side-collapse { display: none; }
+    .side-collapsed .brand-link .brand-name, .side-collapsed .side-search, .side-collapsed .side-group-label,
+    .side-collapsed .side-link .lbl, .side-collapsed .side-n, .side-collapsed .side-foot { display: revert; }
+    .side-collapsed .side-link { justify-content: flex-start; padding: 9px 10px; }
+    .side-collapsed .side-top { flex-direction: row; }
     .nav-toggle-input:checked ~ .sidebar { transform: translateX(0); }
     .nav-scrim {
       display: none;
@@ -345,30 +355,46 @@
 </head>
 <body>
 <a href="#main-content" class="skip-link">Перейти к содержимому</a>
-{% macro navlink(href, label, icon_name, active) -%}
-<a href="{{ href }}" class="side-link{{ ' active' if active else '' }}"{% if active %} aria-current="page"{% endif %}>{{ icon.render(icon_name, 'side-link-icon') }}<span>{{ label }}</span></a>
+{% macro navlink(href, label, icon_name, active, n=none, tone='') -%}
+<a href="{{ href }}" class="side-link{{ ' active' if active else '' }}" data-label="{{ label }}" title="{{ label }}"{% if tone == 'bad' %} data-dot{% endif %}{% if active %} aria-current="page"{% endif %}>{{ icon.render(icon_name, 'side-link-icon') }}<span class="lbl">{{ label }}</span>{% if n is not none %}<span class="side-n {{ tone }}">{{ n }}</span>{% endif %}</a>
 {%- endmacro %}
 {% set path = request.url.path %}
+{% set nc = nav_counts() %}
+<script>try { if (localStorage.getItem('side-collapsed') === '1') document.documentElement.classList.add('side-collapsed'); } catch (e) {}</script>
 <div class="shell">
   <input type="checkbox" id="nav-toggle" class="nav-toggle-input">
   <aside class="sidebar">
-    <div class="brand">
-      <a href="/" class="brand-link"><span class="brand-dot" aria-hidden="true"></span>weather-lab</a>
+   <div class="side-card">
+    <div class="side-block head">
+    <div class="side-top">
+      <a href="/paper" class="brand-link" title="weather-lab"><span class="brand-mark" aria-hidden="true">W</span><span class="brand-name">weather-lab</span></a>
+      <button type="button" class="side-collapse" id="side-collapse" aria-label="Свернуть панель" aria-pressed="false" title="Свернуть панель">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M10 4v16M16 10l-2 2 2 2"/></svg></button>
     </div>
-    <nav aria-label="Разделы">
-      <div class="side-group-label">Обзор</div>
-      {{ navlink('/status', 'здоровье системы', 'status', path == '/status') }}
-      {{ navlink('/events', 'события', 'news', path == '/events') }}
-      <div class="side-group-label">Погода</div>
-      {{ navlink('/paper', 'кошелёк', 'wallet', path == '/paper') }}
-      {{ navlink('/bets', 'ставки', 'trending', path == '/bets') }}
+    <label class="side-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="m20 20-4.5-4.5"/></svg>
+      <input type="search" id="side-q" placeholder="Поиск…" aria-label="Поиск по разделам" autocomplete="off"><kbd aria-hidden="true">/</kbd></label>
+    </div>
+    <nav aria-label="Разделы" id="side-nav" class="side-nav">
+     <div class="side-block">
+      <div class="side-group-label">Меню</div>
+      {{ navlink('/paper', 'кошельки', 'wallet', path == '/paper', nc.wallets) }}
+      {{ navlink('/bets', 'ставки', 'trending', path == '/bets', nc.open) }}
       {{ navlink('/', 'погода', 'weather', path == '/' or path.startswith('/city/')) }}
-      <div class="side-group-label">Данные</div>
       {{ navlink('/training', 'обучение модели', 'sliders', path == '/training') }}
+     </div>
+     <div class="side-block">
+      <div class="side-group-label">Инструменты</div>
+      {{ navlink('/status', 'здоровье системы', 'status', path == '/status', nc.alerts if nc.alerts else none, 'bad' if nc.alerts else '') }}
+      {{ navlink('/events', 'события', 'news', path == '/events') }}
+      {{ navlink('/audit', 'проверка', 'target', path == '/audit', ('ok' if nc.audit == 0 else nc.audit) if nc.audit is not none else none, 'good' if nc.audit == 0 else ('bad' if nc.audit else '')) }}
+     </div>
+      <div class="side-empty side-block" id="side-empty" hidden>Ничего не найдено</div>
     </nav>
+    <div class="side-spacer"></div>
     <div class="side-foot">
-      <span class="paper-badge">paper trading · $0 реальных денег</span>
+      <span class="paper-badge"><b>Paper trading</b>$0 реальных денег</span>
     </div>
+   </div>
   </aside>
   <label for="nav-toggle" class="nav-scrim" aria-hidden="true"></label>
   <div class="main-col">
@@ -381,5 +407,35 @@
     </main>
   </div>
 </div>
+<script>
+/* панель: свернуть (запоминается), поиск по разделам, «/» — в поиск, Enter — первый найденный */
+(function () {
+  var root = document.documentElement, btn = document.getElementById('side-collapse');
+  function sync() { var on = root.classList.contains('side-collapsed'); btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    btn.setAttribute('aria-label', on ? 'Развернуть панель' : 'Свернуть панель'); btn.title = btn.getAttribute('aria-label'); }
+  sync();
+  btn.addEventListener('click', function () {
+    root.classList.toggle('side-collapsed'); sync();
+    try { localStorage.setItem('side-collapsed', root.classList.contains('side-collapsed') ? '1' : '0'); } catch (e) {}
+  });
+  var q = document.getElementById('side-q'), links = document.querySelectorAll('#side-nav .side-link'), empty = document.getElementById('side-empty');
+  q.addEventListener('input', function () {
+    var t = q.value.trim().toLowerCase(), n = 0;
+    links.forEach(function (a) { var hit = !t || a.dataset.label.indexOf(t) !== -1; a.hidden = !hit; n += hit; });
+    document.querySelectorAll('#side-nav .side-block:not(.side-empty)').forEach(function (b) { b.hidden = !b.querySelector('.side-link:not([hidden])'); });
+    empty.hidden = n > 0;
+  });
+  q.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { var first = Array.prototype.find.call(links, function (a) { return !a.hidden; }); if (first) location.href = first.href; }
+    if (e.key === 'Escape') { q.value = ''; q.dispatchEvent(new Event('input')); q.blur(); }
+  });
+  document.addEventListener('keydown', function (e) {
+    var tag = (e.target.tagName || '').toLowerCase();
+    if (e.key === '/' && tag !== 'input' && tag !== 'textarea' && tag !== 'select') {
+      e.preventDefault(); root.classList.remove('side-collapsed'); sync(); q.focus();
+    }
+  });
+})();
+</script>
 </body>
 </html>

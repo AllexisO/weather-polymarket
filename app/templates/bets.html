@@ -1,5 +1,25 @@
 {% extends "base.html" %}
-{% block title %}Ставки — weather-lab{% endblock %}
+{% block title %}Ставки — weather-lab<script>
+/* 2026-09-27: нажатие на день «Движения денег» — сводка дня; данные из data-* (textContent, без HTML) */
+(function () {
+  var btns = document.querySelectorAll('.flow .fd'); if (!btns.length) return;
+  function word(n, one, few, many) { var a = n % 10, b = n % 100; return a === 1 && b !== 11 ? one : (a >= 2 && a <= 4 && (b < 12 || b > 14) ? few : many); }
+  function set(id, txt) { var el = document.getElementById(id); if (el) el.textContent = txt; }
+  btns.forEach(function (b) {
+    b.addEventListener('click', function () {
+      btns.forEach(function (x) { x.classList.toggle('sel', x === b); x.setAttribute('aria-pressed', x === b ? 'true' : 'false'); });
+      var d = b.dataset, on = +d.open, net = +d.net;
+      set('fd-date', d.date); set('fd-staked', '$' + d.staked); set('fd-open', on + ' ' + word(on, 'ставка', 'ставки', 'ставок'));
+      set('fd-back', '$' + d.back); set('fd-won', '+$' + d.won); set('fd-won-n', 'угадали ' + d.wonN);
+      set('fd-lost', '−$' + d.lost); set('fd-lost-n', 'не угадали ' + d.lostN);
+      var el = document.getElementById('fd-net');
+      el.textContent = (net > 0.005 ? '+' : (net < -0.005 ? '−' : '')) + '$' + Math.abs(net).toFixed(2);
+      el.className = 'num ' + (net > 0.005 ? 'pos' : (net < -0.005 ? 'neg' : ''));
+    });
+  });
+})();
+</script>
+{% endblock %}
 {% block content %}
 {#
   2026-09-27 (просьба Alex): все ставки всех кошельков — открытые и закрытые отдельно.
@@ -55,18 +75,44 @@
   .latest { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .lt { border: 1px solid var(--bk-line); border-radius: 14px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
   .lt-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
-  .lt-top b { font-weight: 600; font-size: 14.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .lt-top b { font-weight: 600; font-size: 14.5px; overflow-wrap: anywhere; }
   .lt-top span { font-variant-numeric: tabular-nums; font-size: 14px; white-space: nowrap; }
-  .lt-sub { font-size: 12.5px; color: var(--bk-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .lt .chip { max-width: 100%; white-space: normal; line-height: 1.3; padding-top: 3px; padding-bottom: 3px; }
+  .lt .chip svg { flex-shrink: 0; }
+  .lt-sub { font-size: 12.5px; color: var(--bk-muted); overflow-wrap: anywhere; }
   .flow-h { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 18px; }
   .flow-h .big { font-size: 34px; font-weight: 600; letter-spacing: -.02em; }
   .legend { display: flex; gap: 14px; font-size: 12.5px; color: var(--bk-muted); margin: 6px 0 10px; }
   .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
-  .flow { display: grid; grid-template-columns: repeat(14, minmax(0, 1fr)); gap: 6px; align-items: end; height: 150px; }
-  .fd { display: flex; gap: 2px; align-items: flex-end; height: 100%; position: relative; }
+  .flow { display: grid; grid-template-columns: repeat(var(--n, 14), minmax(0, 1fr)); gap: 6px; align-items: end; height: 150px; }
+  .flow[style*="--n: 2"], .flow[style*="--n: 3"] { gap: 3px; }
+  .fd { display: flex; gap: 2px; align-items: flex-end; height: 100%; position: relative; padding: 0 1px; margin: 0; border: 0; border-radius: 6px;
+    background: transparent; cursor: pointer; font: inherit; }
+  .fd:hover, .fd.sel { background: rgba(255, 255, 255, .06); }
+  .fd.sel { box-shadow: inset 0 -2px 0 var(--bk-text); }
+  .fd:focus-visible { outline: 2px solid var(--bk-accent); outline-offset: 2px; }
+  /* переключатель периода: 14 дней / месяц */
+  .period { display: flex; flex-wrap: wrap; gap: 8px; margin: 2px 0 14px; }
+  .pbtn { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--bk-line);
+    background: var(--bk-raise); color: var(--bk-muted); font-size: 13.5px; font-weight: 500; text-decoration: none; cursor: pointer; }
+  .bk a.pbtn { color: var(--bk-muted); }
+  .pbtn.on, .bk a.pbtn.on { background: #F4F4F5; color: #0A0A0B; border-color: #F4F4F5; font-weight: 600; }
+  .pbtn select { appearance: none; border: 0; background: transparent; color: inherit; font: inherit; font-weight: 600; cursor: pointer; padding: 0 2px; }
+  .pbtn select option { color: #0A0A0B; }
+  .pbtn:focus-within, .pbtn:focus-visible { outline: 2px solid var(--bk-accent); outline-offset: 2px; }
+  .fdet { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--bk-line); }
+  .fdet-h { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; font-size: 13px; margin-bottom: 10px; }
+  .fdet-h b { font-size: 15px; }
+  .fdet-g { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+  .fdet-g div { background: var(--bk-raise); border-radius: 12px; padding: 10px 12px; }
+  .fdet-g span { display: block; font-size: 12px; color: var(--bk-muted); }
+  .fdet-g b { display: block; font-size: 17px; font-weight: 600; margin-top: 2px; }
+  .fdet-g small { display: block; font-size: 12px; color: var(--bk-muted); }
+  .fdet-net { margin-top: 10px; font-size: 14px; color: var(--bk-muted); }
+  .fdet-net b { font-size: 16px; }
   .fd i { flex: 1; border-radius: 5px 5px 2px 2px; min-height: 2px; }
   .fd i.st { background: var(--amb); } .fd i.bk2 { background: var(--bk-pos); }
-  .fl { display: grid; grid-template-columns: repeat(14, minmax(0, 1fr)); gap: 6px; margin-top: 6px; font-size: 11px; color: var(--bk-muted); text-align: center; }
+  .fl { display: grid; grid-template-columns: repeat(var(--n, 14), minmax(0, 1fr)); gap: 6px; margin-top: 6px; font-size: 11px; color: var(--bk-muted); text-align: center; }
   .fl b { display: block; color: var(--bk-text); font-weight: 600; }
 
   /* метки статуса (Finance Health) */
@@ -88,8 +134,11 @@
     background: var(--bk-raise); border: 1px solid var(--bk-line); font-size: 18px; font-weight: 600; line-height: 1.05; }
   .db small { font-size: 10.5px; font-weight: 600; letter-spacing: .06em; color: var(--bk-muted); margin-bottom: 2px; }
   .it b { font-weight: 600; }
-  .it .sub { display: block; font-size: 12.5px; color: var(--bk-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* 2026-09-27 (просьба Alex): без обрезки многоточием — длинные строки переносятся; пары «маркет 27.09» не разрываются (.nb) */
+  .it .sub { display: block; font-size: 12.5px; color: var(--bk-muted); overflow-wrap: anywhere; }
+  .nb { white-space: nowrap; }
   .it .sub.wrap { white-space: normal; }
+  .it .sub .when { color: var(--bk-text); font-weight: 600; font-variant-numeric: tabular-nums; }
   .it .sub .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
   .right { display: flex; align-items: center; gap: 10px; }
   .pill { border: 1px solid var(--bk-line); border-radius: 10px; padding: 5px 10px; font-weight: 600; font-size: 14px; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -104,8 +153,10 @@
   }
   @media (max-width: 600px) {
     .tiles { grid-template-columns: 1fr 1fr; } .tiles .tile:last-child { grid-column: 1 / -1; }
+    .latest { grid-template-columns: 1fr; }
     .tile .v { font-size: 24px; }
     .flow, .fl { gap: 3px; } .fl { font-size: 9.5px; }
+    .fdet-g { grid-template-columns: 1fr 1fr; }
     .pane { padding: 16px; }
     .wb { width: 32px; height: 32px; font-size: 11px; }
     .right .wb { display: none; }
@@ -151,13 +202,37 @@
     </section>
 
     <section class="pane" aria-labelledby="s-flow">
-      <div class="sec-head"><h2 id="s-flow">Движение денег</h2><span class="aside">14 дней</span></div>
+      <div class="sec-head"><h2 id="s-flow">Движение денег</h2><span class="aside">{{ month.name if month else '14 дней' }}</span></div>
+      <form class="period" method="get" action="/bets" aria-label="Период">
+        {% if sel %}<input type="hidden" name="w" value="{{ sel }}">{% endif %}
+        <a class="pbtn{{ '' if month else ' on' }}" href="/bets{{ '?w=' ~ sel if sel else '' }}"{% if not month %} aria-current="true"{% endif %}>14 дней</a>
+        <label class="pbtn{{ ' on' if month else '' }}"><span>Месяц</span>
+          <select id="m" name="m" onchange="this.form.submit()" aria-label="Выбрать месяц">
+            {% if not month %}<option value="" selected>выбрать…</option>{% endif %}
+            {% for x in months | reverse %}<option value="{{ x.key }}"{% if month and x.key == month.key %} selected{% endif %}>{{ x.name }}</option>{% endfor %}
+          </select></label>
+        <noscript><button type="submit">Показать</button></noscript>
+      </form>
       <div class="flow-h"><span class="big num">{{ cash_big(kpi.flow_staked) }}</span><span class="muted">поставлено · вернулось <b class="num" style="color:var(--bk-text)">${{ '%.2f' | format(kpi.flow_back) }}</b></span></div>
       <div class="legend"><span><i style="background:var(--amb)"></i>поставили</span><span><i style="background:var(--bk-pos)"></i>вернулось по итогам</span></div>
-      <div class="flow" role="img" aria-label="Поставлено и вернулось по дням за 14 дней">
-        {% for d in flow %}<div class="fd" title="{{ d.date }}: поставили ${{ '%.2f' | format(d.staked) }}, вернулось ${{ '%.2f' | format(d.back) }}"><i class="st" style="height: {{ d.hs }}%"></i><i class="bk2" style="height: {{ d.hb }}%"></i></div>{% endfor %}
+      <div class="flow" role="group" aria-label="Поставлено и вернулось по дням — нажмите на день" style="--n: {{ flow | length }}">
+        {% for d in flow %}<button type="button" class="fd{{ ' sel' if loop.last else '' }}" aria-pressed="{{ 'true' if loop.last else 'false' }}"
+          aria-label="{{ d.wd }} {{ d.date }}: поставили ${{ '%.2f' | format(d.staked) }}, вернулось ${{ '%.2f' | format(d.back) }}"
+          data-date="{{ d.wd }}, {{ d.date }}" data-staked="{{ '%.2f' | format(d.staked) }}" data-open="{{ d.open_n }}" data-back="{{ '%.2f' | format(d.back) }}"
+          data-won-n="{{ d.won_n }}" data-won="{{ '%.2f' | format(d.won) }}" data-lost-n="{{ d.lost_n }}" data-lost="{{ '%.2f' | format(-d.lost) }}" data-net="{{ '%.2f' | format(d.net) }}"><i class="st" style="height: {{ d.hs }}%"></i><i class="bk2" style="height: {{ d.hb }}%"></i></button>{% endfor %}
       </div>
-      <div class="fl">{% for d in flow %}<span><b>{{ d.wd }}</b>{{ d.date[:2] }}</span>{% endfor %}</div>
+      <div class="fl" style="--n: {{ flow | length }}">{% for d in flow %}<span>{% if d.label %}{% if not month %}<b>{{ d.wd }}</b>{% endif %}{{ d.day }}{% endif %}</span>{% endfor %}</div>
+      {% set t = flow[-1] %}
+      <div class="fdet" id="fdet" aria-live="polite">
+        <div class="fdet-h"><b id="fd-date">{{ t.wd }}, {{ t.date }}</b><span class="muted">нажмите на день, чтобы посмотреть другой</span></div>
+        <div class="fdet-g">
+          <div><span>Поставили</span><b class="num" id="fd-staked">${{ '%.2f' | format(t.staked) }}</b><small id="fd-open">{{ t.open_n }} {{ 'ставка' if t.open_n % 10 == 1 and t.open_n % 100 != 11 else ('ставки' if t.open_n % 10 in [2, 3, 4] and t.open_n % 100 not in [12, 13, 14] else 'ставок') }}</small></div>
+          <div><span>Вернулось</span><b class="num" id="fd-back">${{ '%.2f' | format(t.back) }}</b><small>по закрытым</small></div>
+          <div><span>В плюс</span><b class="num pos" id="fd-won">+${{ '%.2f' | format(t.won) }}</b><small id="fd-won-n">угадали {{ t.won_n }}</small></div>
+          <div><span>В минус</span><b class="num neg" id="fd-lost">−${{ '%.2f' | format(-t.lost) }}</b><small id="fd-lost-n">не угадали {{ t.lost_n }}</small></div>
+        </div>
+        <div class="fdet-net">Итог закрытых за день: <b class="num {{ 'pos' if t.net > 0.005 else ('neg' if t.net < -0.005 else '') }}" id="fd-net">{{ money(t.net) }}</b></div>
+      </div>
     </section>
   </div>
 
@@ -172,7 +247,7 @@
             {% if b.close_badge %}<span class="db" aria-hidden="true"><small>{{ MON[b.close_badge.month - 1] }}</small>{{ b.close_badge.day }}</span>{% else %}<span class="db">—</span>{% endif %}
             <span class="it"><b>{{ b.city_ru }}</b> · {{ b.what }}
               <span class="sub"><i class="dot {{ b.w.tone }}c"></i>{{ b.w.name }}</span>
-              <span class="sub wrap">итог ~{{ b.close_txt }} · открыта {{ b.placed_txt }}{% if b.status == 'resting' %} · заявка ждёт продавца{% endif %}</span></span>
+              <span class="sub wrap"><span class="nb">итог ~{{ b.close_txt }}</span> · <span class="nb">открыта {{ b.placed_txt }}</span>{% if b.status == 'resting' %} · заявка ждёт продавца{% endif %}</span></span>
             <span class="right"><span class="pill" title="Поставили; если угадаем — получим ${{ '%.2f' | format(b.shares) }}">${{ '%.2f' | format(b.cost) }}</span>{{ wbadge(b.w) }}</span>
           </li>
           {% endfor %}
@@ -191,7 +266,7 @@
             {{ wbadge(b.w) }}
             <span class="it"><b>{{ b.city_ru }}</b> · {{ b.what }}
               <span class="sub">{{ b.w.name }}</span>
-              <span class="sub">маркет {{ b.local_date[8:10] }}.{{ b.local_date[5:7] }} · закрыта {{ b.settled_txt }}</span></span>
+              <span class="sub wrap"><span class="nb">закрыта <b class="when">{{ b.settled_txt }}</b></span> · <span class="nb">маркет {{ b.local_date[8:10] }}.{{ b.local_date[5:7] }}</span></span></span>
             <span class="amt"><b class="{{ 'pos' if b.pnl > 0.005 else ('neg' if b.pnl < -0.005 else '') }}">{{ money(b.pnl) }}</b>
               {% if b.status == 'void' %}{{ chip('wait', 'отменён') }}{% elif b.pnl > 0.005 %}{{ chip('in', 'угадали') }}{% else %}{{ chip('out', 'не угадали') }}{% endif %}</span>
           </li>
@@ -202,4 +277,24 @@
     </section>
   </div>
 </div>
+<script>
+/* 2026-09-27: нажатие на день «Движения денег» — сводка дня; данные из data-* (textContent, без HTML) */
+(function () {
+  var btns = document.querySelectorAll('.flow .fd'); if (!btns.length) return;
+  function word(n, one, few, many) { var a = n % 10, b = n % 100; return a === 1 && b !== 11 ? one : (a >= 2 && a <= 4 && (b < 12 || b > 14) ? few : many); }
+  function set(id, txt) { var el = document.getElementById(id); if (el) el.textContent = txt; }
+  btns.forEach(function (b) {
+    b.addEventListener('click', function () {
+      btns.forEach(function (x) { x.classList.toggle('sel', x === b); x.setAttribute('aria-pressed', x === b ? 'true' : 'false'); });
+      var d = b.dataset, on = +d.open, net = +d.net;
+      set('fd-date', d.date); set('fd-staked', '$' + d.staked); set('fd-open', on + ' ' + word(on, 'ставка', 'ставки', 'ставок'));
+      set('fd-back', '$' + d.back); set('fd-won', '+$' + d.won); set('fd-won-n', 'угадали ' + d.wonN);
+      set('fd-lost', '−$' + d.lost); set('fd-lost-n', 'не угадали ' + d.lostN);
+      var el = document.getElementById('fd-net');
+      el.textContent = (net > 0.005 ? '+' : (net < -0.005 ? '−' : '')) + '$' + Math.abs(net).toFixed(2);
+      el.className = 'num ' + (net > 0.005 ? 'pos' : (net < -0.005 ? 'neg' : ''));
+    });
+  });
+})();
+</script>
 {% endblock %}
