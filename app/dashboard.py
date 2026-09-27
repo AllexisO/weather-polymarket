@@ -864,9 +864,9 @@ def _when(dt, now):
 
 
 def wallet_updates(conn):
-    """2026-09-27 (просьба Alex): когда у кошелька последний раз что-то менялось —
-    закрылась ставка (settled_at) или появилась новая (placed_at, иначе время снимка).
-    Время в базе с разными поясами — сравниваем как даты, не как строки."""
+    """2026-09-27 (просьба Alex): время на карточке кошелька — когда последний раз закрылась
+    ставка (settled_at); новые ставки его не меняют (время последней новой — только в подсказке).
+    Нет закрытых ставок — времени нет. Время в базе с разными поясами — сравниваем как даты."""
     out = {}
 
     def upd(w, kind, ts):
@@ -892,9 +892,10 @@ def wallet_updates(conn):
     res = {}
     fmt = lambda dt: dt.astimezone(VIEWER_TZ).strftime("%d.%m %H:%M")
     for w, d in out.items():
-        kind = max(d, key=d.get)
-        res[w] = {"when": fmt(d[kind]), "what": "закрыта ставка" if kind == "settled" else "новая ставка",
-                  "settled": fmt(d["settled"]) if "settled" in d else None, "bet": fmt(d["bet"]) if "bet" in d else None}
+        if "settled" not in d:
+            continue
+        res[w] = {"when": fmt(d["settled"]), "what": "закрыта ставка",
+                  "settled": fmt(d["settled"]), "bet": fmt(d["bet"]) if "bet" in d else None}
     return res
 
 
