@@ -6,31 +6,85 @@
 
 ## 1. Схема
 
+### Сбор данных
+
+```mermaid
+flowchart LR
+  subgraph SRC["Внешние источники"]
+    PM["Polymarket<br>gamma / clob"]
+    PMD["Polymarket<br>data-api"]
+    OM["Open-Meteo<br>16 моделей, условия, ансамбли"]
+    MET["METAR<br>Iowa Mesonet"]
+  end
+
+  subgraph JOBS["Скрипты по крону"]
+    EDGE["weather_edge.py<br>каждые 2 ч"]
+    RES["weather_poly_resolve.py<br>каждые 2 ч"]
+    MM["weather_multimodel.py<br>weather_ml_data.py<br>каждые 6 ч"]
+    ENS["weather_ens.py<br>каждые 2 ч"]
+    ST["weather_station_obs.py<br>каждые 6 ч"]
+    TR["weather_trades_history.py 04:30<br>weather_sharp_rank.py 04:45"]
+    PH["weather_price_history.py<br>04:50"]
+  end
+
+  subgraph DB["База SQLite"]
+    SNAP[("snapshots")]
+    OUT[("weather_poly_outcomes<br>ИТОГ")]
+    FC[("mm_forecasts<br>ml_fcst_vars")]
+    ENSD[("ens_forecasts")]
+    FACT[("station_obs<br>weather_station_daily<br>ФАКТ")]
+    TRD[("poly_trades<br>sharp_wallets")]
+    PRH[("price_history")]
+  end
+
+  PM --> EDGE --> SNAP
+  PM --> RES --> OUT
+  OM --> MM --> FC
+  OM --> ENS --> ENSD
+  MET --> ST --> FACT
+  PMD --> TR --> TRD
+  PM --> PH --> PRH
 ```
- ВНЕШНИЕ ИСТОЧНИКИ                СКРИПТЫ (крон, collector)          БАЗА SQLite (WAL)           ВЫХОД
- ─────────────────                ─────────────────────────          ─────────────────           ─────
- Polymarket gamma/clob ─────────► weather_edge.py  (2 ч) ──────────► snapshots ─────────┐
- Open-Meteo (16 моделей) ───────► weather_multimodel.py (6 ч) ─────► mm_forecasts       │
- Open-Meteo прогноз. условия ───► weather_ml_data.py (6 ч) ────────► ml_fcst_vars       │
- Open-Meteo ансамбли ───────────► weather_ens.py (2 ч) ────────────► ens_forecasts      │
- METAR (Iowa Mesonet) ──────────► weather_station_obs.py (6 ч) ────► station_obs,       │
-                                                                     weather_station_daily (ФАКТ)
- Polymarket (итоги) ────────────► weather_poly_resolve.py (2 ч) ───► weather_poly_outcomes (ИТОГ)
- Polymarket data-api (сделки) ──► weather_trades_history.py (04:30) ► poly_trades, poly_trade_wallets,
-                                                                     poly_market_final
-                                  weather_sharp_rank.py (04:45) ───► sharp_wallets
- Polymarket prices-history ─────► weather_price_history.py (04:50) ► price_history
-                                                                                        │
-                                  weather_ml_live.py --train (05:20) ► data/ml/* (модели), ml_train_log
-                                  weather_ml_fast.py (:02, :32) ───► snapshots_fast     │
-                                  weather_ml_skill.py (05:50) ─────► ml_skill           │
-                                                                                        ▼
-                                  weather_paper.py (2 ч, :10) ─────► paper_trades ──► сайт /paper
- METAR онлайн (aviationweather) ► weather_obs_live.py (2 мин) ─────► paper_obs_trades
- Polymarket websocket ──────────► weather_copy_live.py (всегда) ───► paper_trades (copy)
-                                  weather_copy.py (5 мин, запасной)► paper_trades (copy)
-                                  weather_alerts.py (30 мин) ──────► alerts ─────────► красная плашка
-                                  jobmark.py (из каждого скрипта) ─► job_runs ───────► /status
+
+### Модель и ставки
+
+```mermaid
+flowchart LR
+  FC[("прогнозы, METAR,<br>факт, цены рынка")] --> TRAIN["weather_ml_live.py --train<br>05:20, переобучение"]
+  TRAIN --> MODELS["data/ml/<br>v3, v4, v4e"]
+  TRAIN --> TLOG[("ml_train_log")]
+
+  MODELS --> FAST["weather_ml_fast.py<br>08:00 местного"]
+  MODELS --> EDGE["weather_edge.py<br>каждые 2 ч"]
+  FAST --> SF[("snapshots_fast")]
+  EDGE --> SNAP[("snapshots")]
+
+  SF --> PAPER["weather_paper.py<br>правила кошельков"]
+  SNAP --> PAPER
+  PAPER --> EXEC["polyexec.py<br>стакан, задержка, комиссия"]
+  EXEC --> PT[("paper_trades")]
+
+  WS["Polymarket websocket"] --> COPY["weather_copy_live.py<br>+ weather_copy.py"]
+  SHARP[("sharp_wallets")] --> COPY
+  COPY --> EXEC
+
+  METAR["METAR онлайн"] --> OBS["weather_obs_live.py<br>каждые 2 мин"] --> POT[("paper_obs_trades")]
+
+  OUT[("weather_poly_outcomes")] -->|расчёт ставок| PT
+  PT --> SITE["сайт /paper"]
+  POT --> SITE
+  TLOG --> TSITE["сайт /training"]
+```
+
+### Контроль
+
+```mermaid
+flowchart LR
+  ALL["каждый скрипт"] -->|jobmark.py| JR[("job_runs")] --> STATUS["сайт /status"]
+  AL["weather_alerts.py<br>каждые 30 мин"] --> ALT[("alerts")] --> BANNER["красная плашка<br>на сайте"]
+  PF["preflight.py"] --> AL
+  WD["db_watchdog.sh<br>каждые 2 мин"] -->|база занята более 6 мин| KILL["остановить зависший скрипт,<br>перезапустить copier / dashboard"]
+  WD --> BANNER
 ```
 
 ## 2. Контейнеры (`docker-compose.yml`)
