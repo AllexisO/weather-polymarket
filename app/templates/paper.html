@@ -37,12 +37,12 @@
 <div class="segbar" role="progressbar" aria-label="{{ label }}" aria-valuemin="0" aria-valuemax="{{ need }}" aria-valuenow="{{ n }}">{% for i in range(SEG) %}<i class="{{ 'on' if i < on else '' }}" style="--k: {{ i }}"></i>{% endfor %}</div>
 {%- endmacro %}
 {# ▲/▼ — как изменился баланс при последнем расчёте ставок (2026-09-27, просьба Alex) #}
-{% macro move(m) -%}{% if m %}<span class="mv {{ m.dir }}" title="Последний расчёт {{ m.when }}: {{ m.n }} {{ 'ставка' if m.n % 10 == 1 and m.n % 100 != 11 else ('ставки' if m.n % 10 in [2, 3, 4] and m.n % 100 not in [12, 13, 14] else 'ставок') }}, итог {{ money(m.pnl) }}">{{ '▲' if m.dir == 'up' else ('▼' if m.dir == 'down' else '•') }} {{ money(m.pnl) }}</span>{% endif %}{%- endmacro %}
+{% macro move(m) -%}{% if m %}<span class="mv {{ m.dir }}" title="Последний расчёт {{ m.when }}: {{ m.n }} {{ 'ставка' if m.n % 10 == 1 and m.n % 100 != 11 else ('ставки' if m.n % 10 in [2, 3, 4] and m.n % 100 not in [12, 13, 14] else 'ставок') }}, итог {{ money(m.pnl) }}"><span class="mv-a" aria-hidden="true">{{ '▲' if m.dir == 'up' else ('▼' if m.dir == 'down' else '•') }}</span>{{ money(m.pnl) }}</span>{% endif %}{%- endmacro %}
 {% set all_groups = ([("Главная модель", [main])] if main else []) + groups %}
 
 <style>
   body:has(.bk) .main-col { background: #0A0A0B; }
-  body:has(.bk) main { max-width: 1120px; }
+  body:has(.bk) main { max-width: 1200px; }
   .bk {
     --bk-card: #1C1C1E;
     --bk-raise: #262628;
@@ -61,7 +61,7 @@
     --bk-num: "Onest", -apple-system, "Segoe UI", Roboto, sans-serif;
     color: var(--bk-text); font-family: var(--bk-font); font-size: 15px; line-height: 1.55;
   }
-  .bk .num { font-family: var(--bk-num); font-variant-numeric: tabular-nums; }
+  .bk .num { font-family: var(--bk-num); }
   .bk .pos { color: var(--bk-pos); }
   .bk .neg { color: var(--bk-neg); }
   .bk .muted { color: var(--bk-muted); }
@@ -226,11 +226,10 @@
   .bk a.wal:hover { border-color: rgba(255, 213, 138, .6); color: var(--bk-text); }
   .bk a.wal.sel { border-color: var(--bk-accent); box-shadow: inset 0 0 0 1px var(--bk-accent); }
   .wal-top { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
-  .wal-name { font-weight: 600; font-size: 14.5px; line-height: 1.3; }
-  .wal-bal { font-family: var(--bk-num); font-weight: 600; font-size: 16px; white-space: nowrap; }
-  .wal-desc { font-size: 12.5px; color: var(--bk-muted); margin-top: 2px; }
-  .upd { display: inline-flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 12.5px; color: var(--bk-faint); }
-  .upd svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; flex-shrink: 0; }
+  .wal-name { font-weight: 600; font-size: 13px; line-height: 1.3; }
+  .wal-bal { font-family: var(--bk-num); font-weight: 600; font-size: 14px; white-space: nowrap; }
+  /* 2026-09-28 (Alex): описание убрано с карточки — оно есть на странице кошелька */
+  .upd { display: inline-flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 12px; color: var(--bk-faint); }
   .upd.corner { align-self: flex-end; margin-top: auto; padding-top: 10px; }
   .wal-meta { font-size: 12.5px; color: var(--bk-muted); margin-top: 8px; }
   .wal-meta b { font-family: var(--bk-num); font-weight: 600; color: var(--bk-text); }
@@ -258,7 +257,7 @@
   .spark path.up { stroke: var(--bk-pos); } .spark path.down { stroke: var(--bk-neg); }
   .spark circle.up { fill: var(--bk-pos); } .spark circle.down { fill: var(--bk-neg); }
   .nospark { font-size: 12.5px; color: var(--bk-faint); }
-  .wal-pnl { font-size: 16px; font-weight: 600; white-space: nowrap; flex-shrink: 0; }
+  .wal-pnl { font-size: 14px; font-weight: 600; white-space: nowrap; flex-shrink: 0; }
   .wal-skill { font-size: 12.5px; color: var(--bk-muted); margin-top: 4px; }
   .wal-skill b { font-family: var(--bk-num); color: var(--bk-text); }
   .wal-skill span { font-weight: 600; white-space: nowrap; }
@@ -401,11 +400,12 @@
   /* ▲/▼ последнего расчёта рядом с балансом */
   .mv { display: inline-flex; align-items: center; gap: 3px; margin-left: 8px; padding: 2px 8px; border-radius: 999px; font-size: 12.5px;
     font-weight: 600; font-variant-numeric: tabular-nums; vertical-align: 3px; white-space: nowrap; letter-spacing: 0; }
+  .mv-a { font-size: .68em; line-height: 1; }  /* 2026-09-28 (Alex): стрелка меньше цифр */
   .mv.up { background: var(--bk-pos-bg); color: var(--bk-pos); }
   .mv.down { background: var(--bk-neg-bg); color: var(--bk-neg); }
   .mv.flat { background: var(--bk-raise); color: var(--bk-muted); }
   .wal-bal { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
-  .wal-bal .mv { margin-left: 0; font-size: 12px; }
+  .wal-bal .mv { margin-left: 0; font-size: 10px; }
   .big .mv { font-size: 14px; padding: 4px 11px; vertical-align: 10px; }
   /* сколько осталось на новые ставки */
   .wal-cash { margin-top: 8px; font-size: 12.5px; color: var(--bk-muted); }
@@ -414,25 +414,37 @@
   .wal-cash.low b { color: var(--bk-neg); }
   .cash-warn { margin-top: 14px; padding: 10px 14px; border-radius: 12px; background: var(--bk-neg-bg); color: var(--bk-neg); font-size: 14px; font-weight: 600; }
   /* карточка кошелька: отдельные блоки (2026-09-27, просьба Alex) */
-  .wb-money { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; margin-top: 12px; border-radius: 12px; overflow: hidden; background: var(--bk-line); }
-  .wb-money div { background: var(--bk-raise); padding: 9px 12px; display: flex; flex-direction: column; justify-content: space-between; gap: 2px; }
+  .wb-money { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; margin-top: 10px; border-radius: 10px; overflow: hidden; background: var(--bk-line); }
+  .wb-money div { background: var(--bk-raise); padding: 5px 11px 6px; display: flex; flex-direction: column; justify-content: space-between; gap: 0; min-width: 0; }
   .wb-money span, .wb-stats span, .wb-hist span { display: block; font-size: 11.5px; color: var(--bk-muted); }
-  .wb-money b { display: block; font-size: 16px; font-weight: 600; color: var(--bk-text); }
-  .wb-money p { grid-column: 1 / -1; margin: 0; padding: 7px 12px; background: var(--bk-neg-bg); color: var(--bk-neg); font-size: 12.5px; font-weight: 600; }
+  .wb-money b { display: block; font-size: 14px; font-weight: 600; color: var(--bk-text); white-space: nowrap; }
+  .wb-money span { font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .wb-money p { grid-column: 1 / -1; margin: 0; padding: 5px 11px; background: var(--bk-neg-bg); color: var(--bk-neg); font-size: 12.5px; font-weight: 600; }
   .wb-money.low div:first-child b { color: var(--bk-neg); }
-  .wb-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 10px; }
-  .wb-stats div { border: 1px solid var(--bk-line); border-radius: 10px; padding: 7px 10px; min-width: 0; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 0 8px; }
-  .wb-stats div span { display: inline; font-size: 12px; }
-  .wb-stats b { display: block; font-size: 14.5px; font-weight: 600; color: var(--bk-text); white-space: nowrap; }
+  .wb-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin-top: 10px; }
+  /* 2026-09-28 (Alex): подпись и значение всегда на одной строке — значение не переносится, подпись сокращается «…» */
+  .wb-stats div { border: 1px solid var(--bk-line); border-radius: 9px; padding: 4px 7px; min-width: 0; display: flex; flex-wrap: nowrap; justify-content: space-between; align-items: baseline; gap: 4px; }
+  .wb-stats div span { display: inline; font-size: 11px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .wb-stats div b { flex-shrink: 0; }
+  .wb-stats b { display: block; font-size: 13px; font-weight: 600; color: var(--bk-text); white-space: nowrap; }
   .wb-stats b.pos { color: var(--bk-pos); } .wb-stats b.neg { color: var(--bk-neg); }
-  .wb-hist { margin-top: 10px; padding: 8px 12px; border-radius: 10px; background: var(--bk-raise); font-size: 13px; color: var(--bk-muted); }
+  .wb-hist { margin-top: 10px; padding: 8px 12px; border-radius: 10px; background: var(--bk-raise); font-size: 12px; color: var(--bk-muted);
+             white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* 2026-09-28 (Alex): блоки соседних карточек на одном уровне — шапка всегда на 2 строки названия,
+     блок графика всегда на 2 строки подписи случайности, «На истории» — в одну строку */
+  .wal-top { min-height: 42px; align-items: flex-start; }
+  .wal-top .wal-name { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .wb-luck { min-height: 2.8em; line-height: 1.4; }
   .wb-hist b { color: var(--bk-text); font-weight: 600; }
   .wb-note { margin-top: 8px; font-size: 12px; color: var(--bk-faint); }
   .wb-foot { margin-top: auto; padding-top: 12px; display: flex; justify-content: space-between; align-items: center; gap: 10px; }
   .wb-foot .upd { margin-top: 0; }
-  .wb-verdict { font-size: 13px; font-weight: 600; }
+  .wb-verdict { font-size: 12px; font-weight: 600; }
   .wb-verdict { color: var(--bk-faint); font-weight: 500; }
-  .wb-luck { margin-top: -2px; font-size: 12.5px; color: var(--bk-faint); text-align: right; }
+  .wb-chart { margin-top: 12px; padding: 10px 12px; border-radius: 12px; background: var(--bk-raise); }
+  .wb-chart .wal-mid { margin-top: 0; }
+  .wb-chart .spark { max-width: none; }
+  .wb-luck { margin-top: 6px; font-size: 10px; color: var(--bk-faint); text-align: left; }
   .wb-luck.pos { color: var(--bk-pos); } .wb-luck.neg { color: var(--bk-neg); }
   .tile-luck { display: block; font-size: 12.5px; opacity: .75; margin-top: 4px; line-height: 1.35; }
   .wb-verdict.pos { color: var(--bk-pos); font-weight: 600; } .wb-verdict.neg { color: var(--bk-neg); font-weight: 600; }
@@ -494,7 +506,7 @@
       <div>
         {% if main and cur.key == main.key %}<div class="acct-name" style="margin-bottom: 14px;"><span class="tag">главная модель</span></div>{% endif %}
         <div class="big">{{ cash_big(cur.balance) }}{{ move(cur.move) }}<span>на счёте · старт ${{ '%.0f' | format(start) }}{% if cur.roi is not none %} · доходность <b class="num {{ 'pos' if cur.roi > 0.05 else ('neg' if cur.roi < -0.05 else '') }}">{{ '%+.1f' | format(cur.roi) }}%</b> от поставленного{% endif %}</span></div>
-        {% if cur.upd %}<div class="upd" title="{{ cur.upd.what | capitalize }} · последняя закрытая: {{ cur.upd.settled or 'ещё не было' }} · последняя новая: {{ cur.upd.bet or 'ещё не было' }}"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span class="num">{{ cur.upd.when }}</span></div>{% endif %}
+        {% if cur.upd %}<div class="upd" title="{{ cur.upd.what | capitalize }} · последняя закрытая: {{ cur.upd.settled or 'ещё не было' }} · последняя новая: {{ cur.upd.bet or 'ещё не было' }}"><span class="num">{{ cur.upd.when }}</span></div>{% endif %}
         <div class="tiles">
           <div class="tile t1"><span>Свободно для ставок</span><b class="num{{ ' neg' if cur.low_cash else '' }}">${{ '%.2f' | format(cur.cash) }}</b></div>
           <div class="tile t2"><span>В открытых ставках</span><b class="num">${{ '%.2f' | format(cur.in_play) }}</b></div>
@@ -718,7 +730,7 @@
       <div class="feat-name">{{ main.name }}</div>
       <div class="feat-desc">{{ main.desc }}</div>
       <div class="big">{{ cash_big(main.balance) }}{{ move(main.move) }}<span>на счёте · итог <b class="num {{ 'pos' if main.pnl > 0.005 else ('neg' if main.pnl < -0.005 else '') }}">{{ money(main.pnl) }}</b></span></div>
-      {% if main.upd %}<div class="upd" title="{{ main.upd.what | capitalize }} · последняя закрытая: {{ main.upd.settled or 'ещё не было' }} · последняя новая: {{ main.upd.bet or 'ещё не было' }}"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span class="num">{{ main.upd.when }}</span></div>{% endif %}
+      {% if main.upd %}<div class="upd" title="{{ main.upd.what | capitalize }} · последняя закрытая: {{ main.upd.settled or 'ещё не было' }} · последняя новая: {{ main.upd.bet or 'ещё не было' }}"><span class="num">{{ main.upd.when }}</span></div>{% endif %}
       <div class="feat-stats">
         <span>сыграно <b class="num">{{ main.n }}</b>{% if main.n %} · угадано <b class="num">{{ main.winrate }}%</b>{% endif %}{% if main.roi is not none %} · доходность <b class="num {{ 'pos' if main.roi > 0.05 else ('neg' if main.roi < -0.05 else '') }}">{{ '%+.1f' | format(main.roi) }}%</b> от поставленного{% endif %}</span>
         <span>ждут результата <b class="num">{{ main.open }}</b> · в ставках <b class="num">${{ '%.2f' | format(main.in_play) }}</b> · свободно <b class="num{{ ' neg' if main.low_cash else '' }}">${{ '%.2f' | format(main.cash) }}</b>{% if main.low_cash %} — новых ставок не будет{% endif %}</span>
@@ -744,16 +756,17 @@
     {% for c in cs %}
     <a class="wal" href="?w={{ c.key }}">
       <div class="wal-top"><span class="wal-name">{{ c.name }}</span><span class="wal-bal">{{ cash_big(c.balance) }}{{ move(c.move) }}</span></div>
-      <div class="wal-desc">{{ c.desc }}</div>
+      <div class="wb-chart">{# 2026-09-28 (Alex): график с итогом — отдельным блоком #}
       <div class="wal-mid">
         {% if c.spark %}<svg class="spark" viewBox="0 0 {{ c.spark.w }} {{ c.spark.h }}" preserveAspectRatio="none" aria-hidden="true"><line x1="0" x2="{{ c.spark.w }}" y1="{{ c.spark.base }}" y2="{{ c.spark.base }}"/><path pathLength="1" class="{{ 'up' if c.spark.up else 'down' }}" d="{{ c.spark.path }}"/><circle class="{{ 'up' if c.spark.up else 'down' }}" cx="{{ c.spark.end[0] }}" cy="{{ c.spark.end[1] }}" r="3"/></svg>
         {% else %}<span class="nospark">итогов ещё нет</span>{% endif %}
         <span class="wal-pnl num {{ 'pos' if c.pnl > 0.005 else ('neg' if c.pnl < -0.005 else '') }}">{{ money(c.pnl) }}</span>
       </div>
-      {% if c.luck %}<div class="wb-luck {{ c.luck[1] }}" title="Мы ставим на дешёвые варианты: один выигрыш платит в 4-7 раз больше ставки, поэтому итог первых недель сильно зависит от везения. ± — размах, который даёт чистая случайность при таких ценах">{{ c.luck[0] }}</div>{% endif %}
+      <div class="wb-luck {{ c.luck[1] if c.luck else '' }}" title="Мы ставим на дешёвые варианты: один выигрыш платит в 4-7 раз больше ставки, поэтому итог первых недель сильно зависит от везения. ± — размах, который даёт чистая случайность при таких ценах">{{ c.luck[0] if c.luck else '' }}</div>
+      </div>
       {# 2026-09-27 (просьба Alex): всё отдельными блоками — деньги, результаты, история; «лучше/хуже рынка» — всегда внизу слева #}
       <div class="wb-money{{ ' low' if c.low_cash else '' }}" title="Свободно для новых ставок: баланс минус деньги в открытых ставках">
-        <div><span>Свободно для ставок</span><b class="num">${{ '%.2f' | format(c.cash) }}</b></div>
+        <div title="Свободно для ставок"><span>Свободно</span><b class="num">${{ '%.2f' | format(c.cash) }}</b></div>
         <div><span>В ставках</span><b class="num">${{ '%.2f' | format(c.in_play) }}</b></div>
         {% if c.low_cash %}<p>⚠ меньше ставки $2 — новых ставок не будет</p>{% endif %}
       </div>
@@ -761,7 +774,7 @@
         <div><span>Сыграно</span><b class="num">{{ c.n }}</b></div>
         <div><span>Угадано</span><b class="num">{{ c.winrate ~ '%' if c.n else '—' }}</b></div>
         <div><span>Ждут</span><b class="num">{{ c.open }}</b></div>
-        <div title="Итог в процентах от всех денег, поставленных в закрытые ставки (с комиссией)"><span>Доходность</span><b class="num {{ 'pos' if c.roi and c.roi > 0.05 else ('neg' if c.roi and c.roi < -0.05 else '') }}">{{ ('%+.1f' | format(c.roi)) ~ '%' if c.roi is not none else '—' }}</b></div>
+        <div title="Итог в процентах от всех денег, поставленных в закрытые ставки (с комиссией)"><span>Доходн.</span><b class="num {{ 'pos' if c.roi and c.roi > 0.05 else ('neg' if c.roi and c.roi < -0.05 else '') }}">{{ ('%+.1f' | format(c.roi)) ~ '%' if c.roi is not none else '—' }}</b></div>
       </div>
       {% if c.skill and c.skill.bets and not c.skill.parent %}
       <div class="wb-hist"><span>На истории</span>угадано ставок <b class="num">{{ c.skill.won }}</b>, рынок ждал <b class="num">{{ '%.0f' | format(c.skill.ek) }}</b></div>
@@ -772,7 +785,7 @@
         {% if c.vs_mkt is none %}<span></span>
         {% elif c.n < verdict_min_n %}<span class="wb-verdict" title="Сравнивать с рынком рано: на малом числе ставок результат — в основном случайность">мало ставок: {{ c.n }} из {{ verdict_min_n }}</span>
         {% else %}<span class="wb-verdict {{ 'pos' if c.vs_mkt > 0 else 'neg' }}" title="{{ c.n }} закрытых ставок: потрачено ${{ '%.2f' | format(c.cost) }}, выплачено ${{ '%.2f' | format(c.paid) }} — {{ '%+.0f' | format(c.vs_mkt) }}% к цене рынка; комиссия ${{ '%.2f' | format(c.fees) }}">{{ '▲ лучше' if c.vs_mkt > 0 else '▼ хуже' }} рынка {{ '%+.0f' | format(c.vs_mkt) }}%</span>{% endif %}
-        {% if c.upd %}<span class="upd" title="{{ c.upd.what | capitalize }} · последняя закрытая: {{ c.upd.settled or 'ещё не было' }} · последняя новая: {{ c.upd.bet or 'ещё не было' }}"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span class="num">{{ c.upd.when }}</span></span>{% endif %}
+        {% if c.upd %}<span class="upd" title="{{ c.upd.what | capitalize }} · последняя закрытая: {{ c.upd.settled or 'ещё не было' }} · последняя новая: {{ c.upd.bet or 'ещё не было' }}"><span class="num">{{ c.upd.when }}</span></span>{% endif %}
       </div>
     </a>
     {% endfor %}

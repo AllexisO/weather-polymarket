@@ -85,7 +85,7 @@ def run_checks():
         mem = sqlite3.connect(":memory:")
         mem.row_factory = sqlite3.Row
         mem.execute(f"ATTACH DATABASE 'file:{DB_PATH}?mode=ro' AS src")
-        for t in ("snapshots", "snapshots_fast", "paper_trades", "weather_station_daily", "weather_poly_outcomes"):
+        for t in ("snapshots", "snapshots_fast", "paper_trades", "weather_station_daily", "weather_poly_outcomes", "ml_skill"):
             if ro.execute("SELECT 1 FROM sqlite_master WHERE name = ?", (t,)).fetchone():
                 mem.execute(f"CREATE TABLE {t} AS SELECT * FROM src.{t}")
         mem.execute("DETACH DATABASE src")

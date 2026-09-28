@@ -392,6 +392,7 @@
       <div class="side-group-label">Меню</div>
       {{ navlink('/paper', 'кошельки', 'wallet', path == '/paper', nc.wallets) }}
       {{ navlink('/bets', 'ставки', 'trending', path == '/bets', nc.open) }}
+      {{ navlink('/cities', 'города', 'globe', path.startswith('/cities'), nc.cities if nc.cities else none) }}
       {{ navlink('/', 'погода', 'weather', path == '/' or path.startswith('/city/')) }}
       {{ navlink('/training', 'обучение модели', 'sliders', path == '/training') }}
      </div>
@@ -449,6 +450,93 @@
       e.preventDefault(); root.classList.remove('side-collapsed'); sync(); q.focus();
     }
   });
+})();
+</script>
+<script>
+/* 2026-09-28 (просьба Alex): живое обновление без перезагрузки. Страница держит открытое соединение /api/stream
+   (Server-Sent Events): сервер каждые 3 с сверяет отпечаток данных и, как только пришло новое (ставка, итог,
+   цены, проверка, обучение, заметка, тревога), сразу шлёт сигнал. По сигналу подгружаем эту же страницу и точечно
+   обновляем только изменившиеся тексты/значения (см. morph). Пока человек печатает или выделяет текст — ждём 2 с.
+   Соединение оборвалось — EventSource переподключается сам. */
+(function () {
+  if (!window.EventSource) return;
+  var ver = null, pending = null, busy = false, lastInput = 0, STATE = ['sel', 'active', 'on', 'flash'];
+  ['pointerdown', 'keydown', 'wheel', 'touchstart'].forEach(function (e) {
+    document.addEventListener(e, function () { lastInput = Date.now(); }, { passive: true });
+  });
+  function idle() {
+    var a = document.activeElement;
+    if (a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return false;
+    if (window.getSelection && String(window.getSelection())) return false;
+    return Date.now() - lastInput > 1500;
+  }
+  /* Точечное обновление: новая страница сравнивается с текущей, меняются только отличающиеся тексты и атрибуты —
+     элементы остаются те же (обработчики, анимации, выбранные вкладки/фильтры не трогаются). Состояние, которое
+     меняют скрипты (aria-selected/pressed/expanded, hidden, open, классы sel/active/on), у существующих элементов
+     сохраняется; поля ввода не трогаем. Скрипты страницы заново не запускаются. */
+  var KEEP_ATTR = { 'aria-selected': 1, 'aria-pressed': 1, 'aria-expanded': 1, 'hidden': 1, 'open': 1 };
+  function morphAttrs(a, b) {
+    Array.prototype.forEach.call(b.attributes, function (at) {
+      if (KEEP_ATTR[at.name]) return;
+      if (at.name === 'class') {
+        var keep = Array.prototype.filter.call(a.classList, function (c) { return STATE.indexOf(c) >= 0; });
+        var want = Array.prototype.filter.call(b.classList, function (c) { return STATE.indexOf(c) < 0; }).concat(keep).join(' ');
+        if (a.getAttribute('class') !== want) a.setAttribute('class', want);
+        return;
+      }
+      if (a.getAttribute(at.name) !== at.value) a.setAttribute(at.name, at.value);
+    });
+    Array.prototype.slice.call(a.attributes).forEach(function (at) {
+      if (!KEEP_ATTR[at.name] && at.name !== 'style' && at.name !== 'class' && !b.hasAttribute(at.name)) a.removeAttribute(at.name);
+    });
+  }
+  function morph(a, b) {
+    if (a.nodeType !== b.nodeType || a.nodeName !== b.nodeName) { a.replaceWith(document.importNode(b, true)); return; }
+    if (a.nodeType === 3 || a.nodeType === 8) { if (a.nodeValue !== b.nodeValue) a.nodeValue = b.nodeValue; return; }
+    if (a.nodeType !== 1 || a.tagName === 'SCRIPT') return;
+    morphAttrs(a, b);
+    if (/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return;
+    var ac = Array.prototype.slice.call(a.childNodes), bc = b.childNodes, i;
+    for (i = 0; i < bc.length; i++) {
+      if (i < ac.length) morph(ac[i], bc[i]); else a.appendChild(document.importNode(bc[i], true));
+    }
+    for (i = bc.length; i < ac.length; i++) ac[i].remove();
+  }
+  var lastHtml = null;
+  function swap(doc) {
+    var om = document.getElementById('main-content'), nm = doc.getElementById('main-content');
+    if (!om || !nm) return;
+    if (nm.innerHTML !== lastHtml) {  /* та же страница, что уже на экране, — ничего не трогаем */
+      lastHtml = nm.innerHTML;
+      morph(om, nm);
+    }
+    doc.querySelectorAll('.sidebar .side-link').forEach(function (nl) {  /* счётчики в боковой панели */
+      var ol = document.querySelector('.sidebar .side-link[href="' + nl.getAttribute('href') + '"]');
+      if (!ol) return;
+      var nn = nl.querySelector('.side-n'), on = ol.querySelector('.side-n');
+      if (nn && on) { if (on.textContent !== nn.textContent) on.textContent = nn.textContent; if (on.className !== nn.className) on.className = nn.className; }
+      else if (nn) ol.appendChild(nn.cloneNode(true));
+      else if (on) on.remove();
+      if (nl.hasAttribute('data-dot')) ol.setAttribute('data-dot', nl.getAttribute('data-dot')); else ol.removeAttribute('data-dot');
+    });
+    if (doc.title && document.title !== doc.title) document.title = doc.title;
+  }
+  function apply() {
+    if (pending === null || pending === ver || busy) return;
+    if (!idle()) { setTimeout(apply, 2000); return; }
+    var want = pending;
+    busy = true;
+    fetch(location.href, { cache: 'no-store' }).then(function (r) { if (!r.ok) throw r; return r.text(); }).then(function (html) {
+      swap(new DOMParser().parseFromString(html, 'text/html'));
+      ver = want;
+    }).catch(function () {}).then(function () { busy = false; if (pending !== ver) setTimeout(apply, 2000); });
+  }
+  var es = new EventSource('/api/stream');
+  es.onmessage = function (e) {
+    if (ver === null) { ver = e.data; return; }  /* первый сигнал — то, что уже на странице */
+    pending = e.data;
+    apply();
+  };
 })();
 </script>
 </body>

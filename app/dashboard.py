@@ -269,6 +269,7 @@ PAPER_WALLETS = {
     "ml3_cal15": "Смесь — не дешевле 15¢",
     "no_cheap": "Против лотерейных билетов",
     "fav": "Недооценённые фавориты",
+    "ml3_city": "Смесь — лучшие города",
     "copy": "Повтор за сильными трейдерами",
     # двойники: те же сигналы, но покупают своей заявкой (без комиссии, по нижней цене)
     "main_mk": "Основная модель — своя заявка", "emos_mk": "EMOS — своя заявка", "mm_mk": "Микс — своя заявка",
@@ -300,6 +301,8 @@ WALLET_INFO = {
                "Покупает «нет» на вариант, который модель считает переоценённым (перевес от 10 п.п.)"),
     "ml3_cal15": ("Другие версии обучаемой модели", "Смесь — не дешевле 15¢",
                   "Как «смесь», но не ставит на варианты дешевле 15¢: на всём рынке они сбываются реже своей цены"),
+    "ml3_city": ("Другие версии обучаемой модели", "Смесь — лучшие города",
+                 "Как «смесь», но только в половине городов, где она последние 45 дней была лучше рынка сильнее всего (пересчёт по понедельникам)"),
     "ml3_cal": ("Другие версии обучаемой модели", "Главная v3 + рынок (смесь)",
                 "35% главной модели + 65% рынка: без самоуверенности, ставит при перевесе от 3 п.п."),
     "ml2": ("Другие версии обучаемой модели", "Обучаемая v2", "То же без мнения рынка"),
@@ -346,7 +349,7 @@ CITY_RU = {
     "wuhan": "Ухань", "zhengzhou": "Чжэнчжоу",
 }
 WALLET_BADGE = {"ml3": "v3", "ml2": "v2", "ml": "v1", "ml_shift": "v1+", "mm": "MX", "emos": "EM", "main": "GI",
-                "mm_mk": "MX", "emos_mk": "EM", "main_mk": "GI", "ml3_mk": "v3", "ml3_cal": "v3+", "ml3_no": "v3−", "ml3_cal_k": "v3$", "ml4": "v4", "ml4_cal": "v4+", "ml4e": "v4³", "ml4e_cal": "v4³+", "ens": "EN", "ml3_cal15": "v3+¢", "no_cheap": "НЕТ", "fav": "ФАВ", "copy": "CP", "obs": "OB", "obs_fmi": "FI"}
+                "mm_mk": "MX", "emos_mk": "EM", "main_mk": "GI", "ml3_mk": "v3", "ml3_cal": "v3+", "ml3_no": "v3−", "ml3_cal_k": "v3$", "ml4": "v4", "ml4_cal": "v4+", "ml4e": "v4³", "ml4e_cal": "v4³+", "ens": "EN", "ml3_cal15": "v3+¢", "no_cheap": "НЕТ", "fav": "ФАВ", "ml3_city": "v3+Г", "copy": "CP", "obs": "OB", "obs_fmi": "FI"}
 WALLET_GROUPS = ["Другие версии обучаемой модели", "Перекосы рынка", "Ансамбли погодных моделей", "Повтор за сильными трейдерами", "Прогноз по формулам (раньше)",
                  "Тот же сигнал, но покупка своей заявкой", "Живые замеры"]
 
@@ -610,7 +613,7 @@ def line_chart(labels, series, fmt, w=520, h=300, vline=None):
             "first": labels[0], "last": labels[-1], "vline": round(X(vline), 1) if vline is not None else None}
 
 
-SKILL_PARENT = {"main_mk": "main", "emos_mk": "emos", "mm_mk": "mm", "ml3_mk": "ml3", "ml3_cal_k": "ml3_cal", "ml3_cal15": "ml3_cal"}  # «своя заявка» — сигнал родителя
+SKILL_PARENT = {"main_mk": "main", "emos_mk": "emos", "mm_mk": "mm", "ml3_mk": "ml3", "ml3_cal_k": "ml3_cal", "ml3_cal15": "ml3_cal", "ml3_city": "ml3_cal"}  # «своя заявка» — сигнал родителя
 
 
 def model_skill(conn, key):
@@ -1329,6 +1332,123 @@ def all_bets(conn):
     return out
 
 
+# ---- города (2026-09-29, просьба Alex: «статистика каждого города, где играли, + или −; по клику — всё по городу:
+# все ставки, на что смотрели, почему ставили») ----
+def _city_ru(city):
+    return CITY_RU.get(city, city.replace("_", " ").title())
+
+
+def _sd(bets):
+    return math.sqrt(sum(b["cost"] ** 2 * (1 - b["price"]) / b["price"] for b in bets
+                         if b["price"] and 0 < b["price"] < 1 and b["cost"]))
+
+
+def _city_sum(bs):
+    done = [b for b in bs if b["pnl"] is not None]
+    pnl = sum(b["pnl"] for b in done)
+    staked = sum(b["cost"] for b in done)
+    won = sum(1 for b in done if b["pnl"] > 0.005)
+    return {"n": len(done), "won": won, "winrate": round(100 * won / len(done)) if done else None, "pnl": pnl,
+            "roi": 100 * pnl / staked if staked else None, "open": sum(1 for b in bs if b["pnl"] is None),
+            "luck": luck(pnl, _sd(done)), "last": max((b["local_date"] for b in bs), default=None)}
+
+
+@app.get("/cities", response_class=HTMLResponse)
+def cities_page(request: Request, w: str = ""):
+    conn = db()
+    try:
+        bets = all_bets(conn)
+    finally:
+        conn.close()
+    wallets = sorted({(b["w"]["key"], b["w"]["name"]) for b in bets}, key=lambda x: x[1])
+    if w:
+        bets = [b for b in bets if b["w"]["key"] == w]
+    by = {}
+    for b in bets:
+        by.setdefault(b["city"], []).append(b)
+    rows = [dict(_city_sum(bs), city=c, name=_city_ru(c), wallets=len({b["w"]["key"] for b in bs})) for c, bs in by.items()]
+    rows.sort(key=lambda r: -r["pnl"])
+    tot = _city_sum(bets)
+    return TEMPLATES.TemplateResponse("cities.html", {"request": request, "rows": rows, "tot": tot, "wallets": wallets, "w": w,
+                                                      "n_plus": sum(r["pnl"] > 0.005 for r in rows),
+                                                      "n_minus": sum(r["pnl"] < -0.005 for r in rows)})
+
+
+@app.get("/cities/{city}", response_class=HTMLResponse)
+def city_bets_page(request: Request, city: str):
+    """Всё по городу: итог по кошелькам и каждый день — итог, что показывали рынок и главная модель в 08:00,
+    решение каждого кошелька с причиной (ставка: шанс модели против цены; пропуск/не купили: причина из записи)."""
+    from weather_cities import OBS_CITIES
+    conn = db()
+    try:
+        bets = [b for b in all_bets(conn) if b["city"] == city]
+        rows = []
+        if table_exists(conn, "paper_trades"):
+            rows += [dict(r, _tbl="p") for r in conn.execute("SELECT * FROM paper_trades WHERE city = ? ORDER BY local_date DESC",
+                                                             (city,))]
+        if table_exists(conn, "paper_obs_trades"):
+            rows += [dict(r, _tbl="o") for r in conn.execute("SELECT * FROM paper_obs_trades WHERE city = ? ORDER BY local_date DESC",
+                                                             (city,))]
+        outcomes = {r["local_date"]: (r["win_lo"], r["win_hi"]) for r in
+                    conn.execute("SELECT local_date, win_lo, win_hi FROM weather_poly_outcomes WHERE city = ?", (city,))} \
+            if table_exists(conn, "weather_poly_outcomes") else {}
+        facts = {r["local_date"]: r["actual_max"] for r in
+                 conn.execute("SELECT local_date, actual_max FROM weather_station_daily WHERE city = ?", (city,))} \
+            if table_exists(conn, "weather_station_daily") else {}
+        dates = sorted({r["local_date"] for r in rows}, reverse=True)
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(snapshots)")}
+        mcol = "ml3_model_p" if "ml3_model_p" in cols else "model_p"
+        seen = {}
+        for d in dates:  # что показывали рынок и главная модель утром: первый снимок дня с 08:00 местного
+            snap = conn.execute(f"""SELECT bucket_lo, bucket_hi, unit, market_p, {mcol} AS mp FROM snapshots
+                                    WHERE city = ? AND local_date = ? AND ts_utc = (SELECT MIN(ts_utc) FROM snapshots
+                                    WHERE city = ? AND local_date = ? AND local_hour >= 8 AND local_hour < 12)""",
+                                (city, d, city, d)).fetchall()
+            if snap:
+                top_m = max(snap, key=lambda s: s["market_p"] or 0)
+                top_v = max((s for s in snap if s["mp"] is not None), key=lambda s: s["mp"], default=None)
+                seen[d] = {"mkt": (paper_bucket(top_m["bucket_lo"], top_m["bucket_hi"], top_m["unit"]), top_m["market_p"]),
+                           "model": (paper_bucket(top_v["bucket_lo"], top_v["bucket_hi"], top_v["unit"]), top_v["mp"]) if top_v else None}
+    finally:
+        conn.close()
+    unit = OBS_CITIES.get(city, {}).get("unit", "celsius")
+    sym = "°F" if unit == "fahrenheit" else "°C"
+    days = []
+    for d in dates:
+        items = []
+        for r in (x for x in rows if x["local_date"] == d):
+            is_no = r["_tbl"] == "o" or r.get("side") == "no"
+            bucket = paper_bucket(r["bucket_lo"], r["bucket_hi"], r["unit"]) if r.get("bucket_lo") is not None else None
+            it = {"w": _wallet_meta(r["wallet"]), "status": r["status"], "what": (("против " if is_no else "на ") + bucket) if bucket else None,
+                  "reason": r.get("reason"), "pnl": _pnl(r) if r["status"] in ("won", "lost", "void") else None,
+                  "cost": (r["stake"] or 0) + _fee(r) if r["status"] in ("open", "resting", "won", "lost", "void") else None,
+                  "price": r.get("price")}
+            mp, kp = r.get("model_p"), r.get("market_p")
+            if r["_tbl"] == "o":
+                it["why"] = r.get("reason") or "станция уже исключила этот вариант"
+            elif r["status"] in ("open", "resting", "won", "lost", "void") and mp is not None and kp is not None:
+                it["why"] = (f"{'«нет» — ' if is_no else ''}модель {mp * 100:.0f}%, рынок {kp * 100:.0f}% — перевес "
+                             f"{(mp - kp) * 100:+.0f} п.п.; купили по {r['price'] * 100:.1f}¢" if r.get("price") else "")
+            else:
+                it["why"] = r.get("reason") or ""
+            items.append(it)
+        placed = [i for i in items if i["status"] in ("open", "resting", "won", "lost", "void")]
+        placed.sort(key=lambda i: (i["pnl"] is None, -(i["pnl"] or 0)))
+        other = [i for i in items if i not in placed]
+        oc = outcomes.get(d)
+        days.append({"date": d, "placed": placed, "other": other,
+                     "pnl": sum(i["pnl"] for i in placed if i["pnl"] is not None),
+                     "outcome": paper_bucket(oc[0], oc[1], unit) if oc else None,
+                     "fact": facts.get(d), "sym": sym, "seen": seen.get(d)})
+    by_w = {}
+    for b in bets:
+        by_w.setdefault(b["w"]["key"], []).append(b)
+    wal = [dict(_city_sum(bs), w=bs[0]["w"]) for bs in by_w.values()]
+    wal.sort(key=lambda r: -r["pnl"])
+    return TEMPLATES.TemplateResponse("city_bets.html", {"request": request, "city": city, "name": _city_ru(city),
+                                                         "tot": _city_sum(bets), "wal": wal, "days": days})
+
+
 MONTH_RU = ["январь", "февраль", "март", "апрель", "май", "июнь", "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь"]
 
 
@@ -1352,6 +1472,9 @@ def bets_page(request: Request, w: str = "", m: str = ""):
         c = b["close"]
         b["close_badge"] = c.astimezone(VIEWER_TZ) if c else None
         b["close_txt"] = _when(c, nv) if c else "—"
+        # 2026-09-29 (Alex, Чунцин): оценка прошла, а Polymarket ещё не подтвердил итог (оракул UMA: «предложен» →
+        # период оспаривания) — пишем «ждём подтверждения», а не время в прошлом
+        b["overdue"] = bool(c and c < now)
         b["placed_txt"] = short(b["placed"]) if b["placed"] else "—"
     opened.sort(key=lambda b: (b["close"] or now + timedelta(days=9), b["w"]["name"]))
     closed = sorted([b for b in bets if b["settled"]], key=lambda b: b["settled"], reverse=True)
@@ -1500,16 +1623,21 @@ def system_events(conn, days=3):
             runs_open.setdefault(b["placed"].replace(minute=0, second=0, microsecond=0), []).append(b)
         if b["settled"] and b["settled"] >= since:
             runs_close.setdefault(b["settled"].replace(second=0, microsecond=0), []).append(b)
+    def wallet_link(bs):
+        # 2026-09-29 (Alex): «подробнее» у ставок ведёт в кошелёк; если кошельков несколько — на обзор кошельков
+        keys = {b["w"]["key"] for b in bs}
+        return f"/paper?w={next(iter(keys))}" if len(keys) == 1 else "/paper"
+
     for t, bs in runs_open.items():
         ws = sorted({b["w"]["name"] for b in bs})
         last = max(b["placed"] for b in bs)
         add(last, "bets", f"Открыто ставок: {len(bs)} на ${sum(b['cost'] for b in bs):.2f}",
-            ", ".join(ws[:4]) + (f" и ещё {len(ws) - 4}" if len(ws) > 4 else ""), "/bets")
+            ", ".join(ws[:4]) + (f" и ещё {len(ws) - 4}" if len(ws) > 4 else ""), wallet_link(bs))
     for t, bs in runs_close.items():
         pnl = sum(b["pnl"] for b in bs)
         won = sum(1 for b in bs if b["pnl"] > 0.005)
         add(t, "bets", f"Закрыто ставок: {len(bs)} · угадано {won} · итог {'+' if pnl >= 0 else '−'}${abs(pnl):.2f}",
-            ", ".join(sorted({b["w"]["name"] for b in bs})[:4]), "/bets")
+            ", ".join(sorted({b["w"]["name"] for b in bs})[:4]), wallet_link(bs))
     if table_exists(conn, "alerts"):
         for r in conn.execute("SELECT message, first_seen, resolved_at FROM alerts"):
             add(_dt(r["first_seen"]), "alert", "Тревога", r["message"], "/status")
@@ -1610,6 +1738,82 @@ def audit_page(request: Request):
     return TEMPLATES.TemplateResponse("audit.html", {"request": request, "a": last, "history": history, "night": night})
 
 
+# ---- живое обновление (2026-09-28, просьба Alex: «видеть, что сайт обновился, без перезагрузки») ----
+# Страница держит соединение /api/stream (Server-Sent Events): сервер раз в 3 с сверяет отпечаток данных
+# (api_version) и при изменении сразу шлёт его — base.html тут же подгружает эту же страницу и подменяет содержимое
+# (с сохранением прокрутки, вкладок и фильтров). Частые скрипты (живые замеры каждые
+# 2 мин, повтор трейдеров каждые 5 мин) в отпечаток не входят, пока не сделали ставку, — иначе страница дёргалась бы.
+_VER_CACHE = {"t": 0.0, "v": None}
+_VER_SQL = (
+    "SELECT COUNT(*), MAX(placed_at), MAX(settled_at), SUM(status = 'open') FROM paper_trades",
+    "SELECT COUNT(*), MAX(placed_at), MAX(settled_at), SUM(status = 'open') FROM paper_obs_trades",
+    "SELECT MAX(rowid) FROM snapshots",
+    "SELECT MAX(rowid) FROM snapshots_fast",
+    "SELECT MAX(rowid) FROM weather_poly_outcomes",
+    "SELECT MAX(run_at) FROM audit_log",
+    "SELECT MAX(run_at) FROM night_check",
+    "SELECT MAX(trained_at) FROM ml_train_log",
+    "SELECT COUNT(*), MAX(rowid) FROM alerts",
+    "SELECT rowid FROM job_log WHERE job NOT IN ('weather_obs_live', 'weather_copy', 'weather_alerts') ORDER BY rowid DESC LIMIT 1",
+)
+
+
+@app.get("/api/version")
+def api_version():
+    if _VER_CACHE["v"] is not None and time.time() - _VER_CACHE["t"] < 2.5:
+        return _VER_CACHE["v"]
+    import hashlib
+    parts = []
+    try:
+        conn = db()
+        try:
+            for q in _VER_SQL:
+                try:
+                    r = conn.execute(q).fetchone()
+                    parts.append(repr(tuple(r) if r is not None else None))  # tuple: repr(Row) — адрес в памяти, менялся бы каждый раз
+                except sqlite3.Error:
+                    parts.append("-")
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        parts.append("db")
+    try:
+        import notes
+        ns = notes.all_notes()
+        parts.append(repr([(n["id"], n["due"], n["done_at"]) for n in ns]))
+    except sqlite3.Error:
+        parts.append("notes")
+    v = {"v": hashlib.md5("|".join(parts).encode()).hexdigest()[:12], "at": datetime.now(VIEWER_TZ).strftime("%H:%M")}
+    _VER_CACHE.update(t=time.time(), v=v)
+    return v
+
+
+@app.get("/api/stream")
+async def api_stream(request: Request):
+    import asyncio
+    from fastapi.responses import StreamingResponse
+    from starlette.concurrency import run_in_threadpool
+
+    async def gen():
+        last, quiet = None, 0
+        while True:
+            if await request.is_disconnected():
+                break
+            v = (await run_in_threadpool(api_version))["v"]
+            if v != last:
+                last, quiet = v, 0
+                yield f"data: {v}\n\n"
+            else:
+                quiet += 1
+                if quiet >= 8:  # ~25 с тишины — пустая строка, чтобы прокси и браузер не закрыли соединение
+                    quiet = 0
+                    yield ": ping\n\n"
+            await asyncio.sleep(3)
+
+    return StreamingResponse(gen(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
+
+
 # ---- заметки с датой (2026-09-28, просьба Alex: «до 12 октября я всё забуду») — notes.py ----
 @app.get("/notes", response_class=HTMLResponse)
 def notes_page(request: Request):
@@ -1675,6 +1879,8 @@ def nav_counts():
             if table_exists(conn, "paper_obs_trades"):
                 n += conn.execute("SELECT COUNT(*) FROM paper_obs_trades WHERE status = 'open'").fetchone()[0]
             v["open"] = n
+            if table_exists(conn, "paper_trades"):  # 2026-09-29: сколько городов, где мы ставили
+                v["cities"] = conn.execute("SELECT COUNT(DISTINCT city) FROM paper_trades WHERE status IN ('open', 'won', 'lost', 'void')").fetchone()[0]
             v["alerts"] = len(active_alerts(conn))
             if table_exists(conn, "audit_log"):
                 r = conn.execute("SELECT ok, details FROM audit_log ORDER BY run_at DESC LIMIT 1").fetchone()

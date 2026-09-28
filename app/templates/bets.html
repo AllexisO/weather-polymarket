@@ -34,7 +34,7 @@
 {% macro wbadge(w) -%}<span class="wb {{ w.tone }}" title="{{ w.name }}" aria-hidden="true">{{ w.badge }}</span>{%- endmacro %}
 <style>
   body:has(.bk) .main-col { background: #0A0A0B; }
-  body:has(.bk) main { max-width: 1180px; }
+  body:has(.bk) main { max-width: 1200px; }
   .bk {
     --bk-card: #1C1C1E; --bk-raise: #262628; --bk-line: #2E2E31; --bk-text: #F4F4F5; --bk-muted: #A1A1AA; --bk-faint: #71717A;
     --bk-accent: #FFD58A; --bk-pos: #A3E39A; --bk-pos-bg: rgba(163, 227, 154, .14); --bk-neg: #F4A77F; --bk-neg-bg: rgba(244, 167, 127, .14);
@@ -247,7 +247,7 @@
             {% if b.close_badge %}<span class="db" aria-hidden="true"><small>{{ MON[b.close_badge.month - 1] }}</small>{{ b.close_badge.day }}</span>{% else %}<span class="db">—</span>{% endif %}
             <span class="it"><b>{{ b.city_ru }}</b> · {{ b.what }}
               <span class="sub"><i class="dot {{ b.w.tone }}c"></i>{{ b.w.name }}</span>
-              <span class="sub wrap"><span class="nb">итог ~{{ b.close_txt }}</span> · <span class="nb">открыта {{ b.placed_txt }}</span>{% if b.status == 'resting' %} · заявка ждёт продавца{% endif %}</span></span>
+              <span class="sub wrap"><span class="nb">{% if b.overdue %}итог: ждём подтверждения Polymarket{% else %}итог ~{{ b.close_txt }}{% endif %}</span> · <span class="nb">открыта {{ b.placed_txt }}</span>{% if b.status == 'resting' %} · заявка ждёт продавца{% endif %}</span></span>
             <span class="right"><span class="pill" title="Поставили; если угадаем — получим ${{ '%.2f' | format(b.shares) }}">${{ '%.2f' | format(b.cost) }}</span>{{ wbadge(b.w) }}</span>
           </li>
           {% endfor %}

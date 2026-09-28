@@ -8,7 +8,7 @@
 {% macro money(v) -%}{{ '−' if v < -0.005 else ('+' if v > 0.005 else '') }}${{ '%.2f' | format(v | abs) }}{%- endmacro %}
 <style>
   body:has(.bk) .main-col { background: #0A0A0B; }
-  body:has(.bk) main { max-width: 1120px; }
+  body:has(.bk) main { max-width: 1200px; }
   .bk {
     --bk-card: #1C1C1E; --bk-raise: #262628; --bk-line: #2E2E31; --bk-text: #F4F4F5; --bk-muted: #A1A1AA; --bk-faint: #71717A;
     --bk-accent: #FFD58A; --bk-pos: #A3E39A; --bk-neg: #F4A77F; --ink: #101012;

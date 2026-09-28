@@ -94,10 +94,44 @@ WALLETS = {"main": "model_p", "emos": "emos_model_p", "mm": "mm_model_p",
            # 2026-09-28 (решение Alex): зеркало no_cheap — «да» на вариант за 50-95¢, который смесь v3 + рынок считает
            # недооценённым (одна ставка на город-день, наибольшая недооценка), «да» не дороже цены + 1¢ (YES_BAND).
            # Проверка (weather_study_structure.py): июль-авг по цене 08:00 256 ставок +12.1%, с 21.08 по сделкам 54 ставки +19.6%.
-           "fav": "ml3c_model_p"}
+           "fav": "ml3c_model_p",
+           # 2026-09-28 (решение Alex): как ml3_cal, но только в городах, где смесь последние 45 дней была лучше рынка
+           # сильнее всего (лучшая половина, пересчёт по понедельникам — CITY_PICK). Проверка (weather_study_city.py,
+           # настоящие сделки 24.08-27.09): +$81 (+31%) на 133 ставках против +$37 (+7%) во всех городах.
+           "ml3_city": "ml3c_model_p"}
+# отбор городов: насколько смесь давала правильному ответу больше рынка (ml_skill, модель source) за прошлые look дней
+# до понедельника недели решения; ставим в лучшей доле share городов (нужно ≥ min_days дней истории)
+CITY_PICK = {"ml3_city": {"source": "ml3_cal", "look": 45, "share": 0.5, "min_days": 15}}
+_CITY_PICK_CACHE = {}
+
+
+def city_pick(conn, wallet, local_date):
+    """(город разрешён?, пояснение) для кошелька с отбором городов. Считается раз на неделю."""
+    import math
+    from datetime import date as _date, timedelta as _td
+    cfg = CITY_PICK[wallet]
+    d = _date.fromisoformat(local_date)
+    week = (d - _td(days=d.weekday())).isoformat()
+    key = (wallet, week)
+    if key not in _CITY_PICK_CACHE:
+        since = (_date.fromisoformat(week) - _td(days=cfg["look"])).isoformat()
+        gaps = {}
+        try:
+            rows = conn.execute("SELECT city, p_model, p_market FROM ml_skill WHERE model = ? AND date >= ? AND date < ?",
+                                (cfg["source"], since, week)).fetchall()
+        except sqlite3.Error:
+            rows = []
+        for city, pm, pk in rows:
+            if pm and pk:
+                gaps.setdefault(city, []).append(math.log(max(pm, 1e-4)) - math.log(max(pk, 1e-4)))
+        score = {c: sum(v) / len(v) for c, v in gaps.items() if len(v) >= cfg["min_days"]}
+        order = sorted(score, key=lambda c: -score[c])
+        _CITY_PICK_CACHE[key] = (set(order[:int(len(order) * cfg["share"])]), score, len(order))
+    keep, score, n = _CITY_PICK_CACHE[key]
+    return keep, score, n
 # у этих кошельков решение — по первому снимку, где у модели ЕСТЬ оценка
 # (обучаемая модель считает только с 08:00 местного, нужны утренние замеры)
-NEEDS_FIELD = {"ml", "ml2", "ml3", "ml_shift", "ml3_mk", "ml3_cal", "ml3_no", "ml3_cal_k", "ml4", "ml4_cal", "ml4e", "ml4e_cal", "ens", "ml3_cal15", "no_cheap", "fav"}
+NEEDS_FIELD = {"ml", "ml2", "ml3", "ml_shift", "ml3_mk", "ml3_cal", "ml3_no", "ml3_cal_k", "ml4", "ml4_cal", "ml4e", "ml4e_cal", "ens", "ml3_cal15", "no_cheap", "fav", "ml3_city"}
 # 2026-09-25: у v1 разброс постоянный (~1°C), и когда её центр совпадает с
 # рынком, она завышает соседние варианты. На истории (цена первой сделки
 # после решения, $2): такие ставки июль-авг -$100, сентябрь -$82; ставки при
@@ -112,10 +146,11 @@ START_TS = {"ml_shift": SHIFT_START_TS, "ml3_mk": "2026-09-26T12:00:00+00:00", "
             "ml4": "2026-09-26T21:30:00+00:00", "ml4_cal": "2026-09-26T21:30:00+00:00",
             "ml4e": "2026-09-27T09:30:00+00:00", "ml4e_cal": "2026-09-27T09:30:00+00:00",
             "ens": "2026-09-27T22:00:00+00:00", "ml3_cal15": "2026-09-28T10:00:00+00:00",
-            "no_cheap": "2026-09-28T13:00:00+00:00", "fav": "2026-09-28T15:00:00+00:00"}
+            "no_cheap": "2026-09-28T13:00:00+00:00", "fav": "2026-09-28T15:00:00+00:00",
+            "ml3_city": "2026-09-28T18:00:00+00:00"}
 # свой минимальный перевес: у смеси с рынком перевес меньше, но честный — порог 3 п.п.
 # (на июле-августе +$499 на 1411 ставок по цене A; сентябрь по реальным сделкам +$85 на 177)
-EDGE_BY_WALLET = {"ml3_cal": 0.03, "ml3_cal_k": 0.03, "ml4_cal": 0.03, "ml4e_cal": 0.03, "ens": 0.03, "ml3_cal15": 0.03, "no_cheap": 0.0, "fav": 0.0}
+EDGE_BY_WALLET = {"ml3_cal": 0.03, "ml3_cal_k": 0.03, "ml4_cal": 0.03, "ml4e_cal": 0.03, "ens": 0.03, "ml3_cal15": 0.03, "no_cheap": 0.0, "fav": 0.0, "ml3_city": 0.03}
 # ставка по перевесу: доля Келли f = (шанс − цена) / (1 − цена), берём ×0.25 от $100, в пределах $0.5-$10.
 # Проверка (смесь, 3 п.п.): июль-авг по реальным сделкам как у $2 (−31% против −30% от вложенного),
 # сентябрь +$107 против +$89 при меньших вложениях. Слабый плюс — отдельный кошелёк для живой проверки.
@@ -134,7 +169,7 @@ YES_BAND = {"fav": (0.50, 0.95)}       # цена «да» варианта дл
 # 2026-09-26: кошельки обучаемых моделей берут и быстрые снимки (weather_ml_fast.py, таблица
 # snapshots_fast — решение в 08:00-08:30 местного вместо 08:00-10:00). Выбирается САМЫЙ РАННИЙ
 # снимок дня из обеих таблиц; нет быстрого — как раньше, по обычному.
-FAST_WALLETS = {"ml", "ml2", "ml3", "ml_shift", "ml3_mk", "ml3_cal", "ml3_no", "ml3_cal_k", "ml4", "ml4_cal", "ml4e", "ml4e_cal", "ml3_cal15", "no_cheap", "fav"}
+FAST_WALLETS = {"ml", "ml2", "ml3", "ml_shift", "ml3_mk", "ml3_cal", "ml3_no", "ml3_cal_k", "ml4", "ml4_cal", "ml4e", "ml4e_cal", "ml3_cal15", "no_cheap", "fav", "ml3_city"}
 # 2026-09-24: двойники тех же трёх моделей с теми же сигналами, но
 # покупают СВОЕЙ заявкой (без комиссии, по нижней цене стакана) — чтобы
 # сравнить с покупкой по чужим заявкам на одних и тех же днях.
@@ -380,6 +415,17 @@ def place(conn, now, only=None):
                             by_date[f["local_date"]] = {"local_date": f["local_date"], "ts": f["ts"], "table": "snapshots_fast"}
                     days = sorted(by_date.values(), key=lambda x: x["local_date"])
                 for d in days:
+                    if wallet in CITY_PICK:
+                        keep, score, n_c = city_pick(conn, wallet, d["local_date"])
+                        if city not in keep:
+                            g = score.get(city)
+                            record_skip(conn, wallet, city, d["local_date"], d["ts"], "skip",
+                                        "город сейчас не в лучшей половине: " + (
+                                            f"за {CITY_PICK[wallet]['look']} дней смесь здесь давала правильному ответу "
+                                            f"{'больше' if g > 0 else 'меньше'} рынка на {abs(g):.3f} (логарифм), "
+                                            f"в ставки идут {len(keep)} лучших из {n_c}" if g is not None
+                                            else f"меньше {CITY_PICK[wallet]['min_days']} дней истории"))
+                            continue
                     if maker and datetime.now().timestamp() >= cutoff_ts(city, d["local_date"]):
                         continue  # полдень в городе уже прошёл — заявку ставить поздно
                     buckets = conn.execute(

@@ -270,10 +270,21 @@ def run():
     settle(conn, now.isoformat())
 
     icaos = [cfg["icao"] for cfg in OBS_CITIES.values()]
-    r = requests.get(METAR_API, params={"ids": ",".join(icaos), "hours": 30, "format": "json"}, timeout=30)
-    r.raise_for_status()
+    # 2026-09-28: aviationweather не ответил за 30 с — раньше падал весь запуск; теперь идём дальше на втором
+    # источнике (tgftp ниже), а сбой — пропуск («с пропусками» на /status), не падение.
+    try:
+        r = requests.get(METAR_API, params={"ids": ",".join(icaos), "hours": 30, "format": "json"}, timeout=30)
+        r.raise_for_status()
+        awc = r.json()
+        if not isinstance(awc, list):
+            raise ValueError(f"ответ не список: {str(awc)[:100]}")
+    except (requests.RequestException, ValueError) as e:
+        import jobmark
+        jobmark.ITEM_ERRORS.append(f"aviationweather: {e}")
+        print(f"aviationweather недоступен — только tgftp: {e}")
+        awc = []
     by_station = {}
-    for m in r.json():
+    for m in awc:
         by_station.setdefault(m["icaoId"], []).append(m)
         if m.get("obsTime"):
             t_iso = datetime.fromtimestamp(m["obsTime"], timezone.utc).isoformat()

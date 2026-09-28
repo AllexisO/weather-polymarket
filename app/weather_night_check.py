@@ -255,15 +255,21 @@ def check_decisions(c, now):
     for w, city, d in c.execute("SELECT wallet, city, local_date FROM paper_trades WHERE local_date >= ?", (min(due.values()),)):
         have.setdefault(w, set()).add((city, d))
     wallets = sorted(set(wp.WALLETS) | set(wp.NO_WALLETS) | set(wp.MAKER_WALLETS))
+    def started(w, city, d):
+        # 2026-09-28: кошелёк, заведённый днём, по утру этого дня решать не мог — не считать это пропуском
+        st = wp.START_TS.get(w)
+        t8 = datetime.fromisoformat(d).replace(hour=8, tzinfo=ZoneInfo(OBS_CITIES[city]["tz"]))
+        return not st or t8 >= datetime.fromisoformat(st)
     for w in ["ml3"] + [x for x in wallets if x != "ml3"]:
-        miss = [city for city, d in due.items() if (city, d) not in have.get(w, set())]
+        miss = [city for city, d in due.items() if started(w, city, d) and (city, d) not in have.get(w, set())]
         main = w == "ml3"
         if main or miss:
             add("Решения", (True if not miss else ("warn" if not main else False)),
                 f"{'Главная модель' if main else w}: решение по каждому городу, где прошло 08:00",
                 f"решено {len(due) - len(miss)} из {len(due)}" + (f"; нет: {', '.join(miss[:8])}" + (" …" if len(miss) > 8 else "") if miss else ""),
                 "посмотреть лог weather_paper / weather_ml_fast — был ли снимок в 08:00 по этим городам" if miss else "")
-    others_ok = [w for w in wallets if w != "ml3" and not [c2 for c2, d in due.items() if (c2, d) not in have.get(w, set())]]
+    others_ok = [w for w in wallets if w != "ml3" and not [c2 for c2, d in due.items()
+                                                          if started(w, c2, d) and (c2, d) not in have.get(w, set())]]
     if others_ok:
         add("Решения", True, "Остальные кошельки приняли решения", f"{len(others_ok)} из {len(wallets) - 1} — по всем городам")
 
