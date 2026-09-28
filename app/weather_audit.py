@@ -80,6 +80,8 @@ def check_wallets(c, out, now):
                     v.append(f"{tag}: перевес {100 * (r['model_p'] - r['market_p']):.1f} п.п. меньше порога {100 * thr:.0f}")
                 if not (wp.MIN_PRICE_BY_WALLET.get(w, wp.MIN_PRICE) - 1e-9 <= r["market_p"] <= wp.MAX_PRICE + 1e-9):
                     v.append(f"{tag}: цена рынка {100 * r['market_p']:.0f}¢ вне 3-95¢")
+                if w in wp.YES_BAND and not (wp.YES_BAND[w][0] - 1e-9 <= r["market_p"] < wp.YES_BAND[w][1] + 1e-9):
+                    v.append(f"{tag}: вариант стоил {100 * r['market_p']:.0f}¢ — вне полосы кошелька")
                 if w in wp.NO_BAND and not (wp.NO_BAND[w][0] - 1e-9 <= 1 - r["market_p"] < wp.NO_BAND[w][1] + 1e-9):
                     v.append(f"{tag}: вариант стоил {100 * (1 - r['market_p']):.0f}¢ — вне полосы кошелька")
                 if r["price"] is not None and r["price"] > min(wp.MAX_PRICE, r["model_p"] - thr) + 0.005:
