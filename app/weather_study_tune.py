@@ -73,7 +73,7 @@ def score(models, te):
         ll_b += -math.log(max(B[i], 1e-4))
         n += 1
         days.append({"city": r["city"], "date": r["date"], "keys": keys, "price": [pr[b] for b in keys],
-                     "blend": dict(zip(keys, B)), "win": w})
+                     "raw": dict(zip(keys, P)), "blend": dict(zip(keys, B)), "win": w})
     return {"ll": ll_m / n, "mkt": ll_k / n, "blend": ll_b / n, "err": err / len(te), "days": days}
 
 
