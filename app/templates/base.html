@@ -5,6 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
 <title>{% block title %}weather-lab{% endblock %}</title>
+<link rel="icon" type="image/svg+xml" href="/static/weather-lab-icon.svg">
+<link rel="icon" type="image/png" sizes="512x512" href="/static/weather-lab-icon-512.png">
+<link rel="apple-touch-icon" href="/static/weather-lab-icon-512.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -102,6 +105,12 @@
   .side-block .side-group-label { padding: 2px 10px 8px; }
   .side-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 2px 12px; }
   .brand-link { display: inline-flex; align-items: center; gap: 10px; color: var(--text); text-decoration: none; font-weight: 700; font-size: 17px; letter-spacing: -0.01em; min-width: 0; }
+  /* 2026-09-28: логотип Alex (app/static): полный — в панели, значок — в свёрнутой панели и шапке телефона */
+  .brand-logo { display: block; height: 34px; width: auto; }
+  .brand-icon { display: none; width: 36px; height: 36px; }
+  .side-collapsed .brand-logo { display: none; }
+  .side-collapsed .brand-icon { display: block; }
+  .topbar-logo { width: 26px; height: 26px; display: block; }
   .brand-mark { width: 30px; height: 30px; border-radius: 9px; background: var(--accent); color: #0A0A0B; display: grid; place-items: center; font-weight: 800; font-size: 14px; flex-shrink: 0; }
   .side-collapse { width: 30px; height: 30px; border-radius: 8px; border: 1px solid var(--border); background: transparent; color: var(--muted);
     display: grid; place-items: center; cursor: pointer; flex-shrink: 0; padding: 0; }
@@ -133,6 +142,7 @@
     font-size: 11.5px; font-weight: 600; background: var(--track); color: var(--muted); font-variant-numeric: tabular-nums; }
   .side-link.active .side-n { background: #0A0A0B; color: var(--text); }
   .side-n.good { color: var(--pos); } .side-n.bad { background: var(--neg); color: #0A0A0B; }
+  .side-n.warn { background: var(--accent); color: #0A0A0B; }
   .side-spacer { flex: 1; min-height: 12px; }
   .side-foot { border-radius: 16px; padding: 12px 14px; background: linear-gradient(135deg, rgba(255, 213, 138, .16), rgba(163, 227, 154, .12)); }
   .paper-badge { display: block; font-size: 12.5px; color: var(--muted); line-height: 1.4; }
@@ -150,6 +160,7 @@
   .side-collapsed .side-link { justify-content: center; padding: 10px 0; }
   .side-collapsed .side-collapse svg { transform: scaleX(-1); }
   .side-collapsed .side-link[data-dot]::after { content: ""; position: absolute; width: 7px; height: 7px; border-radius: 50%; background: var(--neg); transform: translate(11px, -10px); }
+  .side-collapsed .side-link[data-dot="warn"]::after { background: var(--accent); }
 
   .nav-scrim { display: none; }
 
@@ -200,6 +211,8 @@
     .side-collapsed .side-link .lbl, .side-collapsed .side-n, .side-collapsed .side-foot { display: revert; }
     .side-collapsed .side-link { justify-content: flex-start; padding: 9px 10px; }
     .side-collapsed .side-top { flex-direction: row; }
+    .side-collapsed .brand-logo { display: block; }
+    .side-collapsed .brand-icon { display: none; }
     .nav-toggle-input:checked ~ .sidebar { transform: translateX(0); }
     .nav-scrim {
       display: none;
@@ -356,7 +369,7 @@
 <body>
 <a href="#main-content" class="skip-link">Перейти к содержимому</a>
 {% macro navlink(href, label, icon_name, active, n=none, tone='') -%}
-<a href="{{ href }}" class="side-link{{ ' active' if active else '' }}" data-label="{{ label }}" title="{{ label }}"{% if tone == 'bad' %} data-dot{% endif %}{% if active %} aria-current="page"{% endif %}>{{ icon.render(icon_name, 'side-link-icon') }}<span class="lbl">{{ label }}</span>{% if n is not none %}<span class="side-n {{ tone }}">{{ n }}</span>{% endif %}</a>
+<a href="{{ href }}" class="side-link{{ ' active' if active else '' }}" data-label="{{ label }}" title="{{ label }}"{% if tone == 'bad' %} data-dot{% elif tone == 'warn' %} data-dot="warn"{% endif %}{% if active %} aria-current="page"{% endif %}>{{ icon.render(icon_name, 'side-link-icon') }}<span class="lbl">{{ label }}</span>{% if n is not none %}<span class="side-n {{ tone }}">{{ n }}</span>{% endif %}</a>
 {%- endmacro %}
 {% set path = request.url.path %}
 {% set nc = nav_counts() %}
@@ -367,7 +380,7 @@
    <div class="side-card">
     <div class="side-block head">
     <div class="side-top">
-      <a href="/paper" class="brand-link" title="weather-lab"><span class="brand-mark" aria-hidden="true">W</span><span class="brand-name">weather-lab</span></a>
+      <a href="/paper" class="brand-link" title="weather-lab"><img class="brand-logo" src="/static/weather-lab-logo.svg" alt="weather-lab" width="145" height="34"><img class="brand-icon" src="/static/weather-lab-icon.svg" alt="weather-lab" width="36" height="36"></a>
       <button type="button" class="side-collapse" id="side-collapse" aria-label="Свернуть панель" aria-pressed="false" title="Свернуть панель">
         <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M10 4v16M16 10l-2 2 2 2"/></svg></button>
     </div>
@@ -386,6 +399,7 @@
       <div class="side-group-label">Инструменты</div>
       {{ navlink('/status', 'здоровье системы', 'status', path == '/status', nc.alerts if nc.alerts else none, 'bad' if nc.alerts else '') }}
       {{ navlink('/events', 'события', 'news', path == '/events') }}
+      {{ navlink('/notes', 'заметки', 'notes', path == '/notes', nc.notes if nc.notes else none, 'warn' if nc.notes else '') }}
       {{ navlink('/audit', 'проверка', 'target', path == '/audit', ('ok' if nc.audit == 0 else nc.audit) if nc.audit is not none else none, 'good' if nc.audit == 0 else ('bad' if nc.audit else '')) }}
      </div>
       <div class="side-empty side-block" id="side-empty" hidden>Ничего не найдено</div>
@@ -400,7 +414,7 @@
   <div class="main-col">
     <header class="topbar">
       <label for="nav-toggle" class="nav-toggle-btn" aria-label="Открыть меню">{{ icon.render('menu') }}</label>
-      <span class="topbar-title">weather-lab</span>
+      <img class="topbar-logo" src="/static/weather-lab-icon.svg" alt="" width="26" height="26"><span class="topbar-title">weather-lab</span>
     </header>
     <main id="main-content" tabindex="-1">
       {% block content %}{% endblock %}

@@ -78,7 +78,7 @@ def check_wallets(c, out, now):
             if w in taker and r["status"] != "resting" and r["model_p"] is not None and r["market_p"] is not None:
                 if r["model_p"] - r["market_p"] < thr - 1e-9:
                     v.append(f"{tag}: перевес {100 * (r['model_p'] - r['market_p']):.1f} п.п. меньше порога {100 * thr:.0f}")
-                if not (wp.MIN_PRICE - 1e-9 <= r["market_p"] <= wp.MAX_PRICE + 1e-9):
+                if not (wp.MIN_PRICE_BY_WALLET.get(w, wp.MIN_PRICE) - 1e-9 <= r["market_p"] <= wp.MAX_PRICE + 1e-9):
                     v.append(f"{tag}: цена рынка {100 * r['market_p']:.0f}¢ вне 3-95¢")
                 if r["price"] is not None and r["price"] > min(wp.MAX_PRICE, r["model_p"] - thr) + 0.005:
                     v.append(f"{tag}: купили по {100 * r['price']:.1f}¢ дороже потолка {100 * (r['model_p'] - thr):.1f}¢")

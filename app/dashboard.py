@@ -5,6 +5,7 @@ gold-sim (8090-8092).
 """
 
 import json
+import math
 import os
 import sqlite3
 import time
@@ -14,7 +15,8 @@ from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from wallet_docs import WALLET_DOCS
@@ -31,6 +33,14 @@ TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 WEATHER_COORD_FIX_TS = "2026-08-25T19:58:27+00:00"
 
 app = FastAPI(title="weather-lab dashboard")
+# 2026-09-28: логотип и значок сайта (файлы Alex) — app/static
+STATIC_DIR = Path(__file__).parent / "static"
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon():
+    return FileResponse(STATIC_DIR / "weather-lab-icon-512.png", media_type="image/png")
 
 
 def db():
@@ -255,6 +265,8 @@ PAPER_WALLETS = {
     "ml4_cal": "v4 + рынок (смесь)",
     "ml4e": "v4 — среднее 3 обучений",
     "ml4e_cal": "v4 среднее 3 + рынок (смесь)",
+    "ens": "6 ансамблей + рынок (смесь)",
+    "ml3_cal15": "Смесь — не дешевле 15¢",
     "copy": "Повтор за сильными трейдерами",
     # двойники: те же сигналы, но покупают своей заявкой (без комиссии, по нижней цене)
     "main_mk": "Основная модель — своя заявка", "emos_mk": "EMOS — своя заявка", "mm_mk": "Микс — своя заявка",
@@ -284,6 +296,8 @@ WALLET_INFO = {
                   "Как «смесь», но ставка от $0.5 до $10: чем больше перевес, тем больше ставка (Келли ×0.25)"),
     "ml3_no": ("Другие версии обучаемой модели", "Главная v3 — ставки «против»",
                "Покупает «нет» на вариант, который модель считает переоценённым (перевес от 10 п.п.)"),
+    "ml3_cal15": ("Другие версии обучаемой модели", "Смесь — не дешевле 15¢",
+                  "Как «смесь», но не ставит на варианты дешевле 15¢: на всём рынке они сбываются реже своей цены"),
     "ml3_cal": ("Другие версии обучаемой модели", "Главная v3 + рынок (смесь)",
                 "35% главной модели + 65% рынка: без самоуверенности, ставит при перевесе от 3 п.п."),
     "ml2": ("Другие версии обучаемой модели", "Обучаемая v2", "То же без мнения рынка"),
@@ -298,6 +312,9 @@ WALLET_INFO = {
     "mm_mk": ("Тот же сигнал, но покупка своей заявкой", "Микс — своя заявка", "Без комиссии, по нижней цене, но не всегда исполняется"),
     "emos_mk": ("Тот же сигнал, но покупка своей заявкой", "EMOS — своя заявка", "То же для EMOS"),
     "main_mk": ("Тот же сигнал, но покупка своей заявкой", "Основная — своя заявка", "То же для основной модели"),
+    "ens": ("Ансамбли погодных моделей", "6 ансамблей + рынок (смесь)",
+            "212 вариантов прогноза от 6 ансамблей (ECMWF, нейросеть ECMWF, GFS, ICON, UKMO, GEM) + 65% рынка, "
+            "перевес от 3 п.п. Проверка по заметкам: 12.10 и 28.10"),
     "copy": ("Повтор за сильными трейдерами", "Повтор за сильными трейдерами",
              "Повторяет покупки 30 лучших трейдеров погоды за 14 дней — только сделанные накануне дня маркета, не дороже их цены +2¢"),
     "obs": ("Живые замеры", "По живым замерам станции", "Ставка против варианта, который станция уже исключила"),
@@ -323,8 +340,8 @@ CITY_RU = {
     "wuhan": "Ухань", "zhengzhou": "Чжэнчжоу",
 }
 WALLET_BADGE = {"ml3": "v3", "ml2": "v2", "ml": "v1", "ml_shift": "v1+", "mm": "MX", "emos": "EM", "main": "GI",
-                "mm_mk": "MX", "emos_mk": "EM", "main_mk": "GI", "ml3_mk": "v3", "ml3_cal": "v3+", "ml3_no": "v3−", "ml3_cal_k": "v3$", "ml4": "v4", "ml4_cal": "v4+", "ml4e": "v4³", "ml4e_cal": "v4³+", "copy": "CP", "obs": "OB", "obs_fmi": "FI"}
-WALLET_GROUPS = ["Другие версии обучаемой модели", "Повтор за сильными трейдерами", "Прогноз по формулам (раньше)",
+                "mm_mk": "MX", "emos_mk": "EM", "main_mk": "GI", "ml3_mk": "v3", "ml3_cal": "v3+", "ml3_no": "v3−", "ml3_cal_k": "v3$", "ml4": "v4", "ml4_cal": "v4+", "ml4e": "v4³", "ml4e_cal": "v4³+", "ens": "EN", "ml3_cal15": "v3+¢", "copy": "CP", "obs": "OB", "obs_fmi": "FI"}
+WALLET_GROUPS = ["Другие версии обучаемой модели", "Ансамбли погодных моделей", "Повтор за сильными трейдерами", "Прогноз по формулам (раньше)",
                  "Тот же сигнал, но покупка своей заявкой", "Живые замеры"]
 
 
@@ -368,9 +385,32 @@ def _wallet_card(label, rows, nofill=0, skipped=0):
         "fees": sum(_fee(r) for r in rows if r["status"] in ("open", "won", "lost", "void")),
         "won": sum(1 for r in settled if r["status"] == "won"), "open": len(open_),
         "by_city": sorted(by_city.items()), "nofill": nofill, "skipped": skipped,
+        # 2026-09-28 (Alex: «почему "лучше рынка", если большой минус?»): «лучше / хуже рынка» на карточке —
+        # только по настоящим закрытым ставкам этого кошелька и в деньгах: купили по цене рынка, значит честная
+        # выплата = потраченному. Выплата больше потраченного (без комиссии) — выбираем лучше рынка.
+        # Раньше считалось по числу угаданных на истории модели — у ml «лучше рынка» при −$86.
+        "paid": sum(r["payout"] or 0 for r in settled), "cost": sum(r["stake"] for r in settled),
+        # 2026-09-28 (просьба Alex): случайность или нет — размах итога при чистом везении: ставка $s по цене p
+        # выигрывает s/p с шансом p, разброс итога s²(1−p)/p; сумма по закрытым ставкам, корень — «±».
+        "sd": math.sqrt(sum(r["stake"] ** 2 * (1 - r["price"]) / r["price"] for r in settled
+                            if r["price"] and 0 < r["price"] < 1 and r["stake"])),
     }
 
 
+def luck(pnl, sd):
+    """Итог против случайного размаха: (текст, тон). До 1 размаха — случайность, 1-2 — «скорее», от 2 — точно."""
+    if not sd:
+        return None
+    z = pnl / sd
+    if abs(z) < 1:
+        return f"в пределах случайности\u00a0(±\u2060${sd:.0f})", ""
+    word = "плюс" if z > 0 else "минус"
+    if abs(z) < 2:
+        return f"скорее реальный {word}, но может быть и случайность\u00a0(±\u2060${sd:.0f})", "pos" if z > 0 else "neg"
+    return f"{word} не случайный (случайность — до\u00a0±\u2060${sd:.0f})", "pos" if z > 0 else "neg"
+
+
+VERDICT_MIN_N = 20  # меньше закрытых ставок — «лучше / хуже рынка» ещё не говорим (случайность)
 REAL_MONEY_THRESHOLD = 150  # закрытых ставок главной модели до решения о реальных деньгах (CLAUDE.md)
 
 
@@ -564,7 +604,7 @@ def line_chart(labels, series, fmt, w=520, h=300, vline=None):
             "first": labels[0], "last": labels[-1], "vline": round(X(vline), 1) if vline is not None else None}
 
 
-SKILL_PARENT = {"main_mk": "main", "emos_mk": "emos", "mm_mk": "mm", "ml3_mk": "ml3", "ml3_cal_k": "ml3_cal"}  # «своя заявка» — сигнал родителя
+SKILL_PARENT = {"main_mk": "main", "emos_mk": "emos", "mm_mk": "mm", "ml3_mk": "ml3", "ml3_cal_k": "ml3_cal", "ml3_cal15": "ml3_cal"}  # «своя заявка» — сигнал родителя
 
 
 def model_skill(conn, key):
@@ -1111,6 +1151,8 @@ def paper(request: Request, w: str = ""):
         c["low_cash"] = c["cash"] < PAPER_STAKE
         sk = skills.get(c["key"])
         c["skill"] = sk["tot"] if sk else None
+        c["vs_mkt"] = 100 * (c["paid"] / c["cost"] - 1) if c.get("cost") else None
+        c["luck"] = luck(c["pnl"], c.get("sd"))
     sel = w if any(c["key"] == w for c in wallets) else None
     cur = next((c for c in wallets if c["key"] == sel), None)
     pick = lambda lst: [t for t in lst if t.get("wkey") == sel]
@@ -1562,6 +1604,47 @@ def audit_page(request: Request):
     return TEMPLATES.TemplateResponse("audit.html", {"request": request, "a": last, "history": history, "night": night})
 
 
+# ---- заметки с датой (2026-09-28, просьба Alex: «до 12 октября я всё забуду») — notes.py ----
+@app.get("/notes", response_class=HTMLResponse)
+def notes_page(request: Request):
+    import notes
+    today = notes.today()
+    items = notes.all_notes()
+    for n in items:
+        n["days"] = (date.fromisoformat(n["due"]) - date.fromisoformat(today)).days
+    groups = [("Сегодня и просрочено", [n for n in items if not n["done_at"] and n["days"] <= 0], "due"),
+              ("Впереди", [n for n in items if not n["done_at"] and n["days"] > 0], "next"),
+              ("Сделано", [n for n in items if n["done_at"]], "done")]
+    return TEMPLATES.TemplateResponse("notes.html", {"request": request, "groups": groups, "today": today})
+
+
+@app.post("/notes/add")
+async def notes_add(request: Request):
+    import notes
+    d = await request.json()
+    try:
+        nid = notes.add(str(d.get("due", "")), str(d.get("title", "")), str(d.get("body", "")))
+    except ValueError as e:
+        return {"ok": False, "error": f"не сохранено: {e}"}
+    _NAV_CACHE["v"] = None
+    return {"ok": True, "id": nid}
+
+
+@app.post("/notes/{note_id}/{action}")
+def notes_action(note_id: int, action: str):
+    import notes
+    if action == "done":
+        notes.set_done(note_id, True)
+    elif action == "undo":
+        notes.set_done(note_id, False)
+    elif action == "delete":
+        notes.delete(note_id)
+    else:
+        return {"ok": False}
+    _NAV_CACHE["v"] = None
+    return {"ok": True}
+
+
 # ---- счётчики боковой панели (2026-09-27, панель «Меню и инструменты», просьба Alex) ----
 _NAV_CACHE = {"t": 0.0, "v": None}
 
@@ -1572,6 +1655,11 @@ def nav_counts():
     if _NAV_CACHE["v"] is not None and time.time() - _NAV_CACHE["t"] < 60:
         return _NAV_CACHE["v"]
     v = {"wallets": len(set(PAPER_WALLETS) | set(OBS_WALLETS)), "open": None, "alerts": 0, "audit": None}
+    try:
+        import notes
+        v["notes"] = len(notes.due_notes())  # на сегодня и просроченные
+    except sqlite3.Error:
+        v["notes"] = 0
     try:
         conn = db()
         try:
@@ -1595,3 +1683,4 @@ def nav_counts():
 
 
 TEMPLATES.env.globals["nav_counts"] = nav_counts
+TEMPLATES.env.globals["verdict_min_n"] = VERDICT_MIN_N

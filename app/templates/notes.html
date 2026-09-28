@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+{% block title %}Заметки — weather-lab{% endblock %}
+{% block content %}
+{#
+  2026-09-28 (просьба Alex): заметки с датой — «такого числа проверить / запустить». Хранятся в notes.py
+  (data/db/notes.sqlite3). Несделанные на сегодня и просроченные — счётчик в панели и строка в утренней проверке.
+#}
+{% set MONTHS = ['', 'января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'] %}
+{% macro when(n) -%}
+{%- set d = n.due.split('-') -%}
+{{ d[2] | int }} {{ MONTHS[d[1] | int] }}
+{%- endmacro %}
+{% macro left(n) -%}
+{%- if n.days == 0 %}сегодня{% elif n.days == 1 %}завтра{% elif n.days > 1 %}через {{ n.days }} дн.{% else %}просрочено на {{ -n.days }} дн.{% endif -%}
+{%- endmacro %}
+<style>
+  body:has(.bk) .main-col { background: #0A0A0B; }
+  body:has(.bk) main { max-width: 880px; }
+  .bk {
+    --bk-card: #1C1C1E; --bk-raise: #262628; --bk-line: #2E2E31; --bk-text: #F4F4F5; --bk-muted: #A1A1AA; --bk-faint: #71717A;
+    --bk-accent: #FFD58A; --bk-pos: #A3E39A; --bk-neg: #F4A77F; --ink: #101012;
+    --bk-font: "Onest", -apple-system, "Segoe UI", Roboto, sans-serif;
+    color: var(--bk-text); font-family: var(--bk-font); font-size: 15px; line-height: 1.55;
+  }
+  .bk [hidden] { display: none !important; }
+  .top { margin-bottom: 20px; }
+  .top h1 { margin: 0; font-size: 26px; font-weight: 700; letter-spacing: -.02em; }
+  .top p { margin: 4px 0 0; color: var(--bk-muted); font-size: 14px; max-width: 640px; }
+  .sec { margin: 0 0 26px; }
+  .sec h2 { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; font-size: 18px; font-weight: 600; }
+  .sec h2 .cnt { font-size: 13px; font-weight: 600; color: var(--bk-muted); background: var(--bk-raise); border-radius: 999px; padding: 1px 9px; }
+  .pane { background: var(--bk-card); border: 1px solid var(--bk-line); border-radius: 18px; padding: 18px 20px; }
+  .empty { color: var(--bk-faint); font-size: 14px; }
+
+  .form { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 10px; }
+  .form label { display: flex; flex-direction: column; gap: 5px; font-size: 12.5px; color: var(--bk-muted); }
+  .form .wide { grid-column: 1 / -1; }
+  .form input, .form textarea {
+    font: inherit; font-size: 15px; color: var(--bk-text); background: var(--bk-raise); border: 1px solid var(--bk-line);
+    border-radius: 12px; padding: 9px 12px; width: 100%; box-sizing: border-box; color-scheme: dark;
+  }
+  .form textarea { min-height: 76px; resize: vertical; }
+  .form input:focus, .form textarea:focus { outline: 2px solid var(--bk-accent); outline-offset: 1px; border-color: transparent; }
+  .form .row { grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .btn { font: 600 14px var(--bk-font); border-radius: 999px; padding: 8px 18px; border: 1px solid var(--bk-line); background: transparent; color: var(--bk-text); cursor: pointer; }
+  .btn.primary { background: #F4F4F5; color: var(--ink); border-color: #F4F4F5; }
+  .btn:hover { border-color: var(--bk-muted); }
+  .btn.sm { font-size: 13px; padding: 5px 13px; }
+  .btn.danger { color: var(--bk-neg); }
+  .msg { font-size: 13.5px; color: var(--bk-neg); }
+
+  .notes { display: flex; flex-direction: column; gap: 10px; }
+  .note { background: var(--bk-card); border: 1px solid var(--bk-line); border-radius: 16px; padding: 14px 18px; display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 4px 18px; }
+  .note.due { border-color: rgba(255, 213, 138, .55); background: rgba(255, 213, 138, .06); }
+  .note.over { border-color: rgba(244, 167, 127, .6); background: rgba(244, 167, 127, .07); }
+  .note.done { opacity: .6; }
+  .note .date b { display: block; font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .note .date span { font-size: 12.5px; color: var(--bk-muted); }
+  .note.due .date span { color: var(--bk-accent); } .note.over .date span { color: var(--bk-neg); }
+  .note h3 { margin: 0; font-size: 16px; font-weight: 600; text-wrap: balance; }
+  .note.done h3 { text-decoration: line-through; text-decoration-color: var(--bk-faint); }
+  .note .body { margin: 4px 0 0; color: var(--bk-muted); font-size: 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .note .acts { grid-column: 2; display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+  @media (max-width: 560px) {
+    .form { grid-template-columns: minmax(0, 1fr); }
+    .note { grid-template-columns: minmax(0, 1fr); }
+    .note .date { display: flex; align-items: baseline; gap: 8px; }
+    .note .date b { display: inline; }
+    .note .acts { grid-column: 1; }
+  }
+</style>
+<div class="bk">
+  <div class="top">
+    <h1>Заметки</h1>
+    <p>Что и когда проверить или запустить. В день заметки утренняя проверка (07:00) напомнит о ней, а в панели слева появится счётчик.</p>
+  </div>
+
+  <section class="sec">
+    <h2>Новая заметка</h2>
+    <form class="pane form" id="note-form">
+      <label>Когда<input type="date" name="due" value="{{ today }}" required></label>
+      <label>Что сделать<input type="text" name="title" maxlength="200" placeholder="Например: проверить кошелёк ens" required></label>
+      <label class="wide">Подробности<textarea name="body" placeholder="Что именно посмотреть, какой порог, что делать по итогу"></textarea></label>
+      <div class="row"><button type="submit" class="btn primary">Добавить</button><span class="msg" id="note-msg" hidden></span></div>
+    </form>
+  </section>
+
+  {% for title, items, kind in groups %}
+  {% if items or kind != 'done' %}
+  <section class="sec">
+    <h2>{{ title }} <span class="cnt">{{ items | length }}</span></h2>
+    {% if not items %}
+    <div class="pane empty">{% if kind == 'due' %}На сегодня ничего — можно не заглядывать.{% else %}Пока пусто.{% endif %}</div>
+    {% else %}
+    <div class="notes">
+      {% for n in items %}
+      <article class="note{% if kind == 'due' %}{{ ' over' if n.days < 0 else ' due' }}{% elif kind == 'done' %} done{% endif %}">
+        <div class="date"><b>{{ when(n) }}</b><span>{{ 'сделано' if n.done_at else left(n) }}</span></div>
+        <div>
+          <h3>{{ n.title }}</h3>
+          {% if n.body %}<p class="body">{{ n.body }}</p>{% endif %}
+        </div>
+        <div class="acts">
+          {% if n.done_at %}
+          <button class="btn sm" data-act="undo" data-id="{{ n.id }}">Вернуть</button>
+          {% else %}
+          <button class="btn sm" data-act="done" data-id="{{ n.id }}">Сделано</button>
+          {% endif %}
+          <button class="btn sm danger" data-act="delete" data-id="{{ n.id }}">Удалить</button>
+        </div>
+      </article>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </section>
+  {% endif %}
+  {% endfor %}
+</div>
+<script>
+(function () {
+  var form = document.getElementById('note-form'), msg = document.getElementById('note-msg');
+  function post(url, data) {
+    return fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data || {}) })
+      .then(function (r) { return r.json(); });
+  }
+  form.addEventListener('submit', function (e) {
+    e.preventDefault();
+    var f = new FormData(form);
+    post('/notes/add', { due: f.get('due'), title: f.get('title'), body: f.get('body') }).then(function (r) {
+      if (r.ok) { location.reload(); } else { msg.textContent = r.error || 'не сохранено'; msg.hidden = false; }
+    }).catch(function () { msg.textContent = 'сайт не ответил — попробуй ещё раз'; msg.hidden = false; });
+  });
+  document.querySelectorAll('.note [data-act]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var act = b.dataset.act;
+      if (act === 'delete' && !b.dataset.sure) { b.dataset.sure = '1'; b.textContent = 'Точно удалить?'; return; }
+      post('/notes/' + b.dataset.id + '/' + act).then(function () { location.reload(); });
+    });
+  });
+})();
+</script>
+{% endblock %}

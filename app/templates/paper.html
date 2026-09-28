@@ -431,7 +431,11 @@
   .wb-foot { margin-top: auto; padding-top: 12px; display: flex; justify-content: space-between; align-items: center; gap: 10px; }
   .wb-foot .upd { margin-top: 0; }
   .wb-verdict { font-size: 13px; font-weight: 600; }
-  .wb-verdict.pos { color: var(--bk-pos); } .wb-verdict.neg { color: var(--bk-neg); }
+  .wb-verdict { color: var(--bk-faint); font-weight: 500; }
+  .wb-luck { margin-top: -2px; font-size: 12.5px; color: var(--bk-faint); text-align: right; }
+  .wb-luck.pos { color: var(--bk-pos); } .wb-luck.neg { color: var(--bk-neg); }
+  .tile-luck { display: block; font-size: 12.5px; opacity: .75; margin-top: 4px; line-height: 1.35; }
+  .wb-verdict.pos { color: var(--bk-pos); font-weight: 600; } .wb-verdict.neg { color: var(--bk-neg); font-weight: 600; }
   .alerts { margin: 0 0 22px; padding: 14px 18px; border-radius: 14px; border: 1px solid rgba(244, 167, 127, .5); background: rgba(244, 167, 127, .1); }
   .alerts b { color: #F8C2A4; } .alerts ul { margin: 6px 0 0; padding-left: 18px; font-size: 14px; } .alerts li span { color: var(--bk-muted); }
 </style>
@@ -494,7 +498,7 @@
         <div class="tiles">
           <div class="tile t1"><span>Свободно для ставок</span><b class="num{{ ' neg' if cur.low_cash else '' }}">${{ '%.2f' | format(cur.cash) }}</b></div>
           <div class="tile t2"><span>В открытых ставках</span><b class="num">${{ '%.2f' | format(cur.in_play) }}</b></div>
-          <div class="tile t3"><span>Итог закрытых ставок</span><b class="num {{ 'pos' if cur.pnl > 0.005 else ('neg' if cur.pnl < -0.005 else '') }}">{{ money(cur.pnl) }}</b></div>
+          <div class="tile t3"><span>Итог закрытых ставок</span><b class="num {{ 'pos' if cur.pnl > 0.005 else ('neg' if cur.pnl < -0.005 else '') }}">{{ money(cur.pnl) }}</b>{% if cur.luck %}<small class="tile-luck">{{ cur.luck[0] }}</small>{% endif %}</div>
         </div>
         {% if cur.low_cash %}<div class="cash-warn" role="alert">⚠ Свободно ${{ '%.2f' | format(cur.cash) }} — меньше ставки $2: новых ставок не будет, пока не закроются открытые{% if cur.in_play > 0.005 %} (в них ${{ '%.2f' | format(cur.in_play) }}){% endif %}.</div>{% endif %}
       </div>
@@ -746,6 +750,7 @@
         {% else %}<span class="nospark">итогов ещё нет</span>{% endif %}
         <span class="wal-pnl num {{ 'pos' if c.pnl > 0.005 else ('neg' if c.pnl < -0.005 else '') }}">{{ money(c.pnl) }}</span>
       </div>
+      {% if c.luck %}<div class="wb-luck {{ c.luck[1] }}" title="Мы ставим на дешёвые варианты: один выигрыш платит в 4-7 раз больше ставки, поэтому итог первых недель сильно зависит от везения. ± — размах, который даёт чистая случайность при таких ценах">{{ c.luck[0] }}</div>{% endif %}
       {# 2026-09-27 (просьба Alex): всё отдельными блоками — деньги, результаты, история; «лучше/хуже рынка» — всегда внизу слева #}
       <div class="wb-money{{ ' low' if c.low_cash else '' }}" title="Свободно для новых ставок: баланс минус деньги в открытых ставках">
         <div><span>Свободно для ставок</span><b class="num">${{ '%.2f' | format(c.cash) }}</b></div>
@@ -763,7 +768,10 @@
       {% endif %}
       {% if c.start != 100 %}<div class="wb-note">старт ${{ '%.0f' | format(c.start) }}</div>{% endif %}
       <div class="wb-foot">
-        {% if c.skill and c.skill.bets and not c.skill.parent %}<span class="wb-verdict {{ 'pos' if c.skill.won > c.skill.ek else 'neg' }}">{{ '▲ лучше' if c.skill.won > c.skill.ek else '▼ хуже' }} рынка</span>{% else %}<span></span>{% endif %}
+        {# 2026-09-28: по настоящим ставкам кошелька и в деньгах (dashboard._wallet_card), не по истории модели #}
+        {% if c.vs_mkt is none %}<span></span>
+        {% elif c.n < verdict_min_n %}<span class="wb-verdict" title="Сравнивать с рынком рано: на малом числе ставок результат — в основном случайность">мало ставок: {{ c.n }} из {{ verdict_min_n }}</span>
+        {% else %}<span class="wb-verdict {{ 'pos' if c.vs_mkt > 0 else 'neg' }}" title="{{ c.n }} закрытых ставок: потрачено ${{ '%.2f' | format(c.cost) }}, выплачено ${{ '%.2f' | format(c.paid) }} — {{ '%+.0f' | format(c.vs_mkt) }}% к цене рынка; комиссия ${{ '%.2f' | format(c.fees) }}">{{ '▲ лучше' if c.vs_mkt > 0 else '▼ хуже' }} рынка {{ '%+.0f' | format(c.vs_mkt) }}%</span>{% endif %}
         {% if c.upd %}<span class="upd" title="{{ c.upd.what | capitalize }} · последняя закрытая: {{ c.upd.settled or 'ещё не было' }} · последняя новая: {{ c.upd.bet or 'ещё не было' }}"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span class="num">{{ c.upd.when }}</span></span>{% endif %}
       </div>
     </a>

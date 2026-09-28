@@ -8,7 +8,7 @@ sudo docker compose run --rm collector preflight.py 2>&1 | grep -v -i warning; [
 echo; echo "Страницы дашборда:"
 sudo docker compose restart dashboard >/dev/null 2>&1; sleep 5
 wallets=$(sudo docker compose run --rm collector -c "import weather_paper as w; print(' '.join([*w.WALLETS, *w.MAKER_WALLETS, *w.NO_WALLETS, 'copy', 'obs', 'obs_fmi']))" 2>/dev/null | tail -1)
-for u in / /status /paper /training /bets /events /audit; do
+for u in / /status /paper /training /bets /events /audit /notes; do
   c=$(curl -s -o /dev/null -w '%{http_code}' "localhost:8093$u"); [ "$c" = 200 ] || { echo "✗ $u → $c"; fail=1; }
 done
 for w in $wallets; do

@@ -22,7 +22,7 @@ import os
 import shutil
 import sqlite3
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import requests
@@ -177,10 +177,23 @@ def check_models(c, now):
             age_h = (time.time() - f.stat().st_mtime) / 3600
             add("Обучение", ok if age_h < 30 else "warn", f"Модель {name} открывается", detail + ("" if age_h < 30 else f" — не обновлялась {age_h:.0f} ч"),
                 "" if ok else "переобучить: weather_ml_live.py --train")
+    # 2026-09-28: факт ждём только от городов, где вчерашний день уже закончился и прошло 3 ч (архив METAR
+    # отстаёт) — утром по Кишинёву в Америке «вчера» ещё идёт; такие города обучение догружает следующей ночью.
+    # Раньше требовали 44 из 48 всегда — в 07:00 это была ложная тревога («34 из 48»).
+    from zoneinfo import ZoneInfo
+    from weather_cities import OBS_CITIES
     y = (now - timedelta(days=1)).date().isoformat()
-    n_fact = c.execute("SELECT COUNT(*) FROM weather_station_daily WHERE local_date = ?", (y,)).fetchone()[0]
-    add("Обучение", True if n_fact >= 44 else "warn", "Есть вчерашний факт по городам", f"{n_fact} из 48 за {y[8:10]}.{y[5:7]}",
-        "запустить weather_station_obs.py — без факта ночное обучение возьмёт меньше данных" if n_fact < 44 else "")
+    y_end = date.fromisoformat(y) + timedelta(days=1)
+    due = {city for city, cfg in OBS_CITIES.items()
+           if (now.astimezone(ZoneInfo(cfg["tz"])) - timedelta(hours=3)).date() >= y_end}
+    have = {r[0] for r in c.execute("SELECT city FROM weather_station_daily WHERE local_date = ?", (y,))}
+    miss = sorted(due - have)
+    later = len(OBS_CITIES) - len(due)
+    add("Обучение", True if len(miss) <= 2 else "warn", "Есть вчерашний факт по городам",
+        f"{len(due & have)} из {len(due)} городов, где {y[8:10]}.{y[5:7]} уже закончился"
+        + (f"; нет: {', '.join(miss)}" if miss else "")
+        + (f"; ещё {later} — день там ещё не кончился, догрузятся позже" if later else ""),
+        "запустить weather_station_obs.py — без факта ночное обучение возьмёт меньше данных" if len(miss) > 2 else "")
     last_mm = c.execute("SELECT MAX(fetched_at) FROM mm_forecasts").fetchone()[0] \
         if "fetched_at" in [r[1] for r in c.execute("PRAGMA table_info(mm_forecasts)")] else None
     if last_mm:
@@ -265,6 +278,24 @@ def check_misc(c, now):
         "удалить data/STOP, если стоп не нужен" if stop else "")
 
 
+def check_notes(mode):
+    """2026-09-28 (просьба Alex): заметки с датой (notes.py, страница /notes) — утром и днём напомнить, что сегодня
+    по заметкам есть дело; вечером — что будет завтра."""
+    import notes
+    today = notes.today()
+    due = notes.due_notes(today)
+    if mode == "evening":
+        tomorrow = (date.fromisoformat(today) + timedelta(days=1)).isoformat()
+        nxt = [n for n in notes.all_notes() if not n["done_at"] and n["due"] == tomorrow]
+        add("Заметки", True, "Заметки на завтра", "; ".join(n["title"] for n in nxt) if nxt else "нет")
+        return
+    late = [n for n in due if n["due"] < today]
+    detail = "; ".join(f"{n['title']}" + (f" (с {n['due'][8:]}.{n['due'][5:7]})" if n["due"] < today else "") for n in due)
+    add("Заметки", "warn" if due else True,
+        f"Сегодня по заметкам: {len(due)}" + (f", из них просрочено {len(late)}" if late else "") if due else "На сегодня заметок нет",
+        detail, "открыть «Заметки» (/notes): сделать и отметить «Сделано»" if due else "")
+
+
 def main():
     import sys
     mode = next((a for a in sys.argv[1:] if a in MODES), "evening")
@@ -273,6 +304,8 @@ def main():
     for fn in (check_code, check_audit):
         with item_guard(fn.__name__):
             fn()
+    with item_guard("check_notes"):
+        check_notes(mode)
     c = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=30)
     extra = {"morning": [(check_night_done, (c, now))], "midday": [(check_decisions, (c, now))]}.get(mode, [])
     for fn, args in extra + [(check_cron, (c, now)), (check_db, (c,)), (check_models, (c, now)), (check_misc, (c, now))]:

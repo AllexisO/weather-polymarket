@@ -299,6 +299,10 @@ def ensure_schema(conn):
         # 2026-09-26: смесь главной модели с рынком (weather_ml_live.ML3_BLEND_W) — кошелёк ml3_cal
         conn.execute("ALTER TABLE snapshots ADD COLUMN ml3c_model_p REAL")
         conn.execute("ALTER TABLE snapshots ADD COLUMN ml3c_edge REAL")
+    if "ens_model_p" not in cols:
+        # 2026-09-28: 6 ансамблей (weather_ens.py) + смесь с рынком — кошелёк ens
+        conn.execute("ALTER TABLE snapshots ADD COLUMN ens_model_p REAL")
+        conn.execute("ALTER TABLE snapshots ADD COLUMN ens_edge REAL")
     conn.commit()
 
 
@@ -398,6 +402,20 @@ def run():
             except Exception as e:  # отдельный трек: его ошибка не должна ломать снимок
                 print(f"{city}: ошибка обучаемой модели — {e}", file=sys.stderr)
 
+            # 2026-09-28: кошелёк ens — утренние 6 ансамблей (weather_ens.py, 212 вариантов), каждый с равным
+            # весом и сдвигом на поправку города (как основная модель), затем смесь 35/65 с рынком (как ml3_cal).
+            # Поправки ещё нет (новый город) — без сдвига: смесь с рынком и так гасит ошибку.
+            ens_probs = None
+            try:
+                from weather_ens import ENS_MIN_MODELS, load_members
+                ens_members = load_members(conn, city, today_local.date().isoformat(), cfg["unit"])
+                if len(ens_members) >= ENS_MIN_MODELS:
+                    raw = [blended_model_prob(ens_members, b["lo"], b["hi"], bias)[0] or 0.0 for b in market["buckets"]]
+                    from weather_ml_live import blend_with_market
+                    ens_probs = blend_with_market(raw, [b["market_p"] for b in market["buckets"]])
+            except Exception as e:  # отдельный трек: его ошибка не должна ломать снимок
+                print(f"{city}: ошибка ансамблей (кошелёк ens) — {e}", file=sys.stderr)
+
             pooled = [v for members in ensembles.values() for v in members]
             emos_mean = emos_std = None
             if emos is not None and pooled:
@@ -463,6 +481,8 @@ def run():
                         (ml4e_probs[i_b] - b["market_p"]) if ml4e_probs else None,
                         ml4ec_probs[i_b] if ml4ec_probs else None,
                         (ml4ec_probs[i_b] - b["market_p"]) if ml4ec_probs else None,
+                        ens_probs[i_b] if ens_probs else None,
+                        (ens_probs[i_b] - b["market_p"]) if ens_probs else None,
                     )
                 )
             conn.executemany(
@@ -470,8 +490,8 @@ def run():
                 INSERT INTO snapshots
                 (ts_utc, city, local_date, local_hour, unit, bucket_lo, bucket_hi, market_p, model_p, edge, event_vol, ensemble_n,
                  wn2_model_p, wn2_edge, wn2_ensemble_n, emos_model_p, emos_edge, best_ask, mm_model_p, mm_edge, ml_model_p, ml_edge, ml2_model_p, ml2_edge, ml3_model_p, ml3_edge, ml3c_model_p, ml3c_edge, ml4_model_p, ml4_edge, ml4c_model_p, ml4c_edge,
-                 ml4e_model_p, ml4e_edge, ml4ec_model_p, ml4ec_edge)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 ml4e_model_p, ml4e_edge, ml4ec_model_p, ml4ec_edge, ens_model_p, ens_edge)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 rows,
             )
