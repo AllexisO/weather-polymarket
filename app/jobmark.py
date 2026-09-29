@@ -14,7 +14,7 @@ def mark(conn, job):
     conn.commit()
 
 
-def log_run(db_path, job, rc, started, finished, om_calls=0, item_errors=0):
+def log_run(db_path, job, rc, started, finished, om_calls=0, item_errors=0, output=None):
     """2026-09-27 (страница «Здоровье системы»): каждый запуск скрипта крона — в job_log
     (итог, длительность, запросы к Open-Meteo). Пишет обёртка job_wrap.py / run_job.sh.
     Короткое соединение; база занята — запись пропускается, скрипт от этого не падает."""
@@ -27,9 +27,12 @@ def log_run(db_path, job, rc, started, finished, om_calls=0, item_errors=0):
         conn.execute("CREATE INDEX IF NOT EXISTS idx_job_log_job ON job_log(job, finished_at)")
         if "item_errors" not in [r[1] for r in conn.execute("PRAGMA table_info(job_log)")]:
             conn.execute("ALTER TABLE job_log ADD COLUMN item_errors INTEGER DEFAULT 0")
-        conn.execute("INSERT INTO job_log (job, started_at, finished_at, rc, duration_s, om_calls, item_errors) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        # 2026-09-29: хвост вывода запуска — «что произошло» в ленте /events
+        if "output" not in [r[1] for r in conn.execute("PRAGMA table_info(job_log)")]:
+            conn.execute("ALTER TABLE job_log ADD COLUMN output TEXT")
+        conn.execute("INSERT INTO job_log (job, started_at, finished_at, rc, duration_s, om_calls, item_errors, output) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                      (job, started.isoformat(), finished.isoformat(), rc,
-                      round((finished - started).total_seconds(), 1), om_calls, item_errors))
+                      round((finished - started).total_seconds(), 1), om_calls, item_errors, output))
         if rc == 0:
             mark(conn, job)
         conn.execute("DELETE FROM job_log WHERE finished_at < datetime('now', '-14 days')")

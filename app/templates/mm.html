@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+{% block title %}Бот-мейкер — weather-lab{% endblock %}
+{% block content %}
+{#
+  2026-09-30 (решение Alex: «Да!» — свой бот по схеме Poligarch, сначала виртуально): что делает бот-мейкер, сколько
+  заработал бы по настоящим сделкам, где плюс и где минус. Данные — mm_page() в dashboard.py (data/db/mm.sqlite3).
+#}
+{% macro money(v) -%}{{ '−' if v < -0.005 else ('+' if v > 0.005 else '') }}${{ '%.2f' | format(v | abs) }}{%- endmacro %}
+{% macro tone(v) -%}{{ 'pos' if v > 0.005 else ('neg' if v < -0.005 else '') }}{%- endmacro %}
+<style>
+  body:has(.bk) .main-col { background: #0A0A0B; }
+  body:has(.bk) main { max-width: 1200px; }
+  .bk { --bk-card: #1C1C1E; --bk-raise: #262628; --bk-line: #2E2E31; --bk-text: #F4F4F5; --bk-muted: #A1A1AA; --bk-faint: #71717A;
+    --bk-accent: #FFD58A; --bk-accent-bg: rgba(255, 213, 138, .14); --bk-pos: #A3E39A; --bk-pos-bg: rgba(163, 227, 154, .13); --bk-neg: #F4A77F;
+    --bk-font: "Onest", -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--bk-text); font-family: var(--bk-font); font-size: 15px; line-height: 1.55; }
+  .bk .num { font-variant-numeric: tabular-nums; } .bk .pos { color: var(--bk-pos); } .bk .neg { color: var(--bk-neg); } .bk .muted { color: var(--bk-muted); }
+  .bk a { color: var(--bk-accent); text-underline-offset: 3px; }
+  .top h1 { margin: 0; font-size: 26px; font-weight: 700; letter-spacing: -.02em; }
+  .top h1 .tag { vertical-align: middle; margin-left: 8px; }
+  .top p { margin: 6px 0 24px; color: var(--bk-muted); font-size: 14px; max-width: 820px; }
+  .tag { display: inline-block; font-size: 11px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; padding: 3px 9px; border-radius: 999px; background: var(--bk-accent-bg); color: var(--bk-accent); }
+  .sec { margin: 0 0 34px; }
+  .sec-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 16px; margin-bottom: 12px; }
+  .sec-head h2 { margin: 0; font-size: 19px; font-weight: 600; }
+  .sec-head .aside { font-size: 13.5px; color: var(--bk-muted); }
+  .pane { background: var(--bk-card); border: 1px solid var(--bk-line); border-radius: 16px; padding: 20px 22px; }
+  .pane + .pane { margin-top: 14px; }
+  .live { display: flex; flex-wrap: wrap; gap: 10px 28px; align-items: center; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--bk-faint); display: inline-block; margin-right: 8px; }
+  .dot.on { background: var(--bk-pos); box-shadow: 0 0 0 0 rgba(163, 227, 154, .5); animation: pulse 2s infinite; }
+  @keyframes pulse { 70% { box-shadow: 0 0 0 7px rgba(163, 227, 154, 0); } 100% { box-shadow: 0 0 0 0 rgba(163, 227, 154, 0); } }
+  .live b { font-size: 18px; font-weight: 600; } .live span { font-size: 12.5px; color: var(--bk-muted); display: block; }
+  .wal { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+  .w h3 { margin: 0 0 2px; font-size: 16px; font-weight: 600; } .w .code { font: 500 11.5px ui-monospace, Menlo, Consolas, monospace; color: var(--bk-muted);
+    border: 1px solid var(--bk-line); border-radius: 6px; padding: 1px 6px; margin-left: 6px; }
+  .w p { margin: 0 0 12px; font-size: 13px; color: var(--bk-muted); }
+  .w .big { font-size: 34px; font-weight: 600; letter-spacing: -.02em; line-height: 1.1; }
+  .w .sub { font-size: 13px; color: var(--bk-muted); margin-top: 2px; }
+  .kv { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-top: 14px; }
+  .kv div { background: var(--bk-raise); border-radius: 10px; padding: 8px 10px; min-width: 0; }
+  .kv span { display: block; font-size: 11.5px; color: var(--bk-muted); } .kv b { font-size: 14.5px; font-weight: 600; }
+  .chart { position: relative; } .chart svg.viz { width: 100%; height: auto; display: block; overflow: visible; }
+  .viz .grid line { stroke: var(--bk-line); } .viz text { fill: var(--bk-muted); font-size: 12px; } .viz text.lab { fill: var(--bk-text); font-size: 12.5px; }
+  .viz .ln { fill: none; stroke-width: 2.2; stroke-linejoin: round; } .viz .ln.s-model { stroke: #FFD58A; } .viz .ln.s-real { stroke: #A3E39A; }
+  .viz .end { stroke: var(--bk-card); stroke-width: 2; } .viz .end.s-model { fill: #FFD58A; } .viz .end.s-real { fill: #A3E39A; }
+  .viz .hit { fill: transparent; } .viz .cross { stroke: var(--bk-muted); opacity: 0; } .viz .live { stroke: none; }
+  .bk table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  .bk th { text-align: left; font-weight: 500; font-size: 12px; color: var(--bk-muted); padding: 0 10px 8px 0; border-bottom: 1px solid var(--bk-line); white-space: nowrap; }
+  .bk td { padding: 7px 10px 7px 0; border-bottom: 1px solid var(--bk-line); } .bk tr:last-child td { border-bottom: 0; }
+  .bk .r { text-align: right; } .scroll { overflow-x: auto; }
+  .tri { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+  .tri .pane + .pane { margin-top: 0; }
+  .tri h3, .pane h3 { margin: 0 0 10px; font-size: 15px; font-weight: 600; }
+  .rules { margin: 0; padding-left: 20px; } .rules li { margin: 0 0 6px; font-size: 14px; color: var(--bk-muted); } .rules b { color: var(--bk-text); }
+  .empty { color: var(--bk-muted); text-align: center; padding: 22px 8px; font-size: 14.5px; }
+  .foot { margin: 10px 0 0; font-size: 13px; color: var(--bk-muted); max-width: 860px; }
+  @media (max-width: 900px) { .wal, .tri { grid-template-columns: 1fr; } }
+  @media (max-width: 600px) { .pane { padding: 16px; } .kv { grid-template-columns: 1fr 1fr; } }
+</style>
+<div class="bk">
+  <div class="top">
+    <h1>Бот-мейкер <span class="tag">виртуально</span></h1>
+    <p>Свой бот по схеме Poligarch: не угадывает погоду, а стоит с небольшими заявками на «да» и «нет» каждого варианта, первым в очереди,
+      и ждёт, пока их заберут. Пары «да»+«нет» склеиваются в $1, заработок — разница. Денег и ставок нет: бот записывает свои заявки,
+      а исполнение считается по настоящим сделкам после закрытия маркета. Решение — {{ decide[8:10] }}.{{ decide[5:7] }}.</p>
+  </div>
+
+  <section class="sec">
+    <div class="pane live">
+      {% set lv = live %}
+      <div><span class="dot{{ ' on' if lv and lv.n else '' }}"></span>{% if lv and lv.n %}<b>Работает сейчас</b>{% else %}<b>Сейчас заявок нет</b>{% endif %}
+        <span>{% if lv and lv.last %}последняя заявка {{ lv.last }}{% else %}бот ещё не запускался{% endif %}</span></div>
+      {% if lv %}
+      <div><b class="num">{{ lv.n }}</b><span>вариантов с заявками сейчас ({{ lv.cities }} городов)</span></div>
+      <div><b class="num">{{ lv.sides }}</b><span>заявок (стороны «да» / «нет»), из них в выгодных зонах {{ lv.sel }}</span></div>
+      <div><b class="num">{{ lv.markets }}</b><span>вариантов всего с {{ lv.since or '—' }}</span></div>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="sec">
+    <div class="sec-head"><h2>Сколько заработал бы</h2><span class="aside">по закрытым маркетам, считается каждое утро в 06:10</span></div>
+    <div class="wal">
+      {% for w in wallets %}
+      <div class="pane w">
+        <h3>{{ w.name }}<span class="code">{{ w.key }}</span></h3>
+        <p>{{ w.desc }}</p>
+        {% if w.n %}
+        <div class="big num {{ tone(w.pnl) }}">{{ money(w.pnl) }}</div>
+        <div class="sub">{% if w.roi is not none %}<b class="{{ tone(w.roi) }}">{{ '%+.2f' | format(w.roi) }}%</b> от потраченного{% endif %}{% if w.cps is not none %} · {{ '%+.2f' | format(w.cps) }}¢ на долю{% endif %} · Poligarch: +1.0¢ на долю</div>
+        <div class="kv">
+          <div><span>Исполнений</span><b class="num">{{ w.n }}</b></div>
+          <div><span>Маркетов с исполнением</span><b class="num">{{ w.mf }} из {{ w.m }}</b></div>
+          <div><span>Потрачено на покупки</span><b class="num">${{ '%.0f' | format(w.spent) }}</b></div>
+          <div><span>Склейки пар ({{ '%.0f' | format(w.merged) }})</span><b class="num {{ tone(w.mp) }}">{{ money(w.mp) }}</b></div>
+          <div><span>Остаток без пары к итогу</span><b class="num {{ tone(w.ip) }}">{{ money(w.ip) }}</b></div>
+          <div><span>Возврат с комиссии</span><b class="num pos">{{ money(w.rb) }}</b></div>
+        </div>
+        {% else %}<div class="empty">Пока нечего считать: первые маркеты закроются, и утром в 06:10 появится итог.</div>{% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% if chart %}
+    <div class="pane chart" data-viz style="margin-top: 14px;">
+      <h3>Итог по дням маркетов, накопительно</h3>
+      <svg class="viz" viewBox="0 0 {{ chart.w }} {{ chart.h }}" role="img" aria-label="Итог бота по дням">
+        <g class="grid">{% for t in chart.ticks %}<line x1="{{ chart.L }}" x2="{{ chart.R }}" y1="{{ t.y }}" y2="{{ t.y }}"/><text x="{{ chart.L - 8 }}" y="{{ t.y + 4 }}" text-anchor="end">{{ t.label }}</text>{% endfor %}</g>
+        {% for s in chart.series %}<path class="ln {{ s.cls }}" d="{{ s.path }}"/><circle class="end {{ s.cls }}" cx="{{ s.end[0] }}" cy="{{ s.end[1] }}" r="4.5"/>
+          <text class="lab" x="{{ s.end[0] + 10 }}" y="{{ s.ly + 4 }}">{{ s.name }} · {{ chart.cols[-1].vals[loop.index0][1] }}</text>{% endfor %}
+        <text x="{{ chart.L }}" y="{{ chart.h - 6 }}">{{ chart.first }}</text><text x="{{ chart.R }}" y="{{ chart.h - 6 }}" text-anchor="end">{{ chart.last }}</text>
+      </svg>
+    </div>
+    {% endif %}
+  </section>
+
+  {% if zones %}
+  <section class="sec">
+    <div class="sec-head"><h2>Где плюс и где минус</h2><span class="aside">все заявки бота (mm_all), ¢ на исполненную долю</span></div>
+    <div class="tri">
+      <div class="pane"><h3>По времени</h3><table><thead><tr><th>Когда</th><th class="r">Долей</th><th class="r">¢/долю</th><th class="r">Итог</th></tr></thead><tbody>
+        {% for z in zones %}<tr><td>{{ z.k if z.k == 'накануне' else z.k ~ ' ч в день маркета' }}</td><td class="r num">{{ '%.0f' | format(z.sh) }}</td><td class="r num {{ tone(z.c) }}">{{ '%+.2f' | format(z.c) }}</td><td class="r num {{ tone(z.pnl) }}">{{ money(z.pnl) }}</td></tr>{% endfor %}</tbody></table></div>
+      <div class="pane"><h3>По цене купленной стороны</h3><table><thead><tr><th>Цена</th><th class="r">Долей</th><th class="r">¢/долю</th><th class="r">Итог</th></tr></thead><tbody>
+        {% for z in prices %}<tr><td>{{ z.k * 10 }}-{{ z.k * 10 + 10 }}¢</td><td class="r num">{{ '%.0f' | format(z.sh) }}</td><td class="r num {{ tone(z.c) }}">{{ '%+.2f' | format(z.c) }}</td><td class="r num {{ tone(z.pnl) }}">{{ money(z.pnl) }}</td></tr>{% endfor %}</tbody></table></div>
+      <div class="pane"><h3>По городам</h3><div class="scroll" style="max-height: 360px; overflow-y: auto;"><table><thead><tr><th>Город</th><th class="r">Долей</th><th class="r">Итог</th></tr></thead><tbody>
+        {% for z in cities %}<tr><td><a href="/cities/{{ z.k }}">{{ z.ru }}</a></td><td class="r num">{{ '%.0f' | format(z.sh) }}</td><td class="r num {{ tone(z.pnl) }}">{{ money(z.pnl) }}</td></tr>{% endfor %}</tbody></table></div></div>
+    </div>
+  </section>
+  {% endif %}
+
+  {% if recent %}
+  <section class="sec">
+    <div class="sec-head"><h2>Последние закрытые маркеты</h2><span class="aside">все заявки бота</span></div>
+    <div class="pane scroll"><table>
+      <thead><tr><th>Город</th><th>День</th><th>Вариант</th><th>Итог маркета</th><th class="r">Исполнений</th><th class="r">«да» / «нет», долей</th><th class="r">Склейки</th><th class="r">Остаток</th><th class="r">Итог</th></tr></thead>
+      <tbody>{% for r in recent %}<tr><td><a href="/cities/{{ r.city }}">{{ r.city_ru }}</a></td><td class="num">{{ r.local_date[8:10] }}.{{ r.local_date[5:7] }}</td><td class="num">{{ r.what }}</td>
+        <td>{{ 'сбылся' if r.final_yes > 0.5 else 'нет' }}</td><td class="r num">{{ r.n_fills }}</td><td class="r num">{{ '%.0f' | format(r.sh_yes) }} / {{ '%.0f' | format(r.sh_no) }}</td>
+        <td class="r num {{ tone(r.merge_pnl) }}">{{ money(r.merge_pnl) }}</td><td class="r num {{ tone(r.inv_pnl) }}">{{ money(r.inv_pnl) }}</td><td class="r num {{ tone(r.pnl) }}"><b>{{ money(r.pnl) }}</b></td></tr>{% endfor %}</tbody>
+    </table></div>
+  </section>
+  {% endif %}
+
+  <section class="sec">
+    <div class="sec-head"><h2>Как работает бот</h2><span class="aside">правила записаны до запуска</span></div>
+    <div class="pane">
+      <ol class="rules">
+        <li><b>Раз в 30 секунд</b> смотрит живые стаканы всех погодных вариантов на сегодня и завтра (~1 000 вариантов в 48 городах) и не погодных маркетов, где за неделю торговал Poligarch (список раз в сутки).</li>
+        <li><b>Ставит заявку на «да»</b> на 0.1¢ выше лучшей заявки покупателей и <b>на «нет»</b> — так же с другой стороны: встаёт первым в очередь. По 10 долей с каждой стороны.</li>
+        <li><b>Пауза</b> (только погода) за минуту до и 3 минуты после каждой сводки METAR города (в эти минуты стоящий с заявкой терял ~1¢ на долю в обоих периодах истории) и вечером дня маркета после 18:00 местного (максимум уже виден).</li>
+        <li><b>Перекос</b> не больше 30 долей без пары: тяжёлую сторону дальше не покупает.</li>
+        <li><b>Пары «да»+«нет»</b> склеиваются в $1 сразу; остаток без пары держится до итога маркета.</li>
+        <li><b>Исполнение</b> — по настоящим сделкам: если в момент сделки заявка стояла и цена её достала, она исполнилась. Плюс возврат мейкеру 25% комиссии забирающего.</li>
+      </ol>
+      <p class="foot">Честно о допущении: считаем, что наша заявка первая в очереди и что забирающий взял бы её так же. Другие боты тоже улучшают цену, поэтому это <b>верхняя</b> оценка.
+        Порог (записан заранее): за 14 дней итог ≥ +1% от потраченного и в плюсе обе недели, исполнений ≥ 2 000 — тогда разговор о маленьком реальном запуске (только решением Alex).</p>
+    </div>
+  </section>
+</div>
+{% endblock %}

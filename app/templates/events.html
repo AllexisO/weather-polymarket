@@ -9,7 +9,47 @@
 {% set KIND = {
   'train': ('Обучение', 'k-train'), 'data': ('Данные', 'k-data'), 'result': ('Итоги маркетов', 'k-result'),
   'bets': ('Ставки', 'k-bets'), 'alert': ('Тревоги', 'k-alert'), 'ok': ('Тревога снята', 'k-ok'), 'fail': ('Ошибки', 'k-fail')} %}
-{% macro icon_for(kind) -%}<svg viewBox="0 0 24 24" aria-hidden="true">{% if kind == 'train' %}<path d="M12 3 3 8l9 5 9-5-9-5Z"/><path d="M7 10.5V15c0 1.5 2.2 3 5 3s5-1.5 5-3v-4.5"/>{% elif kind == 'data' %}<path d="M12 4v11M7 10l5 5 5-5"/><path d="M5 20h14"/>{% elif kind == 'result' %}<path d="M5 12.5 10 17 19 7"/>{% elif kind == 'bets' %}<path d="M4 7h16v10H4z"/><path d="M4 11h16"/>{% elif kind == 'alert' or kind == 'fail' %}<path d="M12 4 2.8 19h18.4L12 4Z"/><path d="M12 10v4M12 17v.5"/>{% else %}<circle cx="12" cy="12" r="8"/><path d="m8.5 12 2.5 2.5 4.5-5"/>{% endif %}</svg>{%- endmacro %}
+{% macro icon_for(kind) -%}<svg viewBox="0 0 24 24" aria-hidden="true">{% if kind == 'train' %}<path d="M12 3 3 8l9 5 9-5-9-5Z"/><path d="M7 10.5V15c0 1.5 2.2 3 5 3s5-1.5 5-3v-4.5"/>{% elif kind == 'data' %}<path d="M12 4v11M7 10l5 5 5-5"/><path d="M5 20h14"/>{% elif kind == 'result' %}<path d="M5 12.5 10 17 19 7"/>{% elif kind == 'bets_open' %}<path d="M4 6h16v12H4z"/><path d="M12 9v6M9 12h6"/>{% elif kind == 'bets_closed' %}<path d="M4 6h16v12H4z"/><path d="m8.5 12 2.5 2.5 4.5-5"/>{% elif kind == 'bets' %}<path d="M4 7h16v10H4z"/><path d="M4 11h16"/>{% elif kind == 'alert' or kind == 'fail' %}<path d="M12 4 2.8 19h18.4L12 4Z"/><path d="M12 10v4M12 17v.5"/>{% else %}<circle cx="12" cy="12" r="8"/><path d="m8.5 12 2.5 2.5 4.5-5"/>{% endif %}</svg>{%- endmacro %}
+{% macro money(v) -%}{{ '−' if v < -0.005 else ('+' if v > 0.005 else '') }}${{ '%.2f' | format(v | abs) }}{%- endmacro %}
+{# 2026-09-29 (просьба Alex: «для каждого уведомления видеть, что конкретно произошло»): раскрывающиеся подробности #}
+{% macro more(e) -%}{% set m = e.more %}
+<details class="more" id="ev-{{ e.kind }}-{{ e.t.timestamp() | int }}">
+  <summary><span class="chev" aria-hidden="true">›</span>{{ {'log': 'лог запуска', 'markets': 'итоги по маркетам', 'bets': 'все ставки', 'train': 'что было в обучении'}[m.type] }}</summary>
+  <div class="more-in">
+  {% if m.type == 'log' %}
+    {% if m.text %}<pre class="log">{{ m.text }}</pre>{% if m.note %}<p class="note">{{ m.note }}</p>{% endif %}
+    {% else %}<p class="note">Скрипт отработал молча или его вывод не сохранён: вывод каждого запуска сохраняется с 29.09 вечера.</p>{% endif %}
+  {% elif m.type == 'markets' %}
+    <div class="tbl"><table>
+      <thead><tr><th>Город</th><th>День</th><th>Выиграл вариант</th><th>Наши ставки</th><th class="r">Итог</th></tr></thead>
+      <tbody>{% for r in m.rows %}<tr><td><a href="/cities/{{ r.slug }}">{{ r.city }}</a></td><td class="num">{{ r.date }}</td><td class="num"><b>{{ r.win }}</b></td>
+        <td class="num">{% if r.n %}{{ r.n }} · угадано {{ r.won }}{% else %}<span class="muted">не ставили</span>{% endif %}</td>
+        <td class="r num {{ 'pos' if r.pnl > 0.005 else ('neg' if r.pnl < -0.005 else '') }}">{{ money(r.pnl) if r.n else '—' }}</td></tr>{% endfor %}</tbody>
+    </table></div>
+  {% elif m.type == 'bets' %}
+    <div class="tbl"><table>
+      <thead><tr><th>Кошелёк</th><th>Ставка</th><th class="r">Цена</th><th class="r">Поставили</th><th class="r">Итог</th></tr></thead>
+      <tbody>{% for r in m.rows %}<tr><td><code class="code">{{ r.code }}</code> <span class="muted">{{ r.wallet }}</span></td>
+        <td><a href="/cities/{{ r.slug }}">{{ r.city }}</a> · {{ r.date }} · {{ r.what }}</td>
+        <td class="r num">{{ '%.0f' | format((r.price or 0) * 100) }}¢</td><td class="r num">${{ '%.2f' | format(r.cost) }}</td>
+        <td class="r num">{% if r.pnl is not none %}<b class="{{ 'pos' if r.pnl > 0.005 else ('neg' if r.pnl < -0.005 else '') }}">{{ money(r.pnl) }}</b>
+          {% elif r.status == 'resting' %}<span class="muted">заявка ждёт продавца</span>{% else %}<span class="muted">ждём · угадаем {{ money(r.win_amt) }}</span>{% endif %}</td></tr>{% endfor %}</tbody>
+    </table></div>
+  {% elif m.type == 'train' %}
+    <p class="kv">Длилось <b>{{ '%d' | format(m.dur // 60) }} мин {{ '%02d' | format(m.dur % 60) }} с</b> · данных <b>{{ m.data.rows }}</b> город-дней
+      {% if m.data.first %}({{ m.data.first[8:10] }}.{{ m.data.first[5:7] }}.{{ m.data.first[:4] }} – {{ m.data.last[8:10] }}.{{ m.data.last[5:7] }}){% endif %}{% if m.data.new_rows %}, новых <b>+{{ m.data.new_rows }}</b>{% endif %} · городов <b>{{ m.data.cities }}</b></p>
+    <div class="tbl"><table><thead><tr><th>Версия</th><th class="r">Дней</th><th class="r">Признаков</th><th>Что особенного</th></tr></thead>
+      <tbody>{% for v in m.versions %}<tr><td><b>{{ v.name }}</b></td><td class="r num">{{ v.rows }}</td><td class="r num">{{ v.features }}</td><td class="muted">{{ v.note }}</td></tr>{% endfor %}</tbody></table></div>
+    {% if m.exam and m.exam.ll_model is defined %}<p class="kv">Экзамен на {{ m.exam.n }} незнакомых город-днях ({{ m.exam['from'][8:10] }}.{{ m.exam['from'][5:7] }}–{{ m.exam.to[8:10] }}.{{ m.exam.to[5:7] }}):
+      логошибка модели <b>{{ '%.3f' | format(m.exam.ll_model) }}</b>{% if m.exam.ll_blend is defined and m.exam.ll_blend is not none %}, смеси <b>{{ '%.3f' | format(m.exam.ll_blend) }}</b>{% endif %}, рынка <b>{{ '%.3f' | format(m.exam.ll_market) }}</b>
+      · ошибка в градусах: модель <b>{{ '%.2f' | format(m.exam.err_model) }}°</b>, среднее 16 моделей {{ '%.2f' | format(m.exam.err_fc) }}°{% if m.exam.err_market is not none %}, рынок {{ '%.2f' | format(m.exam.err_market) }}°{% endif %}
+      {% if m.verdict %} → модель <b>{{ m.verdict.label }}</b>{% if m.verdict.blend %}, смесь <b>{{ m.verdict.blend.label }}</b>{% endif %}{% endif %}</p>{% endif %}
+    {% if m.imp %}<p class="kv">Больше всего смотрит на: {% for i in m.imp %}{{ i.ru }} <b>{{ '%.0f' | format(i.pct) }}%</b>{% if not loop.last %} · {% endif %}{% endfor %}</p>{% endif %}
+    <ul class="chk">{% for c in m.checks %}<li><span class="{{ 'pos' if c.ok else 'neg' }}">{{ '✓' if c.ok else '!' }}</span> {{ c.title }} <span class="muted">— {{ c.detail }}</span></li>{% endfor %}</ul>
+  {% endif %}
+  </div>
+</details>
+{%- endmacro %}
 <style>
   body:has(.bk) .main-col { background: #0A0A0B; }
   body:has(.bk) main { max-width: 980px; }
@@ -46,16 +86,60 @@
   .ic svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
   .tx b { font-weight: 600; }
   .tx .d { display: block; font-size: 13px; color: var(--bk-muted); margin-top: 2px; word-break: break-word; }
-  .tx .d a { margin-left: 4px; }
+  /* 2026-09-29 (Alex): итог ставок цветом, «подробнее» — живая кнопка справа */
+  .tx .pos { color: var(--bk-pos); } .tx .neg { color: var(--bk-neg); }
+  .k-closed-pos { --c: #A3E39A; } .k-closed-neg { --c: #F4A77F; } .k-closed-zero { --c: #A1A1AA; }
+  .feed li.has-go { grid-template-columns: 48px 36px minmax(0, 1fr) auto; }
+  .go { align-self: center; display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; min-height: 36px; border-radius: 999px;
+    border: 1px solid color-mix(in srgb, var(--bk-accent) 35%, transparent); background: color-mix(in srgb, var(--bk-accent) 10%, transparent);
+    color: var(--bk-accent) !important; font: 500 13.5px var(--bk-font); text-decoration: none; white-space: nowrap;
+    transition: background .18s, color .18s, border-color .18s, transform .18s, box-shadow .18s; }
+  .go span { display: inline-block; transition: transform .18s; }
+  .go:hover { background: var(--bk-accent); color: #0A0A0B !important; border-color: var(--bk-accent);
+    transform: translateY(-1px); box-shadow: 0 6px 18px color-mix(in srgb, var(--bk-accent) 25%, transparent); }
+  .go:hover span { transform: translateX(3px); }
+  .go:active { transform: translateY(0); box-shadow: none; }
+  .go:focus-visible { outline: 2px solid var(--bk-accent); outline-offset: 2px; }
   .k-fail .tx b, .k-alert .tx b { color: var(--bk-neg); }
   .empty { color: var(--bk-muted); padding: 28px 0; text-align: center; }
   .foot { font-size: 13px; color: var(--bk-muted); }
+  /* подробности события */
+  .feed li > details.more { grid-column: 3 / -1; margin-top: -4px; min-width: 0; }
+  .more summary { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; list-style: none; font-size: 13px; color: var(--bk-muted);
+    padding: 3px 10px 3px 8px; border-radius: 999px; border: 1px solid var(--bk-line); transition: color .15s, border-color .15s, background .15s; }
+  .more summary::-webkit-details-marker { display: none; }
+  .more summary:hover { color: var(--bk-accent); border-color: color-mix(in srgb, var(--bk-accent) 40%, transparent); }
+  .more summary:focus-visible { outline: 2px solid var(--bk-accent); outline-offset: 2px; }
+  .more .chev { display: inline-block; font-size: 15px; line-height: 1; transition: transform .18s; }
+  .more[open] summary { color: var(--bk-text); background: var(--bk-raise); }
+  .more[open] .chev { transform: rotate(90deg); }
+  .more-in { margin-top: 10px; padding: 12px 14px; border-radius: 12px; background: #141416; border: 1px solid var(--bk-line); }
+  .more .log { margin: 0; max-height: 360px; overflow: auto; white-space: pre-wrap; word-break: break-word;
+    font: 12.5px/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace; color: #D4D4D8; }
+  .more .note { margin: 8px 0 0; font-size: 12.5px; color: var(--bk-faint); }
+  .more .note:first-child { margin-top: 0; }
+  .more .tbl { overflow-x: auto; }
+  .more table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .more th { text-align: left; font-weight: 500; color: var(--bk-muted); padding: 0 10px 6px 0; border-bottom: 1px solid var(--bk-line); white-space: nowrap; font-size: 12px; }
+  .more td { padding: 6px 10px 6px 0; border-bottom: 1px solid var(--bk-line); vertical-align: top; }
+  .more tr:last-child td { border-bottom: 0; }
+  .more .r { text-align: right; } .more .num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .more .pos { color: var(--bk-pos); } .more .neg { color: var(--bk-neg); } .more .muted { color: var(--bk-muted); }
+  .more a { text-decoration: none; } .more a:hover { text-decoration: underline; }
+  .more .code { padding: 1px 6px; border-radius: 6px; border: 1px solid var(--bk-line); background: var(--bk-card); color: var(--bk-muted);
+    font: 500 11.5px ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  .more .kv { margin: 0 0 10px; font-size: 13px; color: var(--bk-muted); line-height: 1.55; } .more .kv b { color: var(--bk-text); font-weight: 600; }
+  .more .tbl + .kv { margin-top: 10px; }
+  .more .chk { list-style: none; margin: 8px 0 0; padding: 0; font-size: 13px; } .more .chk li { padding: 2px 0; }
   @media (max-width: 600px) {
     .feed { padding: 4px 14px; }
+    .feed li > details.more { grid-column: 2 / -1; order: 4; }
     .feed li { grid-template-columns: 30px minmax(0, 1fr); }
     .hm { grid-column: 2; padding: 0; order: 2; font-size: 12px; }
     .ic { width: 30px; height: 30px; grid-row: span 2; }
     .tx { grid-column: 2; }
+    .feed li.has-go { grid-template-columns: 30px minmax(0, 1fr); }
+    .go { grid-column: 2; order: 3; justify-self: end; }
   }
 </style>
 
@@ -78,10 +162,24 @@
     <h2>{{ d.head }}</h2>
     <ul class="feed">
       {% for e in d.rows %}
-      <li class="{{ KIND[e.kind][1] }}" data-k="{{ 'alert' if e.kind == 'ok' else e.kind }}">
+      {# ставки: открыто / закрыто — разные иконки; итог закрытых — зелёный плюс, красный минус #}
+      {% set ik, cls, parts = e.kind, KIND[e.kind][1], none %}
+      {% if e.kind == 'bets' and e.title.startswith('Закрыто') %}
+        {% set ik = 'bets_closed' %}
+        {% set parts = e.title.split('итог ', 1) %}
+        {% if parts|length == 2 %}
+          {% set sign = 'neg' if parts[1][:1] in ('-', '−') else ('pos' if parts[1].startswith('+') else 'zero') %}
+          {% set cls = cls ~ ' k-closed-' ~ sign %}
+        {% else %}{% set parts = none %}{% endif %}
+      {% elif e.kind == 'bets' and e.title.startswith('Открыто') %}
+        {% set ik = 'bets_open' %}
+      {% endif %}
+      <li class="{{ cls }}{{ ' has-go' if e.link }}" data-k="{{ 'alert' if e.kind == 'ok' else e.kind }}">
         <span class="hm">{{ e.hm }}</span>
-        <span class="ic">{{ icon_for(e.kind) }}</span>
-        <span class="tx"><b>{{ e.title }}</b>{% if e.detail or e.link %}<span class="d">{{ e.detail }}{% if e.link %}<a href="{{ e.link }}">подробнее →</a>{% endif %}</span>{% endif %}</span>
+        <span class="ic">{{ icon_for(ik) }}</span>
+        <span class="tx"><b>{% if parts %}{{ parts[0] }}итог <span class="{{ sign }}">{{ parts[1] }}</span>{% else %}{{ e.title }}{% endif %}</b>{% if e.detail %}<span class="d">{{ e.detail }}</span>{% endif %}</span>
+        {% if e.link %}<a class="go" href="{{ e.link }}">подробнее <span aria-hidden="true">→</span></a>{% endif %}
+        {% if e.more %}{{ more(e) }}{% endif %}
       </li>
       {% endfor %}
     </ul>

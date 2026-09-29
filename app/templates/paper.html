@@ -331,8 +331,11 @@
     @keyframes draw { to { stroke-dashoffset: 0; } }
     @keyframes fadein { to { opacity: 1; } }
     /* последняя точка «дышит» — баланс сейчас */
+    .spk-dot { animation: beat 2.4s ease-in-out 1.3s infinite; }
     .spark circle, .viz .dot { transform-box: fill-box; transform-origin: center; animation: beat 2.4s ease-in-out 1.3s infinite; }
     @keyframes beat { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.45); } }
+    .spk-dot { animation-name: beat-dot; }
+    @keyframes beat-dot { 0%, 100% { transform: translate(-50%, -50%) scale(1); } 50% { transform: translate(-50%, -50%) scale(1.45); } }
     /* зелёные огоньки «данные свежие» мигают, как индикатор онлайна */
     .fr:not(.none):not(.stale) i { animation: live 2s ease-in-out infinite; }
     @keyframes live { 0%, 100% { box-shadow: 0 0 0 0 rgba(163, 227, 154, .55); } 60% { box-shadow: 0 0 0 6px rgba(163, 227, 154, 0); } }
@@ -433,6 +436,11 @@
   /* 2026-09-28 (Alex): блоки соседних карточек на одном уровне — шапка всегда на 2 строки названия,
      блок графика всегда на 2 строки подписи случайности, «На истории» — в одну строку */
   .wal-top { min-height: 42px; align-items: flex-start; }
+  /* 2026-09-29 (Alex): код кошелька (mm_mk, ml3 ...) под названием, чтобы сразу видеть, какой это */
+  .wal-id { display: flex; flex-direction: column; align-items: flex-start; gap: 5px; min-width: 0; }
+  .wal-code { display: inline-block; padding: 1px 7px; border-radius: 6px; border: 1px solid var(--bk-line); background: var(--bk-raise);
+    color: var(--bk-muted); font: 500 11.5px ui-monospace, "SF Mono", Menlo, Consolas, monospace; letter-spacing: .02em; }
+  .feat-name .wal-code { vertical-align: middle; font-size: 13px; margin-left: 6px; }
   .wal-top .wal-name { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   .wb-luck { min-height: 2.8em; line-height: 1.4; }
   .wb-hist b { color: var(--bk-text); font-weight: 600; }
@@ -444,12 +452,19 @@
   .wb-chart { margin-top: 12px; padding: 10px 12px; border-radius: 12px; background: var(--bk-raise); }
   .wb-chart .wal-mid { margin-top: 0; }
   .wb-chart .spark { max-width: none; }
+  .feat-chart { margin-top: 0; padding: 14px 16px; }
+  .feat-chart .spark { height: 56px; }
   .wb-luck { margin-top: 6px; font-size: 10px; color: var(--bk-faint); text-align: left; }
   .wb-luck.pos { color: var(--bk-pos); } .wb-luck.neg { color: var(--bk-neg); }
   .tile-luck { display: block; font-size: 12.5px; opacity: .75; margin-top: 4px; line-height: 1.35; }
   .wb-verdict.pos { color: var(--bk-pos); font-weight: 600; } .wb-verdict.neg { color: var(--bk-neg); font-weight: 600; }
   .alerts { margin: 0 0 22px; padding: 14px 18px; border-radius: 14px; border: 1px solid rgba(244, 167, 127, .5); background: rgba(244, 167, 127, .1); }
   .alerts b { color: #F8C2A4; } .alerts ul { margin: 6px 0 0; padding-left: 18px; font-size: 14px; } .alerts li span { color: var(--bk-muted); }
+  /* 2026-09-29 (Alex: «почини точки»): график тянется по ширине — точка отдельно, чтобы оставалась круглой */
+  .spk { position: relative; display: block; flex: 1 1 auto; min-width: 0; }
+  .spk .spark { max-width: none; width: 100%; }
+  .spk-dot { position: absolute; width: 8px; height: 8px; border-radius: 50%; transform: translate(-50%, -50%); box-shadow: 0 0 0 2px var(--bk-raise); }
+  .spk-dot.up { background: var(--bk-pos); } .spk-dot.down { background: var(--bk-neg); }
 </style>
 
 <div class="bk">
@@ -727,7 +742,7 @@
   <a class="feat" href="?w={{ main.key }}">
     <div class="feat-l">
       <span class="tag">главная модель</span>
-      <div class="feat-name">{{ main.name }}</div>
+      <div class="feat-name">{{ main.name | replace('—', '-') }} <code class="wal-code">{{ main.key }}</code></div>
       <div class="feat-desc">{{ main.desc }}</div>
       <div class="big">{{ cash_big(main.balance) }}{{ move(main.move) }}<span>на счёте · итог <b class="num {{ 'pos' if main.pnl > 0.005 else ('neg' if main.pnl < -0.005 else '') }}">{{ money(main.pnl) }}</b></span></div>
       {% if main.upd %}<div class="upd" title="{{ main.upd.what | capitalize }} · последняя закрытая: {{ main.upd.settled or 'ещё не было' }} · последняя новая: {{ main.upd.bet or 'ещё не было' }}"><span class="num">{{ main.upd.when }}</span></div>{% endif %}
@@ -743,6 +758,15 @@
         <div class="n num">{{ goal.n }} <small>из {{ goal.need }} закрытых ставок</small></div>
         {{ segbar(goal.n, goal.need, "Закрытых ставок") }}
       </div>
+      {# 2026-09-29 (Alex): график — как у остальных кошельков #}
+      <div class="wb-chart feat-chart">
+        <div class="wal-mid">
+          {% if main.spark %}<span class="spk"><svg class="spark" viewBox="0 0 {{ main.spark.w }} {{ main.spark.h }}" preserveAspectRatio="none" aria-hidden="true"><line vector-effect="non-scaling-stroke" x1="0" x2="{{ main.spark.w }}" y1="{{ main.spark.base }}" y2="{{ main.spark.base }}"/><path pathLength="1" class="{{ 'up' if main.spark.up else 'down' }}" d="{{ main.spark.path }}"/></svg><i class="spk-dot {{ 'up' if main.spark.up else 'down' }}" style="left: {{ 100 * main.spark.end[0] / main.spark.w }}%; top: {{ 100 * main.spark.end[1] / main.spark.h }}%" aria-hidden="true"></i></span>
+          {% else %}<span class="nospark">итогов ещё нет</span>{% endif %}
+          <span class="wal-pnl num {{ 'pos' if main.pnl > 0.005 else ('neg' if main.pnl < -0.005 else '') }}">{{ money(main.pnl) }}</span>
+        </div>
+        {% if main.luck %}<div class="wb-luck {{ main.luck[1] }}">{{ main.luck[0] }}</div>{% endif %}
+      </div>
       <span class="open-btn">Открыть кошелёк →</span>
     </div>
   </a>
@@ -755,10 +779,10 @@
   <div class="wal-grid">
     {% for c in cs %}
     <a class="wal" href="?w={{ c.key }}">
-      <div class="wal-top"><span class="wal-name">{{ c.name }}</span><span class="wal-bal">{{ cash_big(c.balance) }}{{ move(c.move) }}</span></div>
+      <div class="wal-top"><span class="wal-id"><span class="wal-name">{{ c.name | replace('—', '-') }}</span><code class="wal-code">{{ c.key }}</code></span><span class="wal-bal">{{ cash_big(c.balance) }}{{ move(c.move) }}</span></div>
       <div class="wb-chart">{# 2026-09-28 (Alex): график с итогом — отдельным блоком #}
       <div class="wal-mid">
-        {% if c.spark %}<svg class="spark" viewBox="0 0 {{ c.spark.w }} {{ c.spark.h }}" preserveAspectRatio="none" aria-hidden="true"><line x1="0" x2="{{ c.spark.w }}" y1="{{ c.spark.base }}" y2="{{ c.spark.base }}"/><path pathLength="1" class="{{ 'up' if c.spark.up else 'down' }}" d="{{ c.spark.path }}"/><circle class="{{ 'up' if c.spark.up else 'down' }}" cx="{{ c.spark.end[0] }}" cy="{{ c.spark.end[1] }}" r="3"/></svg>
+        {% if c.spark %}<span class="spk"><svg class="spark" viewBox="0 0 {{ c.spark.w }} {{ c.spark.h }}" preserveAspectRatio="none" aria-hidden="true"><line vector-effect="non-scaling-stroke" x1="0" x2="{{ c.spark.w }}" y1="{{ c.spark.base }}" y2="{{ c.spark.base }}"/><path pathLength="1" class="{{ 'up' if c.spark.up else 'down' }}" d="{{ c.spark.path }}"/></svg><i class="spk-dot {{ 'up' if c.spark.up else 'down' }}" style="left: {{ 100 * c.spark.end[0] / c.spark.w }}%; top: {{ 100 * c.spark.end[1] / c.spark.h }}%" aria-hidden="true"></i></span>
         {% else %}<span class="nospark">итогов ещё нет</span>{% endif %}
         <span class="wal-pnl num {{ 'pos' if c.pnl > 0.005 else ('neg' if c.pnl < -0.005 else '') }}">{{ money(c.pnl) }}</span>
       </div>

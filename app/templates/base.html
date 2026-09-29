@@ -397,6 +397,8 @@
      <div class="side-block">
       <div class="side-group-label">Меню</div>
       {{ navlink('/paper', 'кошельки', 'wallet', path == '/paper', nc.wallets) }}
+      {{ navlink('/models', 'модели', 'bar-chart', path.startswith('/models')) }}
+      {{ navlink('/mm', 'бот-мейкер', 'results', path == '/mm') }}
       {{ navlink('/bets', 'ставки', 'trending', path == '/bets', nc.open) }}
       {{ navlink('/cities', 'города', 'globe', path.startswith('/cities'), nc.cities if nc.cities else none) }}
       {{ navlink('/traders', 'трейдеры', 'shuffle', path.startswith('/traders'), nc.traders if nc.traders else none) }}

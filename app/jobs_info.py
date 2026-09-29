@@ -30,6 +30,8 @@ JOBS = [
     ("weather_night_check", "Проверки утро / день / вечер", "weather_night_check.py", "07:00, 13:00, 23:30", 11 * 60, "weather_night_check.log"),
     ("weather_pws_live", "Народные станции США (CWOP, сбор)", "weather_pws_live.py", "каждый час 11:00-19:00", 26 * 60, "weather_pws_live.log"),
     ("weather_alerts", "Проверки и тревоги", "weather_alerts.py", "каждые 30 мин", 70, "weather_alerts.log"),
+    ("weather_mm_paper", "Виртуальный бот-мейкер (заявки)", "weather_mm_paper.py", "каждый час, 57 мин", 75, "weather_mm_paper.log"),
+    ("weather_mm_settle", "Бот-мейкер: расчёт исполнений", "weather_mm_settle.py", "06:10", 26 * 60, "weather_mm_settle.log"),
 ]
 
 # имя файла скрипта -> key (у ночного обучения они разные)

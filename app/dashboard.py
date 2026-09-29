@@ -591,6 +591,7 @@ def scenarios(items):
 def line_chart(labels, series, fmt, w=520, h=300, vline=None):
     """Несколько линий на одной оси. series: [{"name", "cls", "values"}].
     Геометрия для SVG + подписи на концах линий (раздвинуты, чтобы не слипались)."""
+    series = [s for s in series if any(v is not None for v in s["values"])]  # пустой ряд не рисуем
     vals = [v for s in series for v in s["values"] if v is not None]
     if len(labels) < 2 or not vals:
         return None
@@ -1297,6 +1298,351 @@ def training(request: Request):
     return TEMPLATES.TemplateResponse("training.html", {"request": request, "last": last, "runs": runs, "alerts": alerts})
 
 
+# ---- /models: всё о каждой модели (2026-09-29, просьба Alex: «хочу видеть ВСЁ! От и до!») ----
+# Модель ≠ кошелёк: список моделей, их кошельки и описания — models_info.py. Мерило «опережает / отстаёт» —
+# логошибка по дням (ml_skill: шанс, который модель и рынок дали выигравшему варианту), как на /training.
+MODEL_EVEN_LL = EXAM_EVEN_LL
+MODEL_FEW_DAYS = 300  # меньше город-дней — «мало дней, может быть случайность»
+
+
+def _ll(p):
+    return -math.log(max(p or 0.0, 0.001))
+
+
+def _gap_word(gap):
+    """gap = логошибка рынка − модели (плюс — модель лучше)."""
+    if gap is None:
+        return {"tone": "none", "label": "нет данных"}
+    if abs(gap) < MODEL_EVEN_LL:
+        return {"tone": "even", "label": "наравне с рынком"}
+    return {"tone": "ahead", "label": f"опережает на {gap:.3f}"} if gap > 0 else {"tone": "behind", "label": f"отстаёт на {-gap:.3f}"}
+
+
+def _skill_rows(conn, key):
+    if not key or not table_exists(conn, "ml_skill"):
+        return []
+    return conn.execute("SELECT city, date, source, p_model, p_market, hit_model, hit_market, bet_p_model, bet_p_market, bet_won "
+                        "FROM ml_skill WHERE model = ? ORDER BY date", (key,)).fetchall()
+
+
+def _track_sum(rows):
+    """Итог по набору город-дней: логошибки, разница с рынком, в скольких днях ближе к правде."""
+    if not rows:
+        return None
+    n = len(rows)
+    llm, llk = sum(_ll(r["p_model"]) for r in rows) / n, sum(_ll(r["p_market"]) for r in rows) / n
+    bets = [r for r in rows if r["bet_won"] is not None]
+    # меньше ~300 город-дней разница с рынком ±0.03 — во многом случайность (разброс по неделям на истории)
+    return {"n": n, "ll_model": llm, "ll_market": llk, "gap": llk - llm, "verdict": _gap_word(llk - llm), "few": n < MODEL_FEW_DAYS,
+            "closer": 100 * sum(r["p_model"] > r["p_market"] for r in rows) / n,
+            "hit_model": 100 * sum(r["hit_model"] for r in rows) / n, "hit_market": 100 * sum(r["hit_market"] for r in rows) / n,
+            "pm": 100 * sum(r["p_model"] for r in rows) / n, "pk": 100 * sum(r["p_market"] for r in rows) / n,
+            "bets": len(bets), "won": sum(r["bet_won"] for r in bets), "ek": sum(r["bet_p_market"] for r in bets),
+            "em": sum(r["bet_p_model"] for r in bets), "first": rows[0]["date"], "last": rows[-1]["date"]}
+
+
+def _weekly(rows):
+    wk = {}
+    for r in rows:
+        d = date.fromisoformat(r["date"])
+        wk.setdefault((d - timedelta(days=d.weekday())).isoformat(), []).append(r)
+    return wk
+
+
+def gap_bars(labels, series, w=760, h=260, vline=None):
+    """Столбики «опережает / отстаёт» по неделям: вверх (зелёный) — модель лучше рынка, вниз — хуже.
+    series: [{"name", "cls", "values"}] — до двух рядов рядом (модель и смесь)."""
+    vals = [v for s_ in series for v in s_["values"] if v is not None]
+    if not labels or not vals:
+        return None
+    m = max(max(abs(v) for v in vals), MODEL_EVEN_LL * 2)
+    step = _nice_step(m, 2)
+    top = step * (-(-m // step))
+    L, R, T, B = 56, 12, 12, 30
+    pw, ph = w - L - R, h - T - B
+    Y = lambda v: T + ph * (1 - (v + top) / (2 * top))
+    cw = pw / len(labels)
+    k = len(series)
+    bw = min(22, cw * 0.72 / k)
+    bars, cols = [], []
+    for i, lab in enumerate(labels):
+        x0 = L + cw * i
+        for j, s_ in enumerate(series):
+            v = s_["values"][i]
+            if v is None:
+                continue
+            x = x0 + cw / 2 - bw * k / 2 + bw * j
+            y0, y1 = Y(max(v, 0)), Y(min(v, 0))
+            bars.append({"x": round(x + 1, 1), "y": round(y0, 1), "w": round(bw - 2, 1), "h": round(max(y1 - y0, 1.5), 1),
+                         "cls": s_["cls"] + (" up" if v >= MODEL_EVEN_LL else (" down" if v <= -MODEL_EVEN_LL else " even"))})
+        cols.append({"x": round(x0 + cw / 2, 1), "x0": round(x0, 1), "cw": round(cw, 1), "label": lab,
+                     "tip": " · ".join(f"{s_['name']}: {_gap_word(s_['values'][i])['label']}" for s_ in series if s_["values"][i] is not None)})
+    ticks = [{"y": round(Y(t), 1), "label": f"{t:+.2f}" if t else "0"} for t in (top, top / 2, 0, -top / 2, -top)]
+    return {"w": w, "h": h, "L": L, "R": w - R, "T": T, "B": T + ph, "zero": round(Y(0), 1), "bars": bars, "cols": cols,
+            "ticks": ticks, "first": labels[0], "last": labels[-1],
+            "even": (round(Y(MODEL_EVEN_LL), 1), round(Y(-MODEL_EVEN_LL), 1)),
+            "vline": round(L + cw * vline, 1) if vline is not None else None}
+
+
+def model_charts(conn, info):
+    """Ряды модели и смеси из ml_skill → итоги (история / вживую), недельные графики, накопленное преимущество, города."""
+    own, blend = _skill_rows(conn, info["skill"]), _skill_rows(conn, info["skill_blend"])
+    base = own or blend
+    if not base:
+        return None
+    parts = [("Модель", "s-model", own), ("Смесь с рынком", "s-real", blend)]
+    parts = [p for p in parts if p[2]]
+    out = {"parts": []}
+    for name, cls, rows in parts:
+        live = [r for r in rows if r["source"] == "live"]
+        hist = [r for r in rows if r["source"] == "history"]
+        out["parts"].append({"name": name, "cls": cls, "all": _track_sum(rows), "live": _track_sum(live), "hist": _track_sum(hist)})
+    # недели: логошибка модели / смеси / рынка и разница с рынком
+    weeks = {name: _weekly(rows) for name, _, rows in parts}
+    keys = sorted({k for w_ in weeks.values() for k in w_})
+    labels = [date.fromisoformat(k).strftime("%d.%m") for k in keys]
+    live_i = next((i for i, k in enumerate(keys) if any(r["source"] == "live" for w_ in weeks.values() for r in w_.get(k, []))), None)
+    if live_i == 0:
+        live_i = None
+    avg = lambda rs, f: sum(_ll(r[f]) for r in rs) / len(rs) if rs else None
+    series = [{"name": name, "cls": cls, "values": [avg(weeks[name].get(k), "p_model") for k in keys]} for name, cls, _ in parts]
+    mk = [avg(next((weeks[n].get(k) for n, _, _ in parts if weeks[n].get(k)), None), "p_market") for k in keys]
+    series.append({"name": "Рынок", "cls": "s-market", "values": mk})
+    out["ll"] = line_chart(labels, series, lambda v: f"{v:.2f}", w=760, h=300, vline=live_i)
+    out["gap"] = gap_bars(labels, [{"name": s_["name"], "cls": s_["cls"],
+                                    "values": [(mk[i] - v) if v is not None and mk[i] is not None else None for i, v in enumerate(s_["values"])]}
+                                   for s_ in series[:-1]], vline=live_i)
+    # накопленное преимущество по дням: сумма (логошибка рынка − модели) — растёт, когда модель ближе к правде
+    days = sorted({r["date"] for _, _, rows in parts for r in rows})
+    cum = []
+    for name, cls, rows in parts:
+        by = {}
+        for r in rows:
+            by[r["date"]] = by.get(r["date"], 0.0) + _ll(r["p_market"]) - _ll(r["p_model"])
+        acc, vals = 0.0, []
+        for d in days:
+            acc += by.get(d, 0.0)
+            vals.append(acc if d >= rows[0]["date"] else None)
+        cum.append({"name": name, "cls": cls, "values": vals})
+    d_live = next((i for i, d in enumerate(days) if any(r["source"] == "live" and r["date"] == d for _, _, rows in parts for r in rows)), None)
+    out["cum"] = line_chart([f"{d[8:10]}.{d[5:7]}" for d in days], cum, lambda v: f"{v:+.0f}", w=760, h=300,
+                            vline=d_live if d_live else None)
+    # последние 14 дней вживую: сколько дней лучше / хуже рынка
+    # города: где модель (или смесь, если своей нет) лучше и хуже рынка
+    rows = base
+    by_city = {}
+    for r in rows:
+        by_city.setdefault(r["city"], []).append(r)
+    cities = []
+    for c, rs in by_city.items():
+        t = _track_sum(rs)
+        cities.append({"city": c, "ru": CITY_RU.get(c, c), "n": t["n"], "gap": t["gap"], "closer": t["closer"], "v": t["verdict"]})
+    cities.sort(key=lambda x: -x["gap"])
+    top = max((abs(c["gap"]) for c in cities), default=1) or 1
+    for c in cities:
+        c["bar"] = round(50 * abs(c["gap"]) / top)
+    out["cities"] = cities
+    out["cities_of"] = parts[0][0] if own else "Смесь с рынком"
+    return out
+
+
+def _money_of(conn, wallets):
+    """Деньги кошельков модели: карточки, общий итог и график итога всех её кошельков вместе."""
+    if not table_exists(conn, "paper_trades") or not wallets:
+        return None
+    q = ",".join("?" * len(wallets))
+    rows = conn.execute(f"SELECT * FROM paper_trades WHERE wallet IN ({q})", wallets).fetchall()
+    cards, ev = [], []
+    for k in wallets:
+        wr = [r for r in rows if r["wallet"] == k]
+        c = _wallet_card(PAPER_WALLETS.get(k, k), wr)
+        c["key"], c["name"] = k, WALLET_INFO.get(k, (None, PAPER_WALLETS.get(k, k), ""))[1].replace("—", "-")
+        c["desc"] = WALLET_INFO.get(k, (None, None, ""))[2]
+        c["start"] = WALLET_START.get(k, PAPER_START_BALANCE)
+        c["balance"] = c["start"] + c["pnl"]
+        st = [r for r in wr if r["status"] in ("won", "lost", "void")]
+        c["spark"] = spark([(r["local_date"], _pnl(r)) for r in st], c["start"])
+        c["luck"] = luck(c["pnl"], c.get("sd"))
+        c["winrate"] = round(100 * c["won"] / c["n"]) if c["n"] else None
+        cards.append(c)
+        ev += [(r["settled_at"] or r["local_date"], _pnl(r), r["city"], r["status"]) for r in st]
+    cards.sort(key=lambda c: (c["key"] != wallets[0], -(c["roi"] if c["roi"] is not None else -999)))
+    staked = sum(r["stake"] + _fee(r) for r in rows if r["status"] in ("won", "lost", "void"))
+    pnl = sum(c["pnl"] for c in cards)
+    chart = balance_chart(ev, 0.0, w=760, h=300)
+    if chart:
+        for t in chart["ticks"]:
+            t["label"] = t["label"].replace("$-", "−$")
+    return {"cards": cards, "pnl": pnl, "roi": 100 * pnl / staked if staked else None, "n": sum(c["n"] for c in cards),
+            "won": sum(c["won"] for c in cards), "open": sum(c["open"] for c in cards), "in_play": sum(c["in_play"] for c in cards),
+            "chart": chart, "luck": luck(pnl, math.sqrt(sum((c.get("sd") or 0) ** 2 for c in cards)))}
+
+
+def _train_runs(conn, info):
+    """Ночные обучения, в которых была эта версия: когда, сколько длилось, данные, экзамен (для v3)."""
+    if not info.get("train_key") or not table_exists(conn, "ml_train_log"):
+        return []
+    runs = []
+    for r in conn.execute("SELECT trained_at, ok, details FROM ml_train_log ORDER BY trained_at"):
+        try:
+            d = json.loads(r["details"])
+        except ValueError:
+            continue
+        v = next((x for x in d.get("versions", []) if x.get("key") == info["train_key"]), None)
+        if v is None:
+            continue
+        ex = d.get("exam") if info.get("exam") else None
+        runs.append({"when": datetime.fromisoformat(r["trained_at"]).astimezone(VIEWER_TZ).strftime("%d.%m %H:%M"),
+                     "ok": bool(r["ok"]), "dry": d.get("dry_run"), "dur": d.get("duration_s") or 0, "rows": v.get("rows"),
+                     "features": v.get("features"), "note": v.get("note"), "data": d.get("data", {}), "exam": ex,
+                     "verdict": exam_verdict(ex) if ex else None, "importance": d.get("importance") if info.get("exam") else None})
+    return runs
+
+
+def _exam_charts(runs):
+    ex = [r for r in runs if r["exam"] and r["exam"].get("ll_model") is not None]
+    out = {}
+    if len(ex) >= 2:
+        labels = [r["when"][:5] for r in ex]
+        out["ll"] = line_chart(labels, [
+            {"name": "Модель", "cls": "s-model", "values": [r["exam"]["ll_model"] for r in ex]},
+            {"name": "Смесь", "cls": "s-real", "values": [r["exam"].get("ll_blend") for r in ex]},
+            {"name": "Рынок", "cls": "s-market", "values": [r["exam"]["ll_market"] for r in ex]}], lambda v: f"{v:.3f}", w=760, h=280)
+    er = [r for r in runs if r["exam"] and r["exam"].get("err_fc") is not None]
+    if len(er) >= 2:
+        out["err"] = line_chart([r["when"][:5] for r in er], [
+            {"name": "Среднее 16 моделей", "cls": "s-fc", "values": [r["exam"]["err_fc"] for r in er]},
+            {"name": "Модель", "cls": "s-model", "values": [r["exam"]["err_model"] for r in er]},
+            {"name": "Рынок", "cls": "s-market", "values": [r["exam"].get("err_market") for r in er]}], lambda v: f"{v:.2f}°", w=760, h=280)
+    if len(runs) >= 2:
+        out["rows"] = line_chart([r["when"][:5] for r in runs], [
+            {"name": "Город-дней", "cls": "s-model", "values": [r["rows"] for r in runs]}], lambda v: f"{v:,.0f}".replace(",", " "), w=760, h=220)
+    return out
+
+
+def _model_card(conn, key, info):
+    ch = model_charts(conn, info)
+    money = _money_of(conn, info["wallets"])
+    runs = _train_runs(conn, info)
+    head = None
+    if ch:
+        p = ch["parts"][-1] if info["skill_blend"] else ch["parts"][0]  # на что ставит большинство кошельков
+        t = p["live"] or p["all"]
+        head = {"who": p["name"], "src": "вживую" if p["live"] else "на истории", **t}
+        # мини-график: накопленное преимущество по дням
+        rows = _skill_rows(conn, info["skill_blend"] or info["skill"])
+        by = {}
+        for r in rows:
+            by[r["date"]] = by.get(r["date"], 0.0) + _ll(r["p_market"]) - _ll(r["p_model"])
+        head["spark"] = spark(sorted(by.items()), 0.0)
+    return {"key": key, **info, "charts": ch, "money": money, "runs": runs, "head": head,
+            "last_train": runs[-1]["when"] if runs else None}
+
+
+@app.get("/models", response_class=HTMLResponse)
+def models_page(request: Request):
+    from models_info import MODELS as MODEL_INFO
+    conn = db()
+    cards = [_model_card(conn, k, v) for k, v in MODEL_INFO.items()]
+    alerts = active_alerts(conn)
+    conn.close()
+    return TEMPLATES.TemplateResponse("models.html", {"request": request, "models": cards, "m": None, "alerts": alerts})
+
+
+@app.get("/models/{key}", response_class=HTMLResponse)
+def model_page(request: Request, key: str):
+    from models_info import MODELS as MODEL_INFO
+    if key not in MODEL_INFO:
+        return HTMLResponse("Нет такой модели", status_code=404)
+    conn = db()
+    m = _model_card(conn, key, MODEL_INFO[key])
+    m["exam_charts"] = _exam_charts(m["runs"])
+    last_imp = next((r["importance"] for r in reversed(m["runs"]) if r.get("importance")), None)
+    if last_imp:
+        top = max(i["pct"] for i in last_imp) or 1
+        m["importance"] = [{"ru": feature_ru(i["name"]), "pct": i["pct"], "bar": round(100 * i["pct"] / top)} for i in last_imp]
+    others = [{"key": k, "name": v["name"], "badge": v["badge"]} for k, v in MODEL_INFO.items()]
+    alerts = active_alerts(conn)
+    conn.close()
+    return TEMPLATES.TemplateResponse("models.html", {"request": request, "models": None, "m": m, "others": others, "alerts": alerts})
+
+
+# ---- /mm: виртуальный бот-мейкер по схеме Poligarch (2026-09-30, решение Alex) — weather_mm_paper.py / weather_mm_settle.py ----
+MM_DB = DB_PATH.parent / "mm.sqlite3"
+MM_WALLETS = {"mm_all": ("Все заявки бота", "Заявки на «да» и «нет» по всем погодным вариантам, кроме пауз (сводки METAR, вечер дня маркета)"),
+              "mm_sel": ("Только выгодные зоны", "Те же заявки, но только в зонах цены и времени, где стоять с заявкой было выгодно в обоих периодах истории"),
+              "mm_pol": ("Политика и прочее", "Те же заявки на не погодных маркетах, где Poligarch торговал за 7 дней; открытые маркеты — по текущей цене, пересчёт каждый день")}
+MM_DECIDE = "2026-10-14"
+
+
+def _mm_zone_rows(conn, wallet, expr, order=None):
+    rows = conn.execute(f"""SELECT {expr} AS k, COUNT(*) AS n, SUM(size) AS sh, SUM(price * size) AS spent, SUM(pnl_final) AS pnl
+                            FROM mm_fills WHERE wallet = ? GROUP BY k""", (wallet,)).fetchall()
+    out = [{"k": r["k"], "n": r["n"], "sh": r["sh"] or 0, "spent": r["spent"] or 0, "pnl": r["pnl"] or 0,
+            "c": 100 * (r["pnl"] or 0) / r["sh"] if r["sh"] else 0} for r in rows]
+    return sorted(out, key=order or (lambda x: x["k"] or ""))
+
+
+@app.get("/mm", response_class=HTMLResponse)
+def mm_page(request: Request):
+    ctx = {"request": request, "wallets": [], "live": None, "decide": MM_DECIDE, "chart": None, "recent": [], "zones": [], "prices": [], "cities": []}
+    if MM_DB.exists():
+        conn = sqlite3.connect(f"file:{MM_DB}?mode=ro", uri=True, timeout=10)
+        conn.row_factory = sqlite3.Row
+        try:
+            now = int(time.time())
+            q = conn.execute("""SELECT COUNT(*) AS n, SUM(yes_bid IS NOT NULL) + SUM(no_bid IS NOT NULL) AS sides, SUM(sel_yes) + SUM(sel_no) AS sel,
+                                MAX(ts_to) AS last, COUNT(DISTINCT city) AS cities FROM mm_quotes WHERE ts_to >= ?""", (now - 90,)).fetchone()
+            first = conn.execute("SELECT MIN(ts_from), MAX(ts_to), COUNT(DISTINCT condition_id) FROM mm_quotes").fetchone()
+            ctx["live"] = {"n": q["n"] or 0, "sides": q["sides"] or 0, "sel": q["sel"] or 0, "cities": q["cities"] or 0,
+                           "since": datetime.fromtimestamp(first[0], VIEWER_TZ).strftime("%d.%m %H:%M") if first[0] else None,
+                           "last": datetime.fromtimestamp(first[1], VIEWER_TZ).strftime("%d.%m %H:%M") if first[1] else None,
+                           "markets": first[2] or 0, "on": bool(q["last"])}
+            has_res = table_exists(conn, "mm_results")
+            series, days_all = [], set()
+            for w, (name, desc) in MM_WALLETS.items():
+                c = {"key": w, "name": name, "desc": desc, "n": 0}
+                if has_res:
+                    r = conn.execute("""SELECT COUNT(*) AS m, SUM(n_fills > 0) AS mf, SUM(n_fills) AS n, SUM(sh_yes + sh_no) AS sh, SUM(spent) AS spent,
+                                        SUM(merged) AS merged, SUM(merge_pnl) AS mp, SUM(inv_pnl) AS ip, SUM(rebate) AS rb, SUM(pnl) AS pnl
+                                        FROM mm_results WHERE wallet = ?""", (w,)).fetchone()
+                    c.update({k: (r[k] or 0) for k in r.keys()})
+                    c["roi"] = 100 * c["pnl"] / c["spent"] if c["spent"] else None
+                    c["cps"] = 100 * c["pnl"] / c["sh"] if c["sh"] else None
+                    by = dict(conn.execute("SELECT local_date, SUM(pnl) FROM mm_results WHERE wallet = ? GROUP BY local_date", (w,)).fetchall())
+                    if w != "mm_pol":  # у политики «день» — дата окончания маркета, на график по дням не кладём
+                        days_all |= set(by)
+                    c["by_day"] = by
+                ctx["wallets"].append(c)
+            days = sorted(days_all)
+            if len(days) >= 2:
+                for c, cls in zip(ctx["wallets"], ("s-model", "s-real")):
+                    acc, vals = 0.0, []
+                    for d in days:
+                        acc += c.get("by_day", {}).get(d, 0.0)
+                        vals.append(acc)
+                    series.append({"name": c["name"], "cls": cls, "values": vals})
+                ctx["chart"] = line_chart([f"{d[8:10]}.{d[5:7]}" for d in days], series, lambda v: f"{'−' if v < 0 else '+'}${abs(v):.0f}", w=760, h=280)
+            if has_res and table_exists(conn, "mm_fills"):
+                order_z = ["накануне", "0-6", "6-9", "9-12", "12-15", "15-18", "18-24"]
+                ctx["zones"] = _mm_zone_rows(conn, "mm_all", "zone", lambda x: order_z.index(x["k"]) if x["k"] in order_z else 99)
+                ctx["prices"] = _mm_zone_rows(conn, "mm_all", "CAST(MIN(price * 10, 9) AS INTEGER)")
+                cs = _mm_zone_rows(conn, "mm_all", "city", lambda x: -x["pnl"])
+                for x in cs:
+                    x["ru"] = CITY_RU.get(x["k"], x["k"])
+                ctx["cities"] = cs
+                ctx["recent"] = [dict(r) | {"city_ru": CITY_RU.get(r["city"], r["city"])} for r in conn.execute(
+                    """SELECT * FROM mm_results WHERE wallet = 'mm_all' AND n_fills > 0 ORDER BY local_date DESC, pnl DESC LIMIT 40""")]
+                for r in ctx["recent"]:
+                    from weather_cities import OBS_CITIES
+                    r["what"] = paper_bucket(r["bucket_lo"], r["bucket_hi"], OBS_CITIES.get(r["city"], {}).get("unit", "celsius"))
+        except sqlite3.Error as e:
+            ctx["error"] = str(e)
+        finally:
+            conn.close()
+    return TEMPLATES.TemplateResponse("mm.html", ctx)
+
+
 # ---- /bets: все ставки всех кошельков — открытые и закрытые отдельно (2026-09-27, просьба Alex) ----
 # Оформление по пяти присланным макетам: пастельные плитки (Payoneer), «движение денег» по дням (Fundcy),
 # «последние» плиткой 2×2 со статусами (Finance Health), «ждут итога» с датой квадратиком (Upcoming Payments),
@@ -1649,6 +1995,27 @@ JOB_DONE = {
 }
 
 
+_LOG_NOISE = ("Found orphan containers", "level=warning msg=")
+
+
+def _clean_log(text, max_lines=120):
+    """Лог для показа: без служебного шума docker, хвост до max_lines строк."""
+    lines = [ln.rstrip() for ln in text.splitlines() if ln.strip() and not any(x in ln for x in _LOG_NOISE)]
+    cut = len(lines) - max_lines
+    return (f"… (ещё {cut} строк выше)\n" if cut > 0 else "") + "\n".join(lines[-max_lines:])
+
+
+def _log_tail(name, max_bytes=16000, max_lines=15):
+    try:
+        with open(DB_PATH.parent.parent / "logs" / name, "rb") as fh:
+            fh.seek(0, 2)
+            fh.seek(max(0, fh.tell() - max_bytes))
+            text = fh.read().decode("utf-8", "replace")
+    except OSError:
+        return None
+    return _clean_log(text, max_lines) or None
+
+
 def system_events(conn, days=3):
     from jobs_info import JOBS
     label = {k: l for k, l, *_ in JOBS}
@@ -1656,17 +2023,37 @@ def system_events(conn, days=3):
     since = now - timedelta(days=days)
     ev = []
 
-    def add(t, kind, title, detail="", link=None):
+    def add(t, kind, title, detail="", link=None, more=None):
         if t and t >= since:
-            ev.append({"t": t, "kind": kind, "title": title, "detail": detail, "link": link})
+            ev.append({"t": t, "kind": kind, "title": title, "detail": detail, "link": link, "more": more})
+
+    # 2026-09-29 (просьба Alex: «для каждого уведомления видеть, что конкретно произошло»): у события — подробности
+    # (more): лог запуска (job_log.output, пишет job_wrap.py с 29.09), маркеты с итогом, ставки по одной, итоги обучения.
+    logfile = {k: lg for k, _l, _s, _sc, _a, lg in JOBS}
+    latest_job = {}
+
+    def log_more(job, output, t):
+        if output and output.strip():
+            return {"type": "log", "text": _clean_log(output)}
+        if latest_job.get(job) == t and logfile.get(job):  # до 29.09 вывод не сохранялся — у последнего запуска хвост файла
+            tail = _log_tail(logfile[job])
+            if tail:
+                return {"type": "log", "text": tail, "note": f"Последние строки файла data/logs/{logfile[job]}: вывод этого запуска отдельно ещё "
+                                                                   "не сохранён (сохраняется с 29.09 вечера), поэтому часть строк может быть от прошлых запусков."}
+        return {"type": "log", "text": None}
 
     from fixes import is_fixed, last_fixes
     fx = last_fixes(conn)
     if table_exists(conn, "job_log"):
         ie = ", item_errors" if "item_errors" in [c[1] for c in conn.execute("PRAGMA table_info(job_log)")] else ", 0 AS item_errors"
-        for r in conn.execute(f"SELECT job, started_at, finished_at, rc, duration_s, om_calls{ie} FROM job_log WHERE finished_at >= ?",
-                              (since.isoformat(),)):
+        oc = ", output" if "output" in [c[1] for c in conn.execute("PRAGMA table_info(job_log)")] else ", NULL AS output"
+        jl = conn.execute(f"SELECT job, started_at, finished_at, rc, duration_s, om_calls{ie}{oc} FROM job_log WHERE finished_at >= ? ORDER BY finished_at",
+                          (since.isoformat(),)).fetchall()
+        for r in jl:
+            latest_job[r["job"]] = _dt(r["finished_at"])
+        for r in jl:
             t = _dt(r["finished_at"])
+            lm = log_more(r["job"], r["output"], t)
             dur = f"{r['duration_s']:.0f} с" if r["duration_s"] < 90 else f"{r['duration_s'] / 60:.0f} мин"
             if r["job"] not in label:
                 continue  # ручные запуски (проверки, пробное обучение) — не события системы
@@ -1674,16 +2061,16 @@ def system_events(conn, days=3):
                 # 2026-09-28: исправленные ошибки — в истории остаются, но зелёным и с тем, что сделали (fixes.py)
                 what = "упал" if r["rc"] != 0 else f"отработал с пропусками ({r['item_errors']})"
                 add(t, "ok", f"Исправлено: «{label.get(r['job'], r['job'])}» {what}",
-                    f"исправлено {fx[r['job']][0].astimezone(VIEWER_TZ):%d.%m %H:%M}: {fx[r['job']][1]}")
+                    f"исправлено {fx[r['job']][0].astimezone(VIEWER_TZ):%d.%m %H:%M}: {fx[r['job']][1]}", None, lm)
             elif r["rc"] != 0:
                 why = "остановлен по пределу времени" if r["rc"] in (124, 137, 143) else f"код выхода {r['rc']}"
-                add(t, "fail", f"Ошибка: «{label.get(r['job'], r['job'])}»", f"{why} · шёл {dur} · подробности на странице «Здоровье системы»", "/status")
+                add(t, "fail", f"Ошибка: «{label.get(r['job'], r['job'])}»", f"{why} · шёл {dur} · подробности на странице «Здоровье системы»", "/status", lm)
             elif r["item_errors"]:
                 add(t, "fail", f"С пропусками: «{label.get(r['job'], r['job'])}»",
-                    f"отработал, но пропущено из-за ошибок: {r['item_errors']} — остальное обработано · подробности на странице «Здоровье системы»", "/status")
+                    f"отработал, но пропущено из-за ошибок: {r['item_errors']} — остальное обработано · подробности на странице «Здоровье системы»", "/status", lm)
             elif r["job"] in JOB_DONE and r["job"] not in FREQUENT_JOBS and r["job"] != "weather_ml_train":
                 extra = f" · запросов к Open-Meteo: {r['om_calls']}" if r["om_calls"] else ""
-                add(t, "data", JOB_DONE.get(r["job"], f"Отработал «{label.get(r['job'], r['job'])}»"), f"за {dur}{extra}")
+                add(t, "data", JOB_DONE.get(r["job"], f"Отработал «{label.get(r['job'], r['job'])}»"), f"за {dur}{extra}", None, lm)
     if table_exists(conn, "ml_train_log"):
         for r in conn.execute("SELECT trained_at, ok, details FROM ml_train_log WHERE trained_at >= ?", (since.isoformat(),)):
             try:
@@ -1696,18 +2083,35 @@ def system_events(conn, days=3):
                 parts.append(f"экзамен: модель — {v['label']}" + (f", смесь — {v['blend']['label']}" if v.get("blend") else ""))
             if not r["ok"]:
                 parts.append("не все проверки пройдены")
+            ex = d.get("exam") or {}
             add(_dt(r["trained_at"]), "train", "Пробное обучение модели" if d.get("dry_run") else "Модель переобучилась",
-                " · ".join(parts), "/training")
+                " · ".join(parts), "/training",
+                {"type": "train", "data": d.get("data", {}), "versions": d.get("versions", []), "checks": d.get("checks", []),
+                 "exam": ex, "verdict": v, "dur": d.get("duration_s") or 0,
+                 "imp": [{"ru": feature_ru(i["name"]), "pct": i["pct"]} for i in (d.get("importance") or [])[:6]]})
     if table_exists(conn, "weather_poly_outcomes"):
+        from weather_cities import OBS_CITIES
         groups = {}
-        for r in conn.execute("SELECT city, resolved_at FROM weather_poly_outcomes WHERE resolved_at >= ?", (since.isoformat(),)):
+        for r in conn.execute("SELECT city, local_date, win_lo, win_hi, resolved_at FROM weather_poly_outcomes WHERE resolved_at >= ?", (since.isoformat(),)):
             t = _dt(r["resolved_at"])
             if t:
-                groups.setdefault(t.replace(second=0, microsecond=0), []).append(CITY_RU.get(r["city"], r["city"]))
-        for t, cities in groups.items():
-            n = len(cities)
+                groups.setdefault(t.replace(second=0, microsecond=0), []).append(r)
+        mk_bets = {}
+        for b in all_bets(conn):
+            if b["pnl"] is not None:
+                mk_bets.setdefault((b["city"], b["local_date"]), []).append(b)
+        for t, rs in groups.items():
+            n = len(rs)
+            cities = [CITY_RU.get(r["city"], r["city"]) for r in rs]
+            rows = []
+            for r in sorted(rs, key=lambda r: CITY_RU.get(r["city"], r["city"])):
+                bs = mk_bets.get((r["city"], r["local_date"]), [])
+                unit = OBS_CITIES.get(r["city"], {}).get("unit", "celsius")
+                rows.append({"city": CITY_RU.get(r["city"], r["city"]), "slug": r["city"], "date": f"{r['local_date'][8:10]}.{r['local_date'][5:7]}",
+                             "win": paper_bucket(r["win_lo"], r["win_hi"], unit) or "?", "n": len(bs),
+                             "won": sum(1 for b in bs if b["pnl"] > 0.005), "pnl": sum(b["pnl"] for b in bs)})
             add(t, "result", f"Пришли итоги {n} {'маркета' if n % 10 == 1 and n % 100 != 11 else 'маркетов'}",
-                ", ".join(sorted(cities)[:12]) + (f" и ещё {n - 12}" if n > 12 else ""))
+                ", ".join(sorted(cities)[:12]) + (f" и ещё {n - 12}" if n > 12 else ""), None, {"type": "markets", "rows": rows})
     # ставки — сводкой по каждому запуску; подробно — на странице «Ставки»
     bets = all_bets(conn)
     runs_open, runs_close = {}, {}
@@ -1722,24 +2126,37 @@ def system_events(conn, days=3):
         keys = {b["w"]["key"] for b in bs}
         return f"/paper?w={next(iter(keys))}" if len(keys) == 1 else "/paper"
 
+    def wallet_names(bs):
+        # 2026-09-29 (Alex): рядом с названием — код кошелька (mm_mk, ml3 ...), чтобы сразу было видно, какой это
+        ws = sorted({f'{b["w"]["name"]} ({b["w"]["key"]})' for b in bs})
+        return ", ".join(ws[:4]) + (f" и ещё {len(ws) - 4}" if len(ws) > 4 else "")
+
+    def bet_rows(bs):
+        return {"type": "bets", "rows": [
+            {"code": b["w"]["key"], "wallet": b["w"]["name"], "city": b["city_ru"], "slug": b["city"],
+             "date": f"{b['local_date'][8:10]}.{b['local_date'][5:7]}", "what": b["what"], "price": b["price"], "cost": b["cost"],
+             "pnl": b["pnl"], "status": b["status"], "win_amt": b["win_amt"]}
+            for b in sorted(bs, key=lambda b: (b["w"]["key"], b["city_ru"]))]}
+
     for t, bs in runs_open.items():
-        ws = sorted({b["w"]["name"] for b in bs})
         last = max(b["placed"] for b in bs)
-        add(last, "bets", f"Открыто ставок: {len(bs)} на ${sum(b['cost'] for b in bs):.2f}",
-            ", ".join(ws[:4]) + (f" и ещё {len(ws) - 4}" if len(ws) > 4 else ""), wallet_link(bs))
+        add(last, "bets", f"Открыто ставок: {len(bs)} на ${sum(b['cost'] for b in bs):.2f}", wallet_names(bs), wallet_link(bs), bet_rows(bs))
     for t, bs in runs_close.items():
         pnl = sum(b["pnl"] for b in bs)
         won = sum(1 for b in bs if b["pnl"] > 0.005)
         add(t, "bets", f"Закрыто ставок: {len(bs)} · угадано {won} · итог {'+' if pnl >= 0 else '−'}${abs(pnl):.2f}",
-            ", ".join(sorted({b["w"]["name"] for b in bs})[:4]), wallet_link(bs))
+            wallet_names(bs), wallet_link(bs), bet_rows(bs))
     if table_exists(conn, "alerts"):
         for r in conn.execute("SELECT message, first_seen, resolved_at FROM alerts"):
-            add(_dt(r["first_seen"]), "alert", "Тревога", r["message"], "/status")
+            am = {"type": "log", "text": r["message"]}
+            add(_dt(r["first_seen"]), "alert", "Тревога", r["message"], "/status", am)
             if r["resolved_at"]:
-                add(_dt(r["resolved_at"]), "ok", "Тревога снята", r["message"])
+                add(_dt(r["resolved_at"]), "ok", "Тревога снята", r["message"], None, am)
     f = DB_PATH.parent.parent / "ALERT_DB_LOCKED"
     try:
-        add(datetime.fromtimestamp(f.stat().st_mtime, timezone.utc), "fail", "Сторож базы: база была занята", f.read_text().strip()[:300], "/status")
+        txt = f.read_text().strip()
+        add(datetime.fromtimestamp(f.stat().st_mtime, timezone.utc), "fail", "Сторож базы: база была занята", txt[:300], "/status",
+            {"type": "log", "text": txt[-6000:]})
     except OSError:
         pass
     ev.sort(key=lambda e: e["t"], reverse=True)

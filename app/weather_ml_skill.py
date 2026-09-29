@@ -45,6 +45,10 @@ MODELS = {
     "ml4_cal": (None, None, "ml4c_model_p", None),
     "ml4e": (None, None, "ml4e_model_p", None),
     "ml4e_cal": (None, None, "ml4ec_model_p", None),
+    # 2026-09-29 (страница «Модели», просьба Alex): v5 «от рынка» и 6 ансамблей — тоже только живые дни
+    "ml5": (None, None, "ml5_model_p", None),
+    "ml5_cal": (None, None, "ml5c_model_p", None),
+    "ens": (None, None, "ens_model_p", None),
     "main": (None, None, "model_p", None),
     "emos": (None, None, "emos_model_p", None),
     "mm": (None, None, "mm_model_p", None),
@@ -58,7 +62,7 @@ def center_c(probs, unit):
     return (m - 32) * 5 / 9 if unit == "fahrenheit" else m
 
 
-MIN_EDGE = {"ml3_cal": 0.03, "ml4_cal": 0.03, "ml4e_cal": 0.03}
+MIN_EDGE = {"ml3_cal": 0.03, "ml4_cal": 0.03, "ml4e_cal": 0.03, "ml5_cal": 0.03, "ens": 0.03}
 
 
 def row(key, city, date, source, unit, model, market, win_lo, min_shift):
@@ -105,7 +109,7 @@ def history(conn, key, table, kind, min_shift, win):
     return out
 
 
-FAST_FIELDS = {"ml_model_p", "ml2_model_p", "ml3_model_p", "ml3c_model_p", "ml4_model_p", "ml4c_model_p", "ml4e_model_p", "ml4ec_model_p"}
+FAST_FIELDS = {"ml_model_p", "ml2_model_p", "ml3_model_p", "ml3c_model_p", "ml4_model_p", "ml4c_model_p", "ml4e_model_p", "ml4ec_model_p", "ml5_model_p", "ml5c_model_p"}
 
 
 def live(conn, key, field, after, min_shift, win):
