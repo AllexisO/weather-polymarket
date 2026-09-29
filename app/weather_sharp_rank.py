@@ -20,7 +20,7 @@ import sqlite3
 import sys
 import time
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 DB_PATH = Path(os.environ.get("POLY_LAB_DB", Path(__file__).parent.parent / "data" / "db" / "polymarket_lab.sqlite3"))
@@ -62,6 +62,30 @@ def rank(src):
     return good[:TOP_N], coverage, len(st)
 
 
+def update_names(conn, wallets):
+    """2026-09-29 (просьба Alex, страница «Трейдеры»): имена профилей Polymarket для трейдеров из рейтинга —
+    таблица trader_names. Обновляем новые и старше 7 дней; ошибка сети — просто без имени, рейтинг не ломается."""
+    import requests
+    conn.execute("CREATE TABLE IF NOT EXISTS trader_names (wallet TEXT PRIMARY KEY, name TEXT, fetched_at TEXT)")
+    week_ago = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+    fresh = {r[0] for r in conn.execute("SELECT wallet FROM trader_names WHERE fetched_at >= ?", (week_ago,))}
+    n = 0
+    for w in wallets:
+        if w in fresh:
+            continue
+        try:
+            r = requests.get("https://gamma-api.polymarket.com/public-profile", params={"address": w}, timeout=10)
+            j = r.json() if r.ok else {}
+            name = (j.get("name") or j.get("pseudonym") or "").strip() or None
+        except (requests.RequestException, ValueError):
+            continue
+        conn.execute("INSERT OR REPLACE INTO trader_names VALUES (?, ?, ?)", (w, name, datetime.now(timezone.utc).isoformat()))
+        n += 1
+        time.sleep(0.3)
+    conn.commit()
+    print(f"имена трейдеров: обновлено {n}")
+
+
 def main():
     src_path = sys.argv[sys.argv.index("--source") + 1] if "--source" in sys.argv else DB_PATH
     src = sqlite3.connect(f"file:{src_path}?mode=ro", uri=True, timeout=60)
@@ -80,10 +104,19 @@ def main():
         conn.commit()
         for w, k, p, t in top[:10]:
             print(f"  {w[:10]}…  сделок {k:6d}  итог {p:+10,.0f}$  ({100 * p / t:+.1f}% от оборота)")
+    try:
+        update_names(conn, [r[0] for r in conn.execute("SELECT wallet FROM sharp_wallets")])
+    except sqlite3.Error as e:
+        print(f"имена трейдеров не обновлены — {e}")
     from jobmark import mark
     mark(conn, "weather_sharp_rank")
     conn.close()
 
 
 if __name__ == "__main__":
-    main()
+    if "--names" in sys.argv:  # только имена (без пересчёта рейтинга)
+        c = sqlite3.connect(DB_PATH, timeout=60)
+        update_names(c, [r[0] for r in c.execute("SELECT wallet FROM sharp_wallets")])
+        c.close()
+    else:
+        main()

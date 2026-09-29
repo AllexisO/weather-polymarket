@@ -295,6 +295,10 @@ def ensure_schema(conn):
         # 2026-09-27: v4e (v4, среднее 3 обучений) и её смесь с рынком — кошельки ml4e / ml4e_cal
         for c in ("ml4e_model_p", "ml4e_edge", "ml4ec_model_p", "ml4ec_edge"):
             conn.execute(f"ALTER TABLE snapshots ADD COLUMN {c} REAL")
+    if "ml5_model_p" not in cols:
+        # 2026-09-29: v5 «от рынка» (учит поправку к рынку) и её смесь с рынком — кошелёк ml5_cal
+        for c in ("ml5_model_p", "ml5_edge", "ml5c_model_p", "ml5c_edge"):
+            conn.execute(f"ALTER TABLE snapshots ADD COLUMN {c} REAL")
     if "ml3c_model_p" not in cols:
         # 2026-09-26: смесь главной модели с рынком (weather_ml_live.ML3_BLEND_W) — кошелёк ml3_cal
         conn.execute("ALTER TABLE snapshots ADD COLUMN ml3c_model_p REAL")
@@ -384,12 +388,13 @@ def run():
                 print(f"{city}: ошибка запроса (микс моделей) — {e}", file=sys.stderr)
 
             ml_probs = ml2_probs = ml3_probs = ml3c_probs = ml4_probs = ml4c_probs = ml4e_probs = ml4ec_probs = None
+            ml5_probs = ml5c_probs = None
             try:
                 from weather_ml_live import bucket_probs as ml_bucket_probs
                 ml_res = ml_bucket_probs(conn, city, cfg, market["buckets"],
                                          metars_by_icao.get(OBS_CITIES[city]["icao"], []))
                 if ml_res is not None:
-                    ml_probs, ml_mu, ml2_probs, ml3_probs, ml4_probs, ml4e_probs = ml_res
+                    ml_probs, ml_mu, ml2_probs, ml3_probs, ml4_probs, ml4e_probs, ml5_probs = ml_res
                     ml3c_probs = ml4c_probs = None
                     from weather_ml_live import blend_with_market
                     if ml3_probs:
@@ -398,6 +403,8 @@ def run():
                         ml4c_probs = blend_with_market(ml4_probs, [b["market_p"] for b in market["buckets"]])
                     if ml4e_probs:
                         ml4ec_probs = blend_with_market(ml4e_probs, [b["market_p"] for b in market["buckets"]])
+                    if ml5_probs:
+                        ml5c_probs = blend_with_market(ml5_probs, [b["market_p"] for b in market["buckets"]])
                     print(f"{city}: обучаемая модель — прогноз максимума {ml_mu:.1f}")
             except Exception as e:  # отдельный трек: его ошибка не должна ломать снимок
                 print(f"{city}: ошибка обучаемой модели — {e}", file=sys.stderr)
@@ -483,6 +490,10 @@ def run():
                         (ml4ec_probs[i_b] - b["market_p"]) if ml4ec_probs else None,
                         ens_probs[i_b] if ens_probs else None,
                         (ens_probs[i_b] - b["market_p"]) if ens_probs else None,
+                        ml5_probs[i_b] if ml5_probs else None,
+                        (ml5_probs[i_b] - b["market_p"]) if ml5_probs else None,
+                        ml5c_probs[i_b] if ml5c_probs else None,
+                        (ml5c_probs[i_b] - b["market_p"]) if ml5c_probs else None,
                     )
                 )
             conn.executemany(
@@ -490,8 +501,9 @@ def run():
                 INSERT INTO snapshots
                 (ts_utc, city, local_date, local_hour, unit, bucket_lo, bucket_hi, market_p, model_p, edge, event_vol, ensemble_n,
                  wn2_model_p, wn2_edge, wn2_ensemble_n, emos_model_p, emos_edge, best_ask, mm_model_p, mm_edge, ml_model_p, ml_edge, ml2_model_p, ml2_edge, ml3_model_p, ml3_edge, ml3c_model_p, ml3c_edge, ml4_model_p, ml4_edge, ml4c_model_p, ml4c_edge,
-                 ml4e_model_p, ml4e_edge, ml4ec_model_p, ml4ec_edge, ens_model_p, ens_edge)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 ml4e_model_p, ml4e_edge, ml4ec_model_p, ml4ec_edge, ens_model_p, ens_edge,
+                 ml5_model_p, ml5_edge, ml5c_model_p, ml5c_edge)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 rows,
             )

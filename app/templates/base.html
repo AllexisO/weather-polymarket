@@ -143,6 +143,12 @@
   .side-link.active .side-n { background: #0A0A0B; color: var(--text); }
   .side-n.good { color: var(--pos); } .side-n.bad { background: var(--neg); color: #0A0A0B; }
   .side-n.warn { background: var(--accent); color: #0A0A0B; }
+  .note-bar { display: flex; align-items: center; gap: 10px; max-width: 1200px; margin: 0 auto 16px; padding: 10px 16px; border-radius: 14px;
+    background: var(--accent-bg); border: 1px solid rgba(255, 213, 138, .45); color: var(--text); text-decoration: none; font-size: 14px; line-height: 1.4; }
+  .note-bar b { color: var(--accent); font-weight: 600; }
+  .note-bar:hover { border-color: var(--accent); }
+  .note-bar-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex-shrink: 0; }
+  .note-bar-go { margin-left: auto; color: var(--accent); white-space: nowrap; font-weight: 600; }
   .side-spacer { flex: 1; min-height: 12px; }
   .side-foot { border-radius: 16px; padding: 12px 14px; background: linear-gradient(135deg, rgba(255, 213, 138, .16), rgba(163, 227, 154, .12)); }
   .paper-badge { display: block; font-size: 12.5px; color: var(--muted); line-height: 1.4; }
@@ -393,6 +399,7 @@
       {{ navlink('/paper', 'кошельки', 'wallet', path == '/paper', nc.wallets) }}
       {{ navlink('/bets', 'ставки', 'trending', path == '/bets', nc.open) }}
       {{ navlink('/cities', 'города', 'globe', path.startswith('/cities'), nc.cities if nc.cities else none) }}
+      {{ navlink('/traders', 'трейдеры', 'shuffle', path.startswith('/traders'), nc.traders if nc.traders else none) }}
       {{ navlink('/', 'погода', 'weather', path == '/' or path.startswith('/city/')) }}
       {{ navlink('/training', 'обучение модели', 'sliders', path == '/training') }}
      </div>
@@ -418,6 +425,12 @@
       <img class="topbar-logo" src="/static/weather-lab-icon.svg" alt="" width="26" height="26"><span class="topbar-title">weather-lab</span>
     </header>
     <main id="main-content" tabindex="-1">
+      {# 2026-09-29 (просьба Alex): напоминание о заметках на сегодня — на всех страницах, кроме самих заметок #}
+      {% if nc.notes and path != '/notes' %}
+      <a class="note-bar" href="/notes"><span class="note-bar-dot" aria-hidden="true"></span>
+        <span><b>Сегодня по заметкам:</b> {{ nc.notes_due | join(' · ') }}{% if nc.notes > nc.notes_due | length %} и ещё {{ nc.notes - nc.notes_due | length }}{% endif %}</span>
+        <span class="note-bar-go">открыть →</span></a>
+      {% endif %}
       {% block content %}{% endblock %}
     </main>
   </div>

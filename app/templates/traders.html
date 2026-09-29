@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}Трейдеры — weather-lab{% endblock %}
+{% block content %}
+{#
+  2026-09-29 (просьба Alex): за кем повторяет кошелёк copy и что каждый из них нам дал — плюс или минус; клик — все наши
+  повторы за трейдером. Ставки — paper_trades (wallet = copy), рейтинг — sharp_wallets, имена — trader_names.
+#}
+{% macro money(v) -%}{{ '−' if v < -0.005 else ('+' if v > 0.005 else '') }}${{ '%.2f' | format(v | abs) }}{%- endmacro %}
+{% macro kmoney(v) -%}{{ '−' if v < 0 else '+' }}${{ '{:,.0f}'.format(v | abs) }}{%- endmacro %}
+<style>
+  body:has(.bk) .main-col { background: #0A0A0B; }
+  body:has(.bk) main { max-width: 1200px; }
+  .bk {
+    --bk-card: #1C1C1E; --bk-raise: #262628; --bk-line: #2E2E31; --bk-text: #F4F4F5; --bk-muted: #A1A1AA; --bk-faint: #71717A;
+    --bk-accent: #FFD58A; --bk-pos: #A3E39A; --bk-neg: #F4A77F; --ink: #101012;
+    --bk-font: "Onest", -apple-system, "Segoe UI", Roboto, sans-serif;
+    color: var(--bk-text); font-family: var(--bk-font); font-size: 15px; line-height: 1.5;
+  }
+  .bk .pos { color: var(--bk-pos); } .bk .neg { color: var(--bk-neg); } .bk .muted { color: var(--bk-muted); }
+  .top { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 10px 24px; margin-bottom: 18px; }
+  .top h1 { margin: 0; font-size: 26px; font-weight: 700; letter-spacing: -.02em; }
+  .top p { margin: 4px 0 0; color: var(--bk-muted); font-size: 14px; max-width: 640px; }
+  .wsel { font: 500 13px var(--bk-font); color: var(--bk-text); background: var(--bk-card); border: 1px solid var(--bk-line);
+          border-radius: 10px; padding: 7px 10px; color-scheme: dark; max-width: 100%; }
+  .tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 22px; }
+  .tile { border-radius: 14px; padding: 12px 14px; color: var(--ink); }
+  .tile span { display: block; font-size: 12.5px; opacity: .72; }
+  .tile b { display: block; font-size: 22px; font-weight: 600; margin-top: 6px; }
+  .t1 { background: #D3DDFB; } .t2 { background: #C7F4E2; } .t3 { background: #FFD58A; } .t4 { background: #F4C7B0; }
+  .list { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+  .bk a.city { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-radius: 12px; background: var(--bk-card);
+               border: 1px solid var(--bk-line); color: var(--bk-text); text-decoration: none; }
+  .bk a.city:hover { border-color: var(--bk-muted); }
+  .c-top { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+  .c-top b { font-size: 14px; font-weight: 600; }
+  .c-top .pnl { font-size: 15px; font-weight: 600; white-space: nowrap; }
+  .c-st { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; }
+  .c-st div { background: var(--bk-raise); border-radius: 8px; padding: 4px 8px; min-width: 0; }
+  .c-st span { display: block; font-size: 10.5px; color: var(--bk-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .c-st i { font-style: normal; font-size: 13px; font-weight: 600; white-space: nowrap; }
+  .tag { font-size: 10.5px; font-weight: 600; padding: 1px 7px; border-radius: 999px; background: rgba(163, 227, 154, .14); color: var(--bk-pos); white-space: nowrap; }
+  .tag.off { background: var(--bk-raise); color: var(--bk-faint); }
+  .c-sub { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; color: var(--bk-muted); }
+  .c-luck { font-size: 10.5px; color: var(--bk-faint); min-height: 1.4em; }
+  .c-luck.pos { color: var(--bk-pos); } .c-luck.neg { color: var(--bk-neg); }
+  .empty { color: var(--bk-faint); padding: 18px; background: var(--bk-card); border-radius: 12px; }
+  @media (max-width: 760px) { .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+</style>
+<div class="bk">
+  <div class="top">
+    <div>
+      <h1>Трейдеры</h1>
+      <p>За кем повторяет кошелёк «Повтор за сильными трейдерами» и что каждый из них принёс нам: плюс или минус. Список пересчитывается каждую ночь (30 лучших за 14 дней); кто выбыл — остаётся здесь с нашим итогом. Нажми на трейдера — все наши повторы за ним.</p>
+    </div>
+  </div>
+
+  <div class="tiles">
+    <div class="tile t1"><span>Итог повтора</span><b>{{ money(tot.pnl) }}</b></div>
+    <div class="tile t2"><span>Трейдеров в плюсе</span><b>{{ n_plus }}</b></div>
+    <div class="tile t4"><span>Трейдеров в минусе</span><b>{{ n_minus }}</b></div>
+    <div class="tile t3"><span>В списке сейчас</span><b>{{ n_listed }}</b></div>
+  </div>
+
+  {% if rows %}
+  <div class="list">
+    {% for r in rows %}
+    <a class="city" href="/traders/{{ r.pref }}">
+      <div class="c-top"><b style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.name }}</b><span class="pnl {{ 'pos' if r.pnl > 0.005 else ('neg' if r.pnl < -0.005 else '') }}">{{ money(r.pnl) }}</span></div>
+      <div class="c-sub"><span class="tag{{ '' if r.listed else ' off' }}">{{ 'в списке' if r.listed else 'выбыл' }}</span>
+        <span>{% if r.their_pnl is not none %}сам за 14 дн: {{ kmoney(r.their_pnl) }} ({{ '%+.1f' | format(r.their_pct) }}%), {{ r.their_n }} сделок{% endif %}</span></div>
+      <div class="c-st">
+        <div title="Наших повторов за ним"><span>Повторов</span><i>{{ r.n }}{% if r.open %} <span style="display:inline" class="muted">+{{ r.open }}</span>{% endif %}</i></div>
+        <div><span>Угадано</span><i>{{ r.winrate ~ '%' if r.winrate is not none else '—' }}</i></div>
+        <div><span>Доходн.</span><i class="{{ 'pos' if r.roi and r.roi > 0.05 else ('neg' if r.roi and r.roi < -0.05 else '') }}">{{ ('%+.0f' | format(r.roi)) ~ '%' if r.roi is not none else '—' }}</i></div>
+      </div>
+      <div class="c-luck {{ r.luck[1] if r.luck else '' }}">{{ r.luck[0] if r.luck else ('повторы ещё не закрылись' if r.open else 'повторов пока не было') }}</div>
+    </a>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty">Повторов пока нет.</div>
+  {% endif %}
+</div>
+{% endblock %}

@@ -76,6 +76,10 @@ def train_and_save():
         print(f"версия 3 (+рынок): обучено {len(qm)} уровней, признаков {len(ml.FEATURES)}")
         train_v4(dfm)
         train_v4e(dfm)
+        try:  # 2026-09-29: v5 «от рынка» — своя ошибка не должна ломать ночное обучение v1-v4
+            train_v5(dfm)
+        except Exception as e:
+            print(f"версия 5 (от рынка): ошибка обучения — {e}", file=sys.stderr)
         # 2026-09-26: подробный отчёт + экзамен для страницы /training
         import weather_ml_report
         rep = weather_ml_report.report(conn, started, df, dfm, sig, qm)
@@ -148,6 +152,45 @@ def train_v4e(dfm):
             m.save_model(str(out / f"q{int(round(q * 100)):02d}.txt"))
         (out / "features.json").write_text(json.dumps(ml.FEATURES))
     print(f"версия 4e (v4, среднее {len(V4E_SEEDS)} обучений): обучено {len(V4E_SEEDS)} × {len(mq.QUANTILES)} уровней")
+
+
+# 2026-09-29 (решение Alex: «сократить отставание от рынка, потом опережать»): v5 «от рынка» — отправная точка не
+# среднее 16 погодных моделей, а ожидаемый максимум по ценам рынка в 08:00 (fc_mean + mkt_mean_vs_fc); модель учит
+# только поправку к рынку — где и насколько рынок ошибается. Признаки — как у v3, среднее 3 обучений.
+# Проверка (weather_study_train3.py, 8 недель, 3 обучения): логошибка 1.1843 против 1.2150 у v3 (−0.031, лучше
+# все 8 недель, почти вровень с рынком 1.178); деньги смеси в сентябре по сделкам хуже (+$39 против +$124).
+# Кошелёк ml5_cal; главное — следить за отставанием от рынка (weather_week_review.py).
+V5_SEEDS = (11, 22, 33)
+
+
+def v5_base(fc_mean, mkt_mean_vs_fc):
+    """Отправная точка v5, °C: ожидаемый максимум рынка; нет цены — среднее погодных моделей."""
+    return fc_mean + (0.0 if mkt_mean_vs_fc is None or mkt_mean_vs_fc != mkt_mean_vs_fc else mkt_mean_vs_fc)
+
+
+def train_v5(dfm):
+    import lightgbm as lgb_
+    import weather_ml_q as mq
+    base = dfm["fc_mean"] + (dfm["mkt_mean_vs_fc"].fillna(0.0) if "mkt_mean_vs_fc" in dfm else 0.0)
+    X, y = dfm[ml.FEATURES], dfm["actual_c"] - base
+    for seed in V5_SEEDS:
+        out = ML_DIR / f"q_fm_s{seed}"
+        out.mkdir(parents=True, exist_ok=True)
+        ex = {"seed": seed, "bagging_seed": seed, "feature_fraction_seed": seed}
+        for q in mq.QUANTILES:
+            m = lgb_.train({**mq.Q_PARAMS, **ex, "alpha": q}, lgb_.Dataset(X, y, categorical_feature=["city_id"]), mq.Q_ROUNDS)
+            m.save_model(str(out / f"q{int(round(q * 100)):02d}.txt"))
+        (out / "features.json").write_text(json.dumps(ml.FEATURES))
+    print(f"версия 5 (от рынка, среднее {len(V5_SEEDS)} обучений): обучено {len(V5_SEEDS)} × {len(mq.QUANTILES)} уровней")
+
+
+def _load_q_fm():
+    if "q_fm" not in _cache:
+        import weather_ml_q as mq
+        _cache["q_fm"] = [({q: lgb.Booster(model_file=str(ML_DIR / f"q_fm_s{s}" / f"q{int(round(q * 100)):02d}.txt"))
+                            for q in mq.QUANTILES}, json.loads((ML_DIR / f"q_fm_s{s}" / "features.json").read_text()))
+                          for s in V5_SEEDS]
+    return _cache["q_fm"]
 
 
 def _load_q_mkt31e():
@@ -268,10 +311,35 @@ def bucket_probs(conn, city, cfg, buckets, metars):
         qs = np.mean([mq.predict_q(m, pd.DataFrame([row4]).reindex(columns=f), [row["fc_mean"]])[0]
                       for m, f in _load_q_mkt31e()], axis=0)
         v4e = [mq.bucket_prob(list(qs), unit, b["lo"], b["hi"]) for b in buckets]
-    return v1, mu_c * k + off, v2, v3, v4, v4e
+    v5 = None
+    if all((ML_DIR / f"q_fm_s{s}" / "features.json").exists() for s in V5_SEEDS):
+        try:  # отдельный трек: ошибка v5 не ломает v1-v4e
+            import weather_ml_q as mq
+            prices = {(b["lo"], b["hi"]): b["market_p"] for b in buckets}
+            mf = ml.mkt_features(prices, unit, row["fc_mean"])
+            row5 = {**row, **mf}
+            b5 = v5_base(row["fc_mean"], mf.get("mkt_mean_vs_fc"))
+            qs = np.mean([mq.predict_q(m, pd.DataFrame([row5]).reindex(columns=f), [b5])[0]
+                          for m, f in _load_q_fm()], axis=0)
+            v5 = [mq.bucket_prob(list(qs), unit, b["lo"], b["hi"]) for b in buckets]
+        except Exception as e:
+            print(f"{city}: ошибка v5 — {e}", file=sys.stderr)
+    return v1, mu_c * k + off, v2, v3, v4, v4e, v5
 
 
 if __name__ == "__main__":
+    if "--train-v5" in sys.argv:
+        # только v5 (не трогая рабочие v1-v4e) — разовый запуск при вводе v5
+        _conn = sqlite3.connect(DB_PATH, timeout=60)
+        _conn.row_factory = sqlite3.Row
+        ml.USE_MKT = True
+        _dfm = ml.build(_conn)
+        _dfm = _dfm[_dfm["actual_c"].notna()]
+        ml.FEATURES = ml.features(_dfm)
+        _conn.close()
+        train_v5(_dfm)
+        ml.USE_MKT = False
+        sys.exit()
     if "--train-v4e" in sys.argv:
         # только v4e (не трогая рабочие v1-v4) — разовый запуск при вводе v4e
         _conn = sqlite3.connect(DB_PATH, timeout=60)

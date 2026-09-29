@@ -45,7 +45,8 @@ def ensure_schema(conn):
         ml_model_p REAL, ml2_model_p REAL, ml3_model_p REAL, ml3c_model_p REAL)""")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_snapshots_fast_city_date ON snapshots_fast (city, local_date)")
     cols = [r[1] for r in conn.execute("PRAGMA table_info(snapshots_fast)")]
-    for c in ("ml4_model_p", "ml4c_model_p", "ml4e_model_p", "ml4ec_model_p"):  # 2026-09-26: v4; 09-27: v4e
+    for c in ("ml4_model_p", "ml4c_model_p", "ml4e_model_p", "ml4ec_model_p",  # 2026-09-26: v4; 09-27: v4e
+              "ml5_model_p", "ml5c_model_p"):  # 2026-09-29: v5 «от рынка»
         if c not in cols:
             conn.execute(f"ALTER TABLE snapshots_fast ADD COLUMN {c} REAL")
     conn.commit()
@@ -88,19 +89,21 @@ def main():
             if res is None:
                 print(f"{city}: у модели нет оценки (нет прогнозов/замеров)")
                 continue
-            v1, mu, v2, v3, v4, v4e = res
+            v1, mu, v2, v3, v4, v4e, v5 = res
             v3c = blend_with_market(v3, [b["market_p"] for b in market["buckets"]]) if v3 else None
             v4c = blend_with_market(v4, [b["market_p"] for b in market["buckets"]]) if v4 else None
             v4ec = blend_with_market(v4e, [b["market_p"] for b in market["buckets"]]) if v4e else None
+            v5c = blend_with_market(v5, [b["market_p"] for b in market["buckets"]]) if v5 else None
             ts = datetime.now(timezone.utc).isoformat()
             rows = [(ts, city, now_local.date().isoformat(), now_local.hour, cfg["unit"], b["lo"], b["hi"], b["market_p"],
                      b.get("best_ask"), market["event_vol"], v1[i] if v1 else None, v2[i] if v2 else None,
                      v3[i] if v3 else None, v3c[i] if v3c else None, v4[i] if v4 else None,
-                     v4c[i] if v4c else None, v4e[i] if v4e else None, v4ec[i] if v4ec else None) for i, b in enumerate(market["buckets"])]
+                     v4c[i] if v4c else None, v4e[i] if v4e else None, v4ec[i] if v4ec else None,
+                     v5[i] if v5 else None, v5c[i] if v5c else None) for i, b in enumerate(market["buckets"])]
             conn.executemany("""INSERT INTO snapshots_fast (ts_utc, city, local_date, local_hour, unit, bucket_lo, bucket_hi,
                                 market_p, best_ask, event_vol, ml_model_p, ml2_model_p, ml3_model_p, ml3c_model_p,
-                                ml4_model_p, ml4c_model_p, ml4e_model_p, ml4ec_model_p)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", rows)
+                                ml4_model_p, ml4c_model_p, ml4e_model_p, ml4ec_model_p, ml5_model_p, ml5c_model_p)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", rows)
             conn.commit()
             print(f"{city}: быстрый снимок {now_local:%H:%M} местного, v1 максимум {mu:.1f}", flush=True)
             time.sleep(1)

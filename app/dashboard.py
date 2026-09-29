@@ -268,6 +268,10 @@ PAPER_WALLETS = {
     "ens": "6 ансамблей + рынок (смесь)",
     "ml3_cal15": "Смесь — не дешевле 15¢",
     "no_cheap": "Против лотерейных билетов",
+    "no_mid": "Против средних вариантов",
+    "no_big": "Против сильно переоценённых",
+    "ml3_conf": "Смесь — не спорить с уверенным рынком",
+    "ml5_cal": "v5 «от рынка» + рынок (смесь)",
     "fav": "Недооценённые фавориты",
     "ml3_city": "Смесь — лучшие города",
     "copy": "Повтор за сильными трейдерами",
@@ -277,7 +281,7 @@ PAPER_WALLETS = {
 }
 PAPER_START_BALANCE = 100.0
 # свой старт у кошелька (как weather_paper.START_BY_WALLET; совпадение проверяет preflight.py)
-WALLET_START = {"copy": 300.0, "ml": 300.0}  # как weather_paper.START_BY_WALLET (preflight сверяет)
+WALLET_START = {"copy": 300.0, "ml": 300.0, "mm_mk": 300.0}  # как weather_paper.START_BY_WALLET (preflight сверяет)
 PAPER_STAKE = 2.0  # ставка кошельков (weather_paper.STAKE): меньше на счёте — новых ставок нет
 # 2026-09-25 (просьба Alex — "много кошельков, не понять что к чему"):
 # одна главная модель наверху, остальные — компактно, по группам, с
@@ -322,6 +326,14 @@ WALLET_INFO = {
             "перевес от 3 п.п. Проверка по заметкам: 12.10 и 28.10"),
     "no_cheap": ("Перекосы рынка", "Против лотерейных билетов",
                  "Покупает «нет» на вариант за 5-15¢, который смесь модели и рынка считает переоценённым: люди переплачивают за дешёвые варианты"),
+    "no_mid": ("Перекосы рынка", "Против средних вариантов",
+               "Покупает «нет» на вариант за 30-55¢, если смесь модели и рынка считает его переоценённым на 3+ п.п."),
+    "ml5_cal": ("Другие версии обучаемой модели", "v5 «от рынка» + рынок (смесь)",
+                "Модель учит не температуру, а поправку к рынку — где и насколько рынок ошибается; смесь 35/65 с рынком, перевес от 3 п.п."),
+    "ml3_conf": ("Другие версии обучаемой модели", "Смесь — не спорить с уверенным рынком",
+                 "Как смесь v3 + рынок, но без ставок в маркетах, где фаворит стоит 60¢ и дороже: там рынок обычно прав"),
+    "no_big": ("Перекосы рынка", "Против сильно переоценённых",
+               "Покупает «нет» на вариант за 25-80¢, если смесь модели и рынка считает его переоценённым на 8+ п.п. (правило бота AadiXD200)"),
     "fav": ("Перекосы рынка", "Недооценённые фавориты",
             "Покупает «да» на вариант за 50-95¢, который смесь модели и рынка считает недооценённым: рынок недоплачивает за фаворитов"),
     "copy": ("Повтор за сильными трейдерами", "Повтор за сильными трейдерами",
@@ -349,7 +361,7 @@ CITY_RU = {
     "wuhan": "Ухань", "zhengzhou": "Чжэнчжоу",
 }
 WALLET_BADGE = {"ml3": "v3", "ml2": "v2", "ml": "v1", "ml_shift": "v1+", "mm": "MX", "emos": "EM", "main": "GI",
-                "mm_mk": "MX", "emos_mk": "EM", "main_mk": "GI", "ml3_mk": "v3", "ml3_cal": "v3+", "ml3_no": "v3−", "ml3_cal_k": "v3$", "ml4": "v4", "ml4_cal": "v4+", "ml4e": "v4³", "ml4e_cal": "v4³+", "ens": "EN", "ml3_cal15": "v3+¢", "no_cheap": "НЕТ", "fav": "ФАВ", "ml3_city": "v3+Г", "copy": "CP", "obs": "OB", "obs_fmi": "FI"}
+                "mm_mk": "MX", "emos_mk": "EM", "main_mk": "GI", "ml3_mk": "v3", "ml3_cal": "v3+", "ml3_no": "v3−", "ml3_cal_k": "v3$", "ml4": "v4", "ml4_cal": "v4+", "ml4e": "v4³", "ml4e_cal": "v4³+", "ens": "EN", "ml3_cal15": "v3+¢", "no_cheap": "НЕТ", "fav": "ФАВ", "no_mid": "НЕТ½", "no_big": "НЕТ+", "ml3_conf": "v3+У", "ml5_cal": "v5+", "ml3_city": "v3+Г", "copy": "CP", "obs": "OB", "obs_fmi": "FI"}
 WALLET_GROUPS = ["Другие версии обучаемой модели", "Перекосы рынка", "Ансамбли погодных моделей", "Повтор за сильными трейдерами", "Прогноз по формулам (раньше)",
                  "Тот же сигнал, но покупка своей заявкой", "Живые замеры"]
 
@@ -1449,6 +1461,88 @@ def city_bets_page(request: Request, city: str):
                                                          "tot": _city_sum(bets), "wal": wal, "days": days})
 
 
+# ---- трейдеры (2026-09-29, просьба Alex: «за кем повторяем, кто даёт плюс, кто минус — чтобы исключить при реальных
+# деньгах»). Ставки кошелька copy: в reason — «повтор за 0x12345678…» (weather_copy.py), по началу адреса сопоставляем
+# с рейтингом sharp_wallets и именами trader_names (weather_sharp_rank.py). ----
+import re as _re
+_COPY_RE = _re.compile(r"повтор за (0x[0-9a-fA-F]{8})")
+
+
+def _copy_bets(conn):
+    out = []
+    if not table_exists(conn, "paper_trades"):
+        return out
+    for r in conn.execute("SELECT * FROM paper_trades WHERE wallet = 'copy' AND status IN ('open', 'resting', 'won', 'lost', 'void')"):
+        r = dict(r)
+        m = _COPY_RE.search(r.get("reason") or "")
+        if not m:
+            continue
+        their = _re.search(r"по (\d+)¢", r["reason"])
+        lag = _re.search(r"через (\d+) с", r["reason"])
+        out.append({"pref": m.group(1).lower(), "city": r["city"], "city_ru": _city_ru(r["city"]), "local_date": r["local_date"],
+                    "what": "на " + paper_bucket(r["bucket_lo"], r["bucket_hi"], r["unit"]), "status": r["status"],
+                    "price": r["price"], "cost": (r["stake"] or 0) + _fee(r),
+                    "pnl": _pnl(r) if r["status"] in ("won", "lost", "void") else None,
+                    "their": int(their.group(1)) / 100 if their else None, "lag": int(lag.group(1)) if lag else None,
+                    "via": "слушатель" if "слушатель" in r["reason"] else "опрос", "placed": _dt(r.get("placed_at") or r.get("snapshot_ts"))})
+    return out
+
+
+def _traders_meta(conn):
+    sharp, names = {}, {}
+    if table_exists(conn, "sharp_wallets"):
+        for r in conn.execute("SELECT wallet, n, pnl, turnover, ranked_at FROM sharp_wallets"):
+            sharp[r["wallet"].lower()] = dict(r)
+    if table_exists(conn, "trader_names"):
+        names = {r["wallet"].lower(): r["name"] for r in conn.execute("SELECT wallet, name FROM trader_names")}
+    return sharp, names
+
+
+@app.get("/traders", response_class=HTMLResponse)
+def traders_page(request: Request):
+    conn = db()
+    try:
+        bets = _copy_bets(conn)
+        sharp, names = _traders_meta(conn)
+    finally:
+        conn.close()
+    by = {}
+    for b in bets:
+        by.setdefault(b["pref"], []).append(b)
+    full = {w[:10]: w for w in list(sharp) + list(names)}
+    rows = []
+    for pref in set(by) | {w[:10] for w in sharp}:
+        w = full.get(pref, pref)
+        s = sharp.get(w)
+        rows.append(dict(_city_sum(by.get(pref, [])), pref=pref, wallet=w, name=names.get(w) or (pref + "…"),
+                         listed=s is not None, their_pnl=s["pnl"] if s else None, their_n=s["n"] if s else None,
+                         their_pct=100 * s["pnl"] / s["turnover"] if s and s["turnover"] else None))
+    rows.sort(key=lambda r: (-(r["n"] + r["open"] > 0), -r["pnl"], -(r["their_pnl"] or 0)))
+    return TEMPLATES.TemplateResponse("traders.html", {"request": request, "rows": rows, "tot": _city_sum(bets),
+                                                       "n_plus": sum(r["pnl"] > 0.005 for r in rows),
+                                                       "n_minus": sum(r["pnl"] < -0.005 for r in rows),
+                                                       "n_listed": len(sharp)})
+
+
+@app.get("/traders/{pref}", response_class=HTMLResponse)
+def trader_page(request: Request, pref: str):
+    pref = pref.lower()[:10]
+    conn = db()
+    try:
+        bets = [b for b in _copy_bets(conn) if b["pref"] == pref]
+        sharp, names = _traders_meta(conn)
+    finally:
+        conn.close()
+    w = next((x for x in list(sharp) + list(names) if x.startswith(pref)), pref)
+    bets.sort(key=lambda b: b["placed"] or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+    nv = datetime.now(VIEWER_TZ)
+    for b in bets:
+        b["placed_txt"] = _when(b["placed"], nv) if b["placed"] else "—"
+    return TEMPLATES.TemplateResponse("trader.html", {"request": request, "pref": pref, "wallet": w,
+                                                      "name": names.get(w) or (pref + "…"), "s": sharp.get(w),
+                                                      "tot": _city_sum(bets), "bets": bets})
+
+
 MONTH_RU = ["январь", "февраль", "март", "апрель", "май", "июнь", "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь"]
 
 
@@ -1833,7 +1927,9 @@ async def notes_add(request: Request):
     import notes
     d = await request.json()
     try:
-        nid = notes.add(str(d.get("due", "")), str(d.get("title", "")), str(d.get("body", "")))
+        every = d.get("every_days")
+        nid = notes.add(str(d.get("due", "")), str(d.get("title", "")), str(d.get("body", "")),
+                        int(every) if every else None)
     except ValueError as e:
         return {"ok": False, "error": f"не сохранено: {e}"}
     _NAV_CACHE["v"] = None
@@ -1867,9 +1963,11 @@ def nav_counts():
     v = {"wallets": len(set(PAPER_WALLETS) | set(OBS_WALLETS)), "open": None, "alerts": 0, "audit": None}
     try:
         import notes
-        v["notes"] = len(notes.due_notes())  # на сегодня и просроченные
+        due = notes.due_notes()
+        v["notes"] = len(due)  # на сегодня и просроченные
+        v["notes_due"] = [n["title"] for n in due][:3]  # плашка вверху всех страниц
     except sqlite3.Error:
-        v["notes"] = 0
+        v["notes"], v["notes_due"] = 0, []
     try:
         conn = db()
         try:
@@ -1881,6 +1979,8 @@ def nav_counts():
             v["open"] = n
             if table_exists(conn, "paper_trades"):  # 2026-09-29: сколько городов, где мы ставили
                 v["cities"] = conn.execute("SELECT COUNT(DISTINCT city) FROM paper_trades WHERE status IN ('open', 'won', 'lost', 'void')").fetchone()[0]
+            if table_exists(conn, "sharp_wallets"):  # 2026-09-29: сколько трейдеров в списке повтора
+                v["traders"] = conn.execute("SELECT COUNT(*) FROM sharp_wallets").fetchone()[0]
             v["alerts"] = len(active_alerts(conn))
             if table_exists(conn, "audit_log"):
                 r = conn.execute("SELECT ok, details FROM audit_log ORDER BY run_at DESC LIMIT 1").fetchone()
