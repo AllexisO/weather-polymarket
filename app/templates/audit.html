@@ -220,7 +220,8 @@
         <tr><td>Режим записи</td><td><span class="st {{ 'ok' if a.db.journal == 'wal' else 'bad' }}">{{ a.db.journal | upper }}</span></td><td class="muted">чтение не мешает записи</td></tr>
         <tr><td>Размер</td><td class="num">{{ a.db.size_txt }}</td><td></td></tr>
         <tr><td>Активные тревоги</td><td><span class="st {{ 'ok' if not a.cron.alerts else 'bad' }}">{{ a.cron.alerts }}</span></td><td class="muted"><a href="/status">здоровье системы →</a></td></tr>
-        <tr><td>Резервные копии</td><td><span class="st bad">нет</span></td><td class="muted">решение за Alex</td></tr>
+        <tr><td>Резервная копия</td><td>{% if backup %}<span class="st {{ 'ok' if backup.fresh else 'bad' }}">{{ 'есть' if backup.fresh else ('ошибка' if backup.status != 'ok' else 'устарела') }}</span>{% else %}<span class="st bad">нет</span>{% endif %}</td>
+          <td class="muted">{% if backup %}{{ backup.when }}, {{ backup.size_txt }} · каждую ночь в 03:10 на HDD (personal_data), 7 дней + воскресенья 4 недели{% if backup.msg %} · {{ backup.msg }}{% endif %}{% else %}копии ещё не было{% endif %}</td></tr>
       </tbody></table>
     </section>
     <section class="pane">
@@ -228,7 +229,7 @@
       <table><tbody>
         <tr><td>Последний снимок цен</td><td class="num">{{ a.data.last_snap_when or '—' }}</td><td class="muted">{{ a.data.last_snap_cities }} городов</td></tr>
         <tr><td>Снимков за 26 ч</td><td><span class="st {{ 'warn' if a.data.gaps else 'ok' }}">{{ a.data.snap_hours }}</span></td><td class="muted">{{ 'пропуски: ' ~ (a.data.gaps | join('; ')) if a.data.gaps else 'без пропусков' }}</td></tr>
-        {% for d, n in a.data.fact_n.items() %}<tr><td>Факт и итоги за {{ d[8:10] }}.{{ d[5:7] }}</td><td><span class="st {{ 'ok' if n >= 48 and a.data.out_n[d] >= 48 else 'warn' }}">{{ n }} / {{ a.data.out_n[d] }}</span></td><td class="muted">из 48 городов</td></tr>{% endfor %}
+        {% for d, n in a.data.fact_n.items() %}{% set need = (a.data.mkt_n or {}).get(d) or 48 %}<tr><td>Факт и итоги за {{ d[8:10] }}.{{ d[5:7] }}</td><td><span class="st {{ 'ok' if n >= need and a.data.out_n[d] >= need else 'warn' }}">{{ n }} / {{ a.data.out_n[d] }}</span></td><td class="muted">из {{ need }} городов с маркетом</td></tr>{% endfor %}
         <tr><td>Сделки собраны по</td><td class="num">{{ a.data.trades_last_day or '—' }}</td><td class="muted">только закрытые маркеты</td></tr>
         {% if a.data.train %}<tr><td>Ночное обучение</td><td><span class="st {{ 'ok' if a.data.train.ok else 'bad' }}">{{ 'проверки пройдены' if a.data.train.ok else 'не все проверки' }}</span></td>
           <td class="muted">{{ a.data.train.when }}{% if a.data.train.verdict %} · экзамен: {{ a.data.train.verdict.label }}{% endif %} · <a href="/training">подробно →</a></td></tr>{% endif %}
@@ -262,7 +263,7 @@
         <thead><tr><th>Кошелёк</th><th class="r">Свободно</th><th class="r">В ставках</th><th class="r">Ставок</th><th class="r">Закрыто</th><th class="r">Итог</th><th class="r">Доходность</th><th>Проверка</th></tr></thead>
         <tbody>{% for w in a.wallets %}
           <tr><td>{% if w.main %}<b>{{ w.name }}</b>{% else %}{{ w.name }}{% endif %}{% if w.violations %}<ul class="viol">{% for v in w.violations[:5] %}<li>{{ v }}</li>{% endfor %}</ul>{% endif %}</td>
-            <td class="r {{ 'neg' if w.cash < 2 and w.key not in ['obs', 'obs_fmi'] else '' }}">${{ '%.2f' | format(w.cash) }}</td>
+            <td class="r {{ 'neg' if w.cash < 2 and w.key not in ['obs', 'obs_fmi', 'obs_fast', 'obs_rt', 'obs_wethr'] else '' }}">${{ '%.2f' | format(w.cash) }}</td>
             <td class="r">${{ '%.2f' | format(w.in_play) }}</td>
             <td class="r">{{ w.bets }}</td><td class="r">{{ w.closed }}</td>
             <td class="r {{ 'pos' if w.pnl > 0.005 else ('neg' if w.pnl < -0.005 else '') }}">{{ money(w.pnl) if w.closed else '—' }}</td>

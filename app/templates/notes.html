@@ -8,10 +8,10 @@
 {% set MONTHS = ['', 'января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'] %}
 {% macro when(n) -%}
 {%- set d = n.due.split('-') -%}
-{{ d[2] | int }} {{ MONTHS[d[1] | int] }}
+{{ d[2] | int }} {{ MONTHS[d[1] | int] }} · {{ n.due_time or '10:00' }}
 {%- endmacro %}
 {% macro left(n) -%}
-{%- if n.days == 0 %}сегодня{% elif n.days == 1 %}завтра{% elif n.days > 1 %}через {{ n.days }} дн.{% else %}просрочено на {{ -n.days }} дн.{% endif -%}
+{%- if n.days == 0 %}{{ 'сегодня, пора' if n.time_passed else 'сегодня в ' ~ (n.due_time or '10:00') }}{% elif n.days == 1 %}завтра в {{ n.due_time or '10:00' }}{% elif n.days > 1 %}через {{ n.days }} дн.{% else %}просрочено на {{ -n.days }} дн.{% endif -%}
 {%- endmacro %}
 <style>
   body:has(.bk) .main-col { background: #0A0A0B; }
@@ -82,6 +82,7 @@
     <h2>Новая заметка</h2>
     <form class="pane form" id="note-form">
       <label>Когда<input type="date" name="due" value="{{ today }}" required></label>
+      <label>Во сколько (по Кишинёву)<input type="time" name="due_time" value="10:00" required></label>
       <label>Что сделать<input type="text" name="title" maxlength="200" placeholder="Например: проверить кошелёк ens" required></label>
       <label class="wide">Подробности<textarea name="body" placeholder="Что именно посмотреть, какой порог, что делать по итогу"></textarea></label>
       <div class="row"><button type="submit" class="btn primary">Добавить</button>
@@ -130,7 +131,7 @@
   form.addEventListener('submit', function (e) {
     e.preventDefault();
     var f = new FormData(form);
-    post('/notes/add', { due: f.get('due'), title: f.get('title'), body: f.get('body'), every_days: f.get('weekly') ? 7 : null }).then(function (r) {
+    post('/notes/add', { due: f.get('due'), due_time: f.get('due_time'), title: f.get('title'), body: f.get('body'), every_days: f.get('weekly') ? 7 : null }).then(function (r) {
       if (r.ok) { location.reload(); } else { msg.textContent = r.error || 'не сохранено'; msg.hidden = false; }
     }).catch(function () { msg.textContent = 'сайт не ответил — попробуй ещё раз'; msg.hidden = false; });
   });

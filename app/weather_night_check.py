@@ -10,7 +10,9 @@
   4. база: запись проходит, журнал WAL не разросся, место на диске;
   5. внешние сервисы: Polymarket, Open-Meteo, METAR, FMI отвечают;
   6. к обучению: файлы моделей открываются, есть вчерашний факт и свежие прогнозы, прошлое обучение прошло;
-  7. лимит Open-Meteo за сутки, стоп ставок.
+  7. лимит Open-Meteo за сутки, стоп ставок;
+  8. (с 30.09) боты-мейкеры: работают, заявки не двоятся и в пределах правил, расчёт не отстаёт, списки свежие;
+     зависшие ставки; каждый быстрый источник замеров присылает новое.
 
 Каждая проверка — ok / warn (внимание) / bad (ночью сломается). Итог — в night_check (JSON), страница /audit
 показывает его сверху; bad → weather_alerts поднимает красную плашку.
@@ -63,7 +65,7 @@ def check_audit():
     add("Ставки", not a["n_violations"], f"Ставки против правил и итогов: проверено {a['n_bets']}",
         f"нарушений {a['n_violations']}" + (": " + "; ".join(a["violations"][:3]) if a["violations"] else ""),
         "открыть страницу «Проверка» — там список по кошелькам")
-    broke = [w for w in a["wallets"] if w["key"] not in ("obs", "obs_fmi") and w["cash"] < 2.0]
+    broke = [w for w in a["wallets"] if w["key"] not in ("obs", "obs_fmi", "obs_fast", "obs_rt", "obs_wethr") and w["cash"] < 2.0]
     add("Ставки", "warn" if broke else True, "У всех кошельков есть деньги на ставку",
         ", ".join(f"{w['key']} ${w['cash']:.2f}" for w in broke) or "у всех ≥ $2",
         "решить: пополнить или оставить — такие кошельки ночью ставить не будут" if broke else "")
@@ -248,6 +250,15 @@ def check_decisions(c, now):
         loc = datetime.now(ZoneInfo(cfg["tz"]))
         if loc.hour >= 12:
             due[city] = loc.date().isoformat()
+    # 02.10: нет маркета Polymarket на этот день (снимков цен нет) — решать нечего, это не пропуск.
+    # Пример: Polymarket перестал выставлять Чжэнчжоу после 01.10.
+    if due:
+        with_mkt = {(r[0], r[1]) for r in c.execute("SELECT DISTINCT city, local_date FROM snapshots WHERE local_date >= ?", (min(due.values()),))}
+        no_mkt = sorted(city for city, d in due.items() if (city, d) not in with_mkt)
+        for city in no_mkt:
+            due.pop(city)
+        if no_mkt:
+            add("Решения", True, "Города без маркета сегодня — решать нечего", ", ".join(no_mkt))
     if not due:
         add("Решения", True, "Утренние решения", "ни в одном городе ещё нет 12:00")
         return
@@ -284,6 +295,133 @@ def check_misc(c, now):
         "удалить data/STOP, если стоп не нужен" if stop else "")
 
 
+def _ro(path):
+    return sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=30) if Path(path).exists() else None
+
+
+def check_bots(c, now):
+    """2026-09-30 (просьба Alex: «проверка, которая работает каждый день»): то, что проверялось руками 30.09 — боты-мейкеры
+    работают, заявки не двоятся и не пересекаются, расчёт не отстаёт, списки не погодных маркетов свежие."""
+    mm = _ro(DB_PATH.parent / "mm.sqlite3")
+    if mm is None:
+        add("Боты-мейкеры", "warn", "База ботов не найдена", "data/db/mm.sqlite3")
+        return
+    t = int(now.timestamp())
+    POLL_OFF = True   # 02.10 (решение Alex): старый бот с опросом раз в 30 с и не погода отключены — их проверки не нужны
+    if mm.execute("SELECT 1 FROM sqlite_master WHERE name = 'mm_ws_stats'").fetchone():
+        r = mm.execute("SELECT hour, events, trades, fills, reconnects FROM mm_ws_stats ORDER BY hour DESC LIMIT 1").fetchone()
+        fresh = r and r[0] >= (now - timedelta(hours=2)).strftime("%Y-%m-%d %H")
+        add("Боты-мейкеры", True if fresh and r[1] > 0 else False, "Бот на живом потоке получает события",
+            f"последний час {r[0]}: событий {r[1]}, сделок {r[2]}, исполнений {r[3]}, переподключений {r[4]}" if r else "статистики нет",
+            "" if fresh and r[1] > 0 else "посмотреть data/logs/weather_mm_ws.log и крон (каждый час)")
+        if r and r[4] > 5:
+            add("Боты-мейкеры", "warn", "Живой поток часто обрывается", f"переподключений за час: {r[4]}", "посмотреть data/logs/weather_mm_ws.log")
+    if not POLL_OFF:
+        # 01.10: через оконную функцию (раньше — самосоединение, держало базу бота и в 23:30 уронило его запись)
+        dup = mm.execute("""SELECT COUNT(*) FROM (SELECT ts_from, LAG(ts_to) OVER (PARTITION BY condition_id, city ORDER BY ts_from, id) AS prev_to
+                            FROM mm_quotes WHERE ts_from >= ?) WHERE prev_to > ts_from""", (t - 86400,)).fetchone()[0]
+        add("Боты-мейкеры", True if dup == 0 else False, "Заявки не двоятся", f"наложений за сутки: {dup}",
+            "" if dup == 0 else "две копии бота работали одновременно — проверить замок (jobmark.single_instance) и ручные запуски")
+        badq = mm.execute("""SELECT COUNT(*) FROM mm_quotes WHERE ts_from >= ? AND (yes_bid + no_bid >= 1.0 OR yes_bid < 0.02 OR yes_bid > 0.98
+                             OR no_bid < 0.02 OR no_bid > 0.98 OR ts_to < ts_from)""", (t - 86400,)).fetchone()[0]
+        add("Боты-мейкеры", True if badq == 0 else False, "Заявки в пределах правил", f"нарушений за сутки: {badq}",
+            "" if badq == 0 else "заявки «да»+«нет» ≥ $1 или цена вне 2-98¢ — ошибка в weather_mm_paper.quote")
+    # расчёт не отстаёт: закрытые маркеты с собранными сделками, по которым итога бота нет
+    done = {r[0] for r in mm.execute("SELECT DISTINCT condition_id FROM mm_results WHERE wallet = 'mm_all'")}
+    loaded = {(r[0], r[1]) for r in c.execute("SELECT city, local_date FROM poly_trades_days")}
+    final = {r[0]: (r[1], r[2]) for r in c.execute("SELECT condition_id, city, local_date FROM poly_market_final")}
+    lag = [cid for (cid,) in mm.execute("SELECT DISTINCT condition_id FROM mm_quotes WHERE city NOT IN ('pol', 'own')")
+           if cid in final and final[cid] in loaded and cid not in done]
+    add("Боты-мейкеры", True if not lag else "warn", "Расчёт бота не отстаёт", f"закрытых маркетов без итога: {len(lag)}",
+        "" if not lag else "запустить weather_mm_settle.py и посмотреть его лог")
+    if mm.execute("SELECT 1 FROM sqlite_master WHERE name = 'mm_ws_fills'").fetchone():
+        win = {(r[0], r[1]) for r in c.execute("SELECT city, local_date FROM weather_poly_outcomes WHERE resolved_at < ?",
+                                               ((now - timedelta(hours=3)).isoformat(),))}
+        wsdone = {r[0] for r in mm.execute("SELECT DISTINCT condition_id FROM mm_results WHERE wallet LIKE 'mm_ws_%'")}
+        wslag = [r[0] for r in mm.execute("SELECT DISTINCT condition_id, city, local_date FROM mm_ws_fills") if (r[1], r[2]) in win and r[0] not in wsdone]
+        add("Боты-мейкеры", True if not wslag else "warn", "Расчёт живого бота не отстаёт", f"маркетов с итогом, но без расчёта: {len(wslag)}",
+            "" if not wslag else "запустить weather_mm_settle.py")
+    mm.close()
+    if POLL_OFF:
+        return
+    for name, label in (("mm_pol_markets.json", "Список маркетов Poligarch"), ("mm_own_markets.json", "Свой выбор маркетов")):
+        p = DB_PATH.parent / name
+        try:
+            age_h = (time.time() - p.stat().st_mtime) / 3600
+            k = len(json.loads(p.read_text()))
+        except (OSError, ValueError):
+            age_h, k = None, 0
+        ok = age_h is not None and age_h < 26 and k > 0
+        add("Боты-мейкеры", True if ok else "warn", f"{label} свежий", f"маркетов {k}, обновлён {age_h:.0f} ч назад" if age_h is not None else "файла нет",
+            "" if ok else "список обновляется ботом раз в сутки — посмотреть data/logs/weather_mm_paper.log")
+
+
+def check_stuck_bets(c, now):
+    """Открытые ставки, у которых итог маркета уже известен больше 3 часов, — расчёт застрял."""
+    n = c.execute("""SELECT COUNT(*) FROM paper_trades t JOIN weather_poly_outcomes o ON o.city = t.city AND o.local_date = t.local_date
+                     WHERE t.status IN ('open', 'resting') AND o.resolved_at < ?""", ((now - timedelta(hours=3)).isoformat(),)).fetchone()[0]
+    add("Ставки", True if n == 0 else False, "Нет зависших ставок", f"открытых ставок с известным итогом: {n}",
+        "" if n == 0 else "расчёт кошельков (weather_paper.py) не закрывает ставки — посмотреть его лог")
+    m = c.execute("SELECT COUNT(*) FROM paper_obs_trades WHERE status = 'open' AND local_date < ?",
+                  ((now - timedelta(days=2)).date().isoformat(),)).fetchone()[0]
+    add("Ставки", True if m == 0 else False, "Нет зависших ставок по замерам", f"открытых старше 2 дней: {m}",
+        "" if m == 0 else "weather_obs_live.settle не закрывает ставки — посмотреть его лог")
+
+
+def check_fastobs(now):
+    """Каждый быстрый источник замеров присылал новое (weather_fastobs.py)."""
+    fo = _ro(DB_PATH.parent / "fastobs.sqlite3")
+    if fo is None:
+        add("Быстрые замеры", "warn", "База быстрых замеров не найдена", "data/db/fastobs.sqlite3")
+        return
+    for src, hours, label in (("synoptic", 2, "Synoptic (США)"), ("jma", 2, "JMA (Токио)"), ("knmi", 2, "KNMI (Амстердам)"),
+                              ("fmi", 2, "FMI (Хельсинки)"), ("hko", 2, "HKO (Гонконг)"), ("metar", 3, "METAR Тайбэя"), ("dwd", 3, "DWD (Мюнхен)"),
+                              ("wethr_hf", 2, "wethr 5-мин замеры (США, кошелёк obs_wethr)")):
+        last = fo.execute("SELECT MAX(first_seen_utc) FROM fast_obs WHERE source = ?", (src,)).fetchone()[0]
+        ok = last is not None and datetime.fromisoformat(last) > now - timedelta(hours=hours)
+        add("Быстрые замеры", True if ok else "warn", f"{label} присылает замеры",
+            f"последний новый — {datetime.fromisoformat(last).astimezone(timezone.utc):%d.%m %H:%M} UTC" if last else "замеров нет",
+            "" if ok else f"источник молчит больше {hours} ч — посмотреть data/logs/weather_fastobs.log (пробный Synoptic до ~13.10)")
+    fo.close()
+
+
+def check_netatmo(now):
+    """02.10 (проверка всего проекта): частные станции Netatmo — свежие замеры по каждому городу списка, и при суточном
+    пересчёте городов не было сбоев (раньше сбой молча выкидывал город на сутки)."""
+    try:
+        cf = json.loads((DB_PATH.parent / "netatmo_cities.json").read_text())
+    except (OSError, ValueError):
+        add("Частные станции", "warn", "Список городов Netatmo", "файла netatmo_cities.json нет")
+        return
+    failed = cf.get("failed") or []
+    add("Частные станции", "warn" if failed else True, "Список городов Netatmo пересчитан без сбоев",
+        f"{len(cf.get('cities', []))} городов" + (f"; не ответили: {', '.join(failed)} — повтор через час" if failed else ""))
+    db = _ro(DB_PATH.parent / "netatmo.sqlite3")
+    if db is None:
+        return
+    since = (now - timedelta(minutes=30)).isoformat()
+    fresh = {r[0] for r in db.execute("SELECT DISTINCT city FROM pws_obs WHERE first_seen_utc >= ?", (since,))}
+    miss = [c for c in cf.get("cities", []) if c not in fresh]
+    add("Частные станции", "warn" if miss else True, "Замеры Netatmo по всем городам за 30 мин",
+        ", ".join(miss) if miss else "по всем городам есть", "посмотреть data/logs/weather_netatmo.log" if miss else "")
+    db.close()
+
+
+def check_backup(now):
+    """02.10 (решение Alex): ночная резервная копия всех баз на HDD (backup_db.sh, крон 03:10) — свежая и без ошибок."""
+    try:
+        b = json.loads((DATA / "backup_status.json").read_text())
+    except (OSError, ValueError):
+        add("База", "warn", "Резервная копия", "копии ещё не было (backup_db.sh)")
+        return
+    age_h = (now - datetime.fromisoformat(b["at"])).total_seconds() / 3600
+    ok = b["status"] == "ok" and age_h < 26
+    add("База", True if ok else False, "Резервная копия на HDD свежая",
+        f"{datetime.fromisoformat(b['at']).astimezone(timezone.utc):%d.%m %H:%M} UTC, {b['size_bytes'] / 1e9:.1f} ГБ, {b['took_s']} с"
+        + (f" — {b['msg']}" if b.get("msg") else ""),
+        "" if ok else "посмотреть data/logs/backup_db.log; запустить ./backup_db.sh вручную")
+
+
 def check_notes(mode):
     """2026-09-28 (просьба Alex): заметки с датой (notes.py, страница /notes) — утром и днём напомнить, что сегодня
     по заметкам есть дело; вечером — что будет завтра."""
@@ -293,10 +431,11 @@ def check_notes(mode):
     if mode == "evening":
         tomorrow = (date.fromisoformat(today) + timedelta(days=1)).isoformat()
         nxt = [n for n in notes.all_notes() if not n["done_at"] and n["due"] == tomorrow]
-        add("Заметки", True, "Заметки на завтра", "; ".join(n["title"] for n in nxt) if nxt else "нет")
+        add("Заметки", True, "Заметки на завтра", "; ".join(f"{n.get('due_time') or '10:00'} — {n['title']}" for n in nxt) if nxt else "нет")
         return
     late = [n for n in due if n["due"] < today]
-    detail = "; ".join(f"{n['title']}" + (f" (с {n['due'][8:]}.{n['due'][5:7]})" if n["due"] < today else "") for n in due)
+    # 03.10: со временем по Кишинёву — «в 10:00 — …», чтобы было понятно, когда смотреть
+    detail = "; ".join(f"{n.get('due_time') or '10:00'} — {n['title']}" + (f" (с {n['due'][8:]}.{n['due'][5:7]})" if n["due"] < today else "") for n in due)
     add("Заметки", "warn" if due else True,
         f"Сегодня по заметкам: {len(due)}" + (f", из них просрочено {len(late)}" if late else "") if due else "На сегодня заметок нет",
         detail, "открыть «Заметки» (/notes): сделать и отметить «Сделано»" if due else "")
@@ -314,7 +453,8 @@ def main():
         check_notes(mode)
     c = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=30)
     extra = {"morning": [(check_night_done, (c, now))], "midday": [(check_decisions, (c, now))]}.get(mode, [])
-    for fn, args in extra + [(check_cron, (c, now)), (check_db, (c,)), (check_models, (c, now)), (check_misc, (c, now))]:
+    for fn, args in extra + [(check_cron, (c, now)), (check_db, (c,)), (check_models, (c, now)), (check_misc, (c, now)),
+                             (check_bots, (c, now)), (check_stuck_bets, (c, now)), (check_fastobs, (now,)), (check_netatmo, (now,)), (check_backup, (now,))]:
         with item_guard(fn.__name__):
             fn(*args)
     c.close()

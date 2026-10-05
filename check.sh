@@ -7,8 +7,8 @@ fail=0
 sudo docker compose run --rm collector preflight.py 2>&1 | grep -v -i warning; [ "${PIPESTATUS[0]}" = 0 ] || fail=1
 echo; echo "Страницы дашборда:"
 sudo docker compose restart dashboard >/dev/null 2>&1; sleep 5
-wallets=$(sudo docker compose run --rm collector -c "import weather_paper as w; print(' '.join([*w.WALLETS, *w.MAKER_WALLETS, *w.NO_WALLETS, 'copy', 'obs', 'obs_fmi']))" 2>/dev/null | tail -1)
-for u in / /status /paper /training /bets /events /audit /notes /cities /cities/chongqing /cities/nyc /traders /models /models/v3 /models/v5 /models/ens /models/main /mm; do
+wallets=$(sudo docker compose run --rm collector -c "import weather_paper as w; print(' '.join([*w.WALLETS, *w.MAKER_WALLETS, *w.NO_WALLETS, 'copy', 'obs', 'obs_fmi', 'obs_fast', 'obs_rt', 'obs_wethr']))" 2>/dev/null | tail -1)
+for u in / /status /paper /training /bets /events /audit /notes /cities /cities/chongqing /cities/nyc /traders /models /models/v3 /models/v5 /models/ens /models/main /mm /mm/mm_all /mm/mm_ws_z30?tab=fills /mm/mm_pol?tab=quotes /mm/mm_own?tab=markets /llm "/llm?w=llm_ds&city=dallas" "/llm?w=llm_gem&city=miami&d=2026-10-03" "/llm?w=llm_ds&city=london"; do
   c=$(curl -s -o /dev/null -w '%{http_code}' "localhost:8093$u"); [ "$c" = 200 ] || { echo "✗ $u → $c"; fail=1; }
 done
 for w in $wallets; do

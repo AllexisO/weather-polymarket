@@ -5,3 +5,5 @@ pandas==2.2.3
 lightgbm==4.5.0
 # 2026-09-26: канал сделок Polymarket в реальном времени (weather_copy_live.py)
 websocket-client==1.8.0
+# 2026-09-30: 10-минутные замеры KNMI (Амстердам) — файлы HDF5/NetCDF4 (weather_fastobs.py)
+h5py==3.12.1

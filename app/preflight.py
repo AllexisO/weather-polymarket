@@ -71,8 +71,16 @@ def run_checks():
 
     # 2в. у каждого кошелька есть полное описание логики (wallet_docs.py, страница кошелька)
     from wallet_docs import WALLET_DOCS
-    nodoc = sorted((set(wallets) | {"copy", "obs", "obs_fmi"}) - set(WALLET_DOCS))
+    nodoc = sorted((set(wallets) | {"copy", "obs", "obs_fmi", "obs_fast", "obs_rt", "obs_wethr", "llm_gem", "llm_ds"}) - set(WALLET_DOCS))
     res.append((not nodoc, "у каждого кошелька есть описание логики", ", ".join(nodoc) or f"{len(WALLET_DOCS)} описаний"))
+
+    # 2г. 03.10: группа каждого кошелька есть в списке групп /paper — иначе кошелёк молча не виден на странице
+    m = re.search(r"^WALLET_GROUPS = (\[.*?\])", (APP / "dashboard.py").read_text(), re.M | re.S)
+    grp = set(ast.literal_eval(m.group(1))) | {"Главная модель", "LLM каждый час"} if m else set()   # LLM — своя страница /llm
+    src = (APP / "dashboard.py").read_text()
+    info = dict(re.findall(r'^    "([a-z0-9_]+)": \("([^"]+)",', src[src.index("WALLET_INFO = {"):src.index("OBS_WALLETS =")], re.M))
+    lost = sorted(f"{w} ({g})" for w, g in info.items() if g not in grp)
+    res.append((not lost, "у каждого кошелька группа видна на /paper", ", ".join(lost) or f"{len(info)} кошельков"))
 
     # 3. колонки, которые пишут снимки
     for script, table, have in (("weather_edge.py", "snapshots", snap), ("weather_ml_fast.py", "snapshots_fast", fast)):

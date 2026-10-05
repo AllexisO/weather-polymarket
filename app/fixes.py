@@ -31,7 +31,7 @@ def last_fixes(conn):
         return {}
     out = {}
     for job, at, note in conn.execute("SELECT job, fixed_at, note FROM error_fixes ORDER BY fixed_at"):
-        out[job] = (_dt(at), note)
+        out[job.removesuffix(".py")] = (_dt(at), note)   # 02.10: «weather_x.py» и «weather_x» — один скрипт
     return out
 
 
@@ -90,7 +90,7 @@ def mark_fixed(job, note, at=None):
     conn = sqlite3.connect(DB_PATH, timeout=60)
     try:
         conn.execute("CREATE TABLE IF NOT EXISTS error_fixes (job TEXT, fixed_at TEXT, note TEXT)")
-        conn.execute("INSERT INTO error_fixes VALUES (?, ?, ?)", (job, at.isoformat(), note))
+        conn.execute("INSERT INTO error_fixes VALUES (?, ?, ?)", (job.removesuffix(".py"), at.isoformat(), note))
         conn.commit()
     finally:
         conn.close()

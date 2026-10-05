@@ -80,6 +80,10 @@ def check_wallets(c, out, now):
                     v.append(f"{tag}: перевес {100 * (r['model_p'] - r['market_p']):.1f} п.п. меньше порога {100 * thr:.0f}")
                 if not (wp.MIN_PRICE_BY_WALLET.get(w, wp.MIN_PRICE) - 1e-9 <= r["market_p"] <= wp.MAX_PRICE + 1e-9):
                     v.append(f"{tag}: цена рынка {100 * r['market_p']:.0f}¢ вне 3-95¢")
+                # 03.10: «да» дешевле 10¢ кошельки моделей не покупают (ставки с этого момента)
+                if (w not in wp.NO_WALLETS and w not in wp.YES_BAND and _dt(r["placed_at"] or r["snapshot_ts"]) >= _dt(wp.YES_MIN_FROM)
+                        and r["market_p"] < wp.YES_MIN - 1e-9):
+                    v.append(f"{tag}: «да» за {100 * r['market_p']:.0f}¢ — дешевле {100 * wp.YES_MIN:.0f}¢ (правило с 03.10)")
                 if w in wp.YES_BAND and not (wp.YES_BAND[w][0] - 1e-9 <= r["market_p"] < wp.YES_BAND[w][1] + 1e-9):
                     v.append(f"{tag}: вариант стоил {100 * r['market_p']:.0f}¢ — вне полосы кошелька")
                 if w in wp.NO_BAND and not (wp.NO_BAND[w][0] - 1e-9 <= 1 - r["market_p"] < wp.NO_BAND[w][1] + 1e-9):
@@ -149,7 +153,7 @@ def check_wallets(c, out, now):
     # кошельки по замерам
     orow = [dict(r) for r in c.execute("SELECT * FROM paper_obs_trades")] if \
         c.execute("SELECT 1 FROM sqlite_master WHERE name = 'paper_obs_trades'").fetchone() else []
-    for w in ("obs", "obs_fmi"):
+    for w in ("obs", "obs_fmi", "obs_fast", "obs_rt", "obs_wethr"):
         rs = [r for r in orow if r.get("wallet", "obs") == w]
         bets = [r for r in rs if r["status"] in ("open", "won", "lost", "void")]
         closed = [r for r in bets if r["status"] != "open"]
@@ -211,6 +215,8 @@ def check_data(c, out, now):
     days = [(now - timedelta(days=i)).date().isoformat() for i in (2, 1)]
     fact_n = {d: c.execute("SELECT COUNT(*) FROM weather_station_daily WHERE local_date = ?", (d,)).fetchone()[0] for d in days}
     out_n = {d: c.execute("SELECT COUNT(*) FROM weather_poly_outcomes WHERE local_date = ?", (d,)).fetchone()[0] for d in days}
+    # 02.10: сколько городов в этот день вообще имели маркет (Polymarket перестал выставлять Чжэнчжоу после 01.10) — не 48 жёстко
+    mkt_n = {d: c.execute("SELECT COUNT(DISTINCT city) FROM snapshots WHERE local_date = ?", (d,)).fetchone()[0] for d in days}
     fact = {(r[0], r[1]): r[2] for r in c.execute("SELECT city, local_date, actual_max FROM weather_station_daily WHERE local_date >= ?",
                                                     ((now - timedelta(days=30)).date().isoformat(),))}
     agree = tot = 0
@@ -229,7 +235,7 @@ def check_data(c, out, now):
         train = {"at": r["trained_at"], "ok": bool(r["ok"]), "checks": d.get("checks", []),
                  "exam": d.get("exam"), "rows": d.get("data", {}).get("rows")}
     return {"snap_hours": len(hours), "gaps": gaps, "last_snap": last, "last_snap_cities": last_cities,
-            "fact_n": fact_n, "out_n": out_n, "agree": [agree, tot], "trades_last_day": tr, "train": train}
+            "fact_n": fact_n, "out_n": out_n, "mkt_n": mkt_n, "agree": [agree, tot], "trades_last_day": tr, "train": train}
 
 
 def check_cron(c, now):
@@ -274,9 +280,9 @@ def run(deep=False):
     # внимание (не ошибки кода, но требуют решения)
     attention = []
     for w in wallets:
-        if w["key"] not in ("obs", "obs_fmi") and w["cash"] < wp.STAKE and w["in_play"] < 1e-6:
+        if w["key"] not in ("obs", "obs_fmi", "obs_fast", "obs_rt", "obs_wethr") and w["cash"] < wp.STAKE and w["in_play"] < 1e-6:
             attention.append(f"{w['key']}: денег ${w['cash']:.2f} и нет открытых ставок — кошелёк остановился")
-        elif w["key"] not in ("obs", "obs_fmi") and w["cash"] < wp.STAKE:
+        elif w["key"] not in ("obs", "obs_fmi", "obs_fast", "obs_rt", "obs_wethr") and w["cash"] < wp.STAKE:
             attention.append(f"{w['key']}: свободно ${w['cash']:.2f} — меньше ставки, новых ставок не делает")
     if data["gaps"]:
         attention.append("пропуски снимков: " + "; ".join(data["gaps"]))

@@ -1,27 +1,51 @@
 #!/bin/bash
-# Ночная резервная копия базы на другой физический диск (2026-09-26, решение Alex).
-# База: пул applications (SSD Samsung 500 ГБ) -> копии: пул personal_data (отдельный HDD).
-# 1) .backup — согласованный снимок средствами SQLite, на тот же SSD (быстро: база
-#    в режиме delete-journal, на время снимка запись в неё ждёт — поэтому снимок короткий);
-# 2) проверка целостности снимка; 3) сжатие zstd сразу на HDD; 4) храним 7 последних.
-# Восстановление: zstd -d polymarket_lab-ДАТА.sqlite3.zst -o polymarket_lab.sqlite3
-set -euo pipefail
-LAB=/mnt/applications/docker/stacks/weather-lab
-SRC=$LAB/data/db/polymarket_lab.sqlite3
-DST=/mnt/personal_data/backups/weather-lab
-KEEP=7
-TS=$(date +%F)
-TMP=$LAB/data/db/.backup-$TS.sqlite3
-mkdir -p "$DST"
-trap 'rm -f "$TMP"' EXIT
-start=$(date +%s)
-sqlite3 "$SRC" ".timeout 120000" ".backup '$TMP'"
-snap=$(( $(date +%s) - start ))
-chk=$(sqlite3 "$TMP" "PRAGMA quick_check;")
-if [ "$chk" != "ok" ]; then echo "$(date -Is) ОШИБКА: снимок повреждён: $chk"; exit 1; fi
-zstd -q -T0 -3 -f "$TMP" -o "$DST/polymarket_lab-$TS.sqlite3.zst"
-ls -1t "$DST"/polymarket_lab-*.sqlite3.zst | tail -n +$((KEEP + 1)) | xargs -r rm -f
-size=$(du -h "$DST/polymarket_lab-$TS.sqlite3.zst" | cut -f1)
-sqlite3 "$SRC" ".timeout 120000" "CREATE TABLE IF NOT EXISTS job_runs (job TEXT PRIMARY KEY, finished_at TEXT NOT NULL);
-  INSERT OR REPLACE INTO job_runs VALUES ('db_backup', strftime('%Y-%m-%dT%H:%M:%S+00:00', 'now'));"
-echo "$(date -Is) ок: снимок ${snap} с, копия $size, всего копий $(ls "$DST"/polymarket_lab-*.zst | wc -l), всего $(du -sh "$DST" | cut -f1)"
+# Резервная копия всех баз weather-lab (2026-10-02, решение Alex): база на одном SSD без зеркала — копия на другом
+# физическом диске (пул personal_data, HDD). Запуск: крон каждую ночь в 03:10 (крон спокоен; в 03:45 — проверка базы).
+#
+# Как: VACUUM INTO из базы, открытой только на чтение, — целостная копия на один момент (режим WAL: скрипты продолжают
+# писать, копия их не блокирует), заодно без пустых страниц; проверка копии (PRAGMA quick_check); сжатие zstd (~в 4 раза).
+# Хранение: последние KEEP_DAYS дней + копии воскресений за KEEP_WEEKS недель. Итог — data/backup_status.json
+# (его читает ежедневная проверка, weather_night_check.py).
+# Ключи: .env → env.backup (права 600, папки 700). Восстановление ключей: cp "<папка>/env.backup" .env
+# Восстановление: zstd -d "<папка>/polymarket_lab.sqlite3.zst" -o data/db/polymarket_lab.sqlite3 (при остановленном кроне).
+set -u
+cd /mnt/applications/docker/stacks/weather-lab || exit 1
+DEST="/mnt/personal_data/Backups/Projects/Weather Polymarket"
+KEEP_DAYS=7
+KEEP_WEEKS=4
+DAY=$(date +%F)
+OUT="$DEST/$DAY"
+mkdir -p "$OUT"
+t0=$(date +%s)
+status=ok
+msg=""
+for f in data/db/*.sqlite3; do
+  n=$(basename "$f")
+  tmp="$OUT/$n"
+  rm -f "$tmp" "$tmp.zst"
+  if ! sqlite3 "file:$f?mode=ro" "VACUUM INTO '$tmp'" 2>>"$OUT/errors.txt"; then
+    status=fail; msg+="$n: копия не создана; "; continue
+  fi
+  qc=$(sqlite3 "$tmp" "PRAGMA quick_check" 2>&1 | head -1)
+  if [ "$qc" != "ok" ]; then status=fail; msg+="$n: проверка копии — $qc; "; fi
+  if ! zstd -q -T0 -10 --rm "$tmp" -o "$tmp.zst"; then status=fail; msg+="$n: сжатие не удалось; "; fi
+done
+cp data/db/*.json "$OUT/" 2>/dev/null
+# 02.10 (Alex: «если SSD умрёт, все ключи пропадут»): ключи API — тоже в копию, читать может только владелец
+install -m 600 .env "$OUT/env.backup" || { status=fail; msg+=".env: не скопирован; "; }
+chmod 700 "$OUT" "$DEST"
+[ -s "$OUT/errors.txt" ] || rm -f "$OUT/errors.txt"
+# старые копии: оставить KEEP_DAYS последних дней и воскресенья за KEEP_WEEKS недель
+for d in "$DEST"/20??-??-??; do
+  b=$(basename "$d")
+  age=$(( ( $(date +%s) - $(date -d "$b" +%s) ) / 86400 ))
+  [ "$age" -lt "$KEEP_DAYS" ] && continue
+  [ "$(date -d "$b" +%u)" = "7" ] && [ "$age" -lt $(( KEEP_WEEKS * 7 )) ] && continue
+  rm -rf "$d"
+done
+size=$(du -sb "$OUT" | cut -f1)
+took=$(( $(date +%s) - t0 ))
+printf '{"at": "%s", "status": "%s", "msg": "%s", "dir": "%s", "size_bytes": %s, "took_s": %s}\n' \
+  "$(date -Iseconds)" "$status" "$msg" "$OUT" "$size" "$took" > data/backup_status.json
+echo "$(date '+%F %T') копия $status за ${took} с, $(du -sh "$OUT" | cut -f1) — $OUT ${msg}"
+[ "$status" = ok ]

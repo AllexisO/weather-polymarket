@@ -5,6 +5,8 @@
 # (по умолчанию 40 мин; 0 — без предела, для ручных долгих загрузок):
 #   docker compose run --rm -e JOB_TIMEOUT=10800 collector weather_ml_live.py --train
 LIMIT="${JOB_TIMEOUT:-2400}"
+# 2026-10-02: обслуживание базы (перестройка таблиц и т.п.) — пока есть data/MAINTENANCE, запуски крона пропускаются
+if [ -f /data/MAINTENANCE ]; then echo "$(date '+%F %T') обслуживание базы (data/MAINTENANCE) — запуск пропущен: $*"; exit 0; fi
 if [ "$LIMIT" = "0" ]; then exec python "$@"; fi
 # не скрипт (python -c ..., -m ...) — без учёта в job_log, только предел времени
 case "$1" in *.py) ;; *) exec timeout -s TERM -k 30 "$LIMIT" python "$@" ;; esac

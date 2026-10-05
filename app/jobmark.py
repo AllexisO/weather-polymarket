@@ -91,3 +91,42 @@ class item_guard:
             except Exception:
                 pass
         return True
+
+
+# ---- одна копия за раз (2026-09-30, проверка бота по просьбе Alex): ручной пробный запуск одновременно с кроном
+# ставил заявки дважды (914 наложений 30.09 в 01:17 и 14:40). Скрипт с частым кроном берёт замок; если копия уже
+# работает — выходит сразу (без ошибки: следующий запуск по крону всё сделает).
+_LOCKS = []
+
+
+def single_instance(name):
+    import fcntl
+    import os as _os
+    import sys as _sys
+    path = f"/data/db/.lock_{name}"
+    fh = open(path, "w")
+    try:
+        fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        print(f"{name}: уже работает другая копия — выхожу", flush=True)
+        _sys.exit(0)
+    fh.write(str(_os.getpid()))
+    fh.flush()
+    _LOCKS.append(fh)
+
+
+def mark_alive(job, state, every=600):
+    """Отметка «жив» раз в every секунд из долгого цикла (2026-09-30: боты работают 57 мин — отметка только в конце
+    давала ложную тревогу «не обновлялось» и не показывала зависание посреди часа). state — dict с ключом "t"."""
+    import os as _os
+    import sqlite3 as _sq
+    import time as _t
+    if _t.time() - state.get("t", 0) < every:
+        return
+    state["t"] = _t.time()
+    try:
+        c = _sq.connect(_os.environ.get("POLY_LAB_DB", "/data/db/polymarket_lab.sqlite3"), timeout=15)
+        mark(c, job)
+        c.close()
+    except Exception as e:  # noqa: BLE001 — отметка не должна ронять бота
+        print(f"{job}: отметка не записана ({type(e).__name__})", flush=True)
