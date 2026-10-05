@@ -132,11 +132,22 @@ def main():
     def fetch(w):
         # 2026-09-26: опрос параллельно — проверка раз в минуту (задержка повтора съедает заработок:
         # на проверке через 0.5 мин +1.0%, 1 мин +0.1%, 2.5 мин −1.1%, 5 мин −2.3%)
-        try:
-            data = requests.get(f"{DATA_API}/trades", params={"user": w, "limit": 50}, timeout=20).json()
-        except (requests.RequestException, ValueError) as e:
-            print(f"{w[:10]}: ошибка — {e}")
-            return w, []
+        # 2026-09-30 (проверка проекта): ночью сбор сделок нагружает тот же API — «Too Many Requests»; две повторные
+        # попытки с паузой, прежде чем пропустить трейдера
+        data = None
+        for attempt in range(3):
+            try:
+                data = requests.get(f"{DATA_API}/trades", params={"user": w, "limit": 50}, timeout=20).json()
+            except (requests.RequestException, ValueError) as e:
+                if attempt == 2:
+                    print(f"{w[:10]}: ошибка — {e}")
+                    return w, []
+                time.sleep(2 * (attempt + 1))
+                continue
+            if isinstance(data, dict) and "Too Many Requests" in str(data.get("error", "")) and attempt < 2:
+                time.sleep(2 * (attempt + 1))
+                continue
+            break
         # 2026-09-27: Data API иногда отвечает объектом-ошибкой ({"error": ...}) вместо списка сделок —
         # раньше скрипт падал на первом таком трейдере и не проверял остальных; теперь пропускаем только его
         if not isinstance(data, list):

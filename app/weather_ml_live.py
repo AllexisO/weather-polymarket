@@ -19,6 +19,7 @@
 """
 
 import json
+import time
 import os
 import sqlite3
 import sys
@@ -46,6 +47,8 @@ def train_and_save():
     df = ml.build(conn)
     df = df[df["actual_c"].notna()]
     ml.FEATURES = ml.features(df)
+    timing = {}  # 30.09: сколько училась каждая версия (страница модели «Как модель училась»)
+    t0 = time.time()
     model = ml.train(df)
     sig, glob = ml.city_sigmas(df)
     n_feat_v1 = len(ml.FEATURES)
@@ -55,6 +58,8 @@ def train_and_save():
         "features": ml.FEATURES, "sigmas": sig, "sigma_global": glob,
         "trained_at": datetime.now(timezone.utc).isoformat(), "n_rows": len(df)}, ensure_ascii=False))
     print(f"обучено на {len(df)} днях, признаков {len(ml.FEATURES)}, sigma по умолчанию {glob:.2f}°C")
+    timing["ml"] = time.time() - t0
+    t0 = time.time()
     # версия 2 — распределение (квантили), weather_ml_q.py; отдельный кошелёк ml2
     import weather_ml_q as mq
     qmodels = mq.train_q(df)
@@ -62,28 +67,41 @@ def train_and_save():
     for q, m in qmodels.items():
         m.save_model(str(ML_DIR / "q" / f"q{int(round(q * 100)):02d}.txt"))
     print(f"версия 2: обучено {len(qmodels)} уровней распределения")
+    timing["ml2"] = time.time() - t0
     # версия 3 = v2 + мнение рынка в 08:00 (weather_ml.USE_MKT) — отдельный кошелёк ml3
     ml.USE_MKT = True
     try:
         dfm = ml.build(conn)
         dfm = dfm[dfm["actual_c"].notna()]
         ml.FEATURES = ml.features(dfm)
+        t0 = time.time()
         qm = mq.train_q(dfm)
         (ML_DIR / "q_mkt").mkdir(parents=True, exist_ok=True)
         for q, m in qm.items():
             m.save_model(str(ML_DIR / "q_mkt" / f"q{int(round(q * 100)):02d}.txt"))
         (ML_DIR / "q_mkt" / "features.json").write_text(json.dumps(ml.FEATURES))
         print(f"версия 3 (+рынок): обучено {len(qm)} уровней, признаков {len(ml.FEATURES)}")
+        timing["ml3"] = time.time() - t0
+        t0 = time.time()
         train_v4(dfm)
+        timing["ml4"] = time.time() - t0
+        t0 = time.time()
         train_v4e(dfm)
+        timing["ml4e"] = time.time() - t0
+        t0 = time.time()
         try:  # 2026-09-29: v5 «от рынка» — своя ошибка не должна ломать ночное обучение v1-v4
             train_v5(dfm)
+            timing["ml5"] = time.time() - t0
         except Exception as e:
             print(f"версия 5 (от рынка): ошибка обучения — {e}", file=sys.stderr)
         # 2026-09-26: подробный отчёт + экзамен для страницы /training
         import weather_ml_report
         rep = weather_ml_report.report(conn, started, df, dfm, sig, qm)
         rep["versions"][0]["features"] = rep["versions"][1]["features"] = n_feat_v1
+        try:  # 30.09: подробности обучения каждой версии — не должны ломать отчёт
+            rep["version_detail"] = weather_ml_report.version_detail(timing, len(df), len(dfm), n_feat_v1, len(ml.FEATURES), sig, glob)
+        except Exception as e:  # noqa: BLE001
+            print(f"подробности версий не записаны: {type(e).__name__}: {e}", file=sys.stderr)
         conn.execute("UPDATE ml_train_log SET details = ? WHERE trained_at = (SELECT MAX(trained_at) FROM ml_train_log)",
                      (json.dumps(rep, ensure_ascii=False),))
         conn.commit()

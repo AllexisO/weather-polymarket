@@ -201,8 +201,8 @@
     @keyframes grow { from { transform: scaleY(0); } }
   }
   /* 2026-09-29 (Alex: «почини точки»): график тянется по ширине — точка отдельно, чтобы оставалась круглой */
-  .spk { position: relative; display: block; flex: 1 1 auto; min-width: 0; }
-  .spk .spark { max-width: none; width: 100%; }
+  .spk { position: relative; display: block; flex: 1 1 auto; min-width: 0; line-height: 0; }
+  .spk .spark { max-width: none; width: 100%; display: block; }
   .spk-dot { position: absolute; width: 8px; height: 8px; border-radius: 50%; transform: translate(-50%, -50%); box-shadow: 0 0 0 2px var(--bk-raise); }
   .spk-dot.up { background: var(--bk-pos); } .spk-dot.down { background: var(--bk-neg); }
 </style>
@@ -362,6 +362,21 @@
   <div class="pane"><p style="margin: 0;">Эта модель не обучается: её шансы считаются по формуле из прогнозов погоды, а поправки
     пересчитываются по накопленным дням (подробно — в «Как работает» ниже). Как она меняется со временем — видно по графикам выше.</p></div>
   {% else %}
+  {% if m.learn %}{% set L = m.learn %}
+  <div class="pane" style="margin-bottom: 14px;">
+    <h3 style="margin: 0 0 10px; font-size: 15px;">Как модель училась прошлой ночью — {{ L.when }}</h3>
+    <div class="facts">
+      <div><span>Что учит</span><b style="font-size: 13.5px; font-weight: 500;">{{ L.what }}</b></div>
+      <div><span>Настройки</span><b style="font-size: 13.5px; font-weight: 500;">{{ L.params }}</b></div>
+      <div><span>Моделей внутри</span><b class="num">{{ L.n_models }}</b>{% if L.n_models == 13 %} <span class="muted" style="font-size: 12px;">(по уровню распределения)</span>{% elif L.n_models == 39 %} <span class="muted" style="font-size: 12px;">(3 обучения × 13 уровней)</span>{% endif %}</div>
+      <div><span>Данные</span><b class="num">{{ '{:,}'.format(L.rows).replace(',', ' ') }} город-дней · {{ L.features }} признаков</b></div>
+      <div><span>Училась</span><b class="num">{% if L.seconds %}{{ '%d' | format(L.seconds // 60) }} мин {{ '%02d' | format(L.seconds % 60) }} с{% else %}— <span class="muted" style="font-size: 12px;">замеряется с 01.10</span>{% endif %}</b></div>
+      <div><span>Всё ночное обучение</span><b class="num">{{ '%d' | format(L.night_dur // 60) }} мин {{ '%02d' | format(L.night_dur % 60) }} с</b></div>
+      {% if L.sigmas %}<div><span>Разброс по городам (°C)</span><b class="num">{{ '%.2f' | format(L.sigmas.min) }}–{{ '%.2f' | format(L.sigmas.max) }}, обычно {{ '%.2f' | format(L.sigmas.global) }}</b></div>
+      <div><span>Шире всего / уже всего</span><b style="font-size: 13px; font-weight: 500;">{% for x in L.sig_top %}{{ x.ru }} {{ '%.1f' | format(x.s) }}{% if not loop.last %}, {% endif %}{% endfor %} / {% for x in L.sig_low %}{{ x.ru }} {{ '%.1f' | format(x.s) }}{% if not loop.last %}, {% endif %}{% endfor %}</b></div>{% endif %}
+    </div>
+  </div>
+  {% endif %}
   {% set ec = m.exam_charts %}
   {% if ec.ll or ec.err %}
   <div class="charts2">
@@ -379,8 +394,8 @@
     </div>{% endif %}
   </div>
   {% else %}
-  <div class="pane"><p style="margin: 0;">Экзамен после обучения сдаёт только главная v3{% if m.key != 'v3' %} (<a href="/models/v3">посмотреть</a>){% endif %}.
-    Для этой версии точность видна по живым дням выше: «накопленное преимущество» и «по неделям».</p></div>
+  <div class="pane"><p style="margin: 0;">Экзамен всех версий идёт с ночи 01.10 — график появится после двух ночей
+    (<a href="/training">сравнение всех версий</a>). Пока точность видна по живым дням выше.</p></div>
   {% endif %}
   {% if ec.rows %}<div class="pane chart" data-viz>
     <h3 style="margin: 0 0 4px; font-size: 15px;">Сколько данных у модели</h3>
@@ -469,7 +484,7 @@
   <div class="sec-head"><h2 id="s-imp">На что модель смотрит больше всего</h2><span class="aside">последнее обучение</span></div>
   <div class="pane imp">
     {% for i in m.importance %}<div class="hb"><span>{{ i.ru }}</span><i style="width: {{ [i.bar, 1] | max }}%"></i><b class="num">{{ '%.0f' | format(i.pct) }}%</b></div>{% endfor %}
-    <p class="foot">Доля в «важности» (медианный уровень): насколько признак помогает поправить среднее погодных моделей.</p>
+    <p class="foot">Доля в «важности» медианного уровня этой версии{% if m.learn and m.learn.n_models == 39 %} (среднее по трём обучениям){% endif %}: насколько признак помогает ей сделать прогноз. У каждой версии своя — она учится отдельно.</p>
   </div>
 </section>
 {% endif %}

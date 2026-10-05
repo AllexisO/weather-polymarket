@@ -30,8 +30,14 @@ JOBS = [
     ("weather_night_check", "Проверки утро / день / вечер", "weather_night_check.py", "07:00, 13:00, 23:30", 11 * 60, "weather_night_check.log"),
     ("weather_pws_live", "Народные станции США (CWOP, сбор)", "weather_pws_live.py", "каждый час 11:00-19:00", 26 * 60, "weather_pws_live.log"),
     ("weather_alerts", "Проверки и тревоги", "weather_alerts.py", "каждые 30 мин", 70, "weather_alerts.log"),
-    ("weather_mm_paper", "Виртуальный бот-мейкер (заявки)", "weather_mm_paper.py", "каждый час, 57 мин", 75, "weather_mm_paper.log"),
-    ("weather_mm_settle", "Бот-мейкер: расчёт исполнений", "weather_mm_settle.py", "06:10", 26 * 60, "weather_mm_settle.log"),
+    ("weather_fastobs", "Быстрые замеры (Synoptic, JMA, DWD, FMI) + кошелёк obs_fast", "weather_fastobs.py", "каждую минуту", 5, "weather_fastobs.log"),
+    ("weather_llm_hour", "LLM-прогноз каждый час (кошельки llm_gem и llm_ds, OpenRouter, 5 городов США)", "weather_llm_hour.py", "каждый час в :05", 75, "weather_llm_hour.log"),
+    ("weather_obs_wethr", "Живые замеры — wethr (кошелёк obs_wethr, платный поток wethr.net, 5 городов США)", "weather_obs_wethr.py", "каждый час с :07, 57 мин", 75, "weather_obs_wethr.log"),
+    ("weather_obs_rt", "Живые замеры — быстро (кошелёк obs_rt, постоянный опрос NOAA)", "weather_obs_rt.py", "каждый час с :07, 57 мин", 75, "weather_obs_rt.log"),
+    ("weather_netatmo", "Частные станции Netatmo у аэропортов (сбор для проверки)", "weather_netatmo.py", "каждые 5 мин", 20, "weather_netatmo.log"),
+    # 02.10: weather_mm_paper (старый бот-мейкер, опрос раз в 30 с) отключён решением Alex — в кроне закомментирован
+    ("weather_mm_ws", "Бот-мейкер на живом потоке", "weather_mm_ws.py", "каждый час, 57 мин", 75, "weather_mm_ws.log"),
+    ("weather_mm_settle", "Бот-мейкер: расчёт исполнений", "weather_mm_settle.py", "каждые 2 ч, :25", 160, "weather_mm_settle.log"),
 ]
 
 # имя файла скрипта -> key (у ночного обучения они разные)

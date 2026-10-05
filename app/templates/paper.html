@@ -461,8 +461,8 @@
   .alerts { margin: 0 0 22px; padding: 14px 18px; border-radius: 14px; border: 1px solid rgba(244, 167, 127, .5); background: rgba(244, 167, 127, .1); }
   .alerts b { color: #F8C2A4; } .alerts ul { margin: 6px 0 0; padding-left: 18px; font-size: 14px; } .alerts li span { color: var(--bk-muted); }
   /* 2026-09-29 (Alex: «почини точки»): график тянется по ширине — точка отдельно, чтобы оставалась круглой */
-  .spk { position: relative; display: block; flex: 1 1 auto; min-width: 0; }
-  .spk .spark { max-width: none; width: 100%; }
+  .spk { position: relative; display: block; flex: 1 1 auto; min-width: 0; line-height: 0; }
+  .spk .spark { max-width: none; width: 100%; display: block; }
   .spk-dot { position: absolute; width: 8px; height: 8px; border-radius: 50%; transform: translate(-50%, -50%); box-shadow: 0 0 0 2px var(--bk-raise); }
   .spk-dot.up { background: var(--bk-pos); } .spk-dot.down { background: var(--bk-neg); }
 </style>

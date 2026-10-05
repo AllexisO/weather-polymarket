@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block title %}{{ w.name if w else 'Бот-мейкер' }} — weather-lab{% endblock %}
+{% block content %}
+{#
+  2026-10-01 (Alex: «при клике переходить на страницу и видеть все-все заявки»): один бот-мейкер — сводка, когда что
+  обновлялось, все маркеты с итогом, все исполнения и все заявки (у бота на опросе; живой поток заявки не хранит).
+  Данные — mm_wallet_page() в dashboard.py.
+#}
+{% macro money(v) -%}{{ '−' if v < -0.005 else ('+' if v > 0.005 else '') }}${{ '%.2f' | format(v | abs) }}{%- endmacro %}
+{% macro tone(v) -%}{{ 'pos' if v > 0.005 else ('neg' if v < -0.005 else '') }}{%- endmacro %}
+{% macro cents(v) -%}{% if v is none %}—{% else %}{{ '%.1f' | format(v * 100) }}¢{% endif %}{%- endmacro %}
+{% include "_mm_style.html" %}
+<div class="bk">
+  <a class="back" href="/mm">← все боты</a>
+  {% if not w %}
+  <div class="pane empty">Данных бота пока нет.</div>
+  {% else %}
+  <div class="top">
+    <h1>{{ w.name }} <span class="code" style="font: 500 13px ui-monospace, Menlo, Consolas, monospace; color: var(--bk-muted); border: 1px solid var(--bk-line); border-radius: 6px; padding: 1px 7px;">{{ w.key }}</span></h1>
+    <p>{{ w.desc }}</p>
+  </div>
+
+  <section class="sec">
+    <div class="pane w">
+      {% if w.n %}
+      <div class="big num {{ tone(w.pnl) }}">{{ money(w.pnl) }}</div>
+      <div class="sub">{% if w.roi is not none %}<b class="{{ tone(w.roi) }}">{{ '%+.2f' | format(w.roi) }}%</b> от потраченного{% endif %}{% if w.cps is not none %} · {{ '%+.2f' | format(w.cps) }}¢ на долю{% endif %} · Poligarch: +1.0¢ на долю</div>
+      <div class="kv">
+        <div><span>Исполнений</span><b class="num">{{ w.n }}</b></div>
+        <div><span>Маркетов с исполнением</span><b class="num">{{ w.mf }} из {{ w.m }}</b></div>
+        <div><span>Потрачено на покупки</span><b class="num">${{ '%.0f' | format(w.spent) }}</b></div>
+        <div><span>Склейки пар ({{ '%.0f' | format(w.merged) }})</span><b class="num {{ tone(w.mp) }}">{{ money(w.mp) }}</b></div>
+        <div><span>Остаток без пары к итогу</span><b class="num {{ tone(w.ip) }}">{{ money(w.ip) }}</b></div>
+        <div><span>Возврат с комиссии</span><b class="num pos">{{ money(w.rb) }}</b></div>
+      </div>
+      {% else %}<div class="empty">Итога пока нет: маркеты ещё не закрылись.</div>{% endif %}
+      <div class="upd">{% for lab, val in w.upd %}<span>{{ lab }}: <b>{{ val }}</b></span>{% endfor %}</div>
+    </div>
+  </section>
+
+  <section class="sec">
+    <div class="tabs">
+      <a href="/mm/{{ w.key }}?tab=markets" class="{{ 'on' if tab == 'markets' }}">Маркеты с итогом</a>
+      <a href="/mm/{{ w.key }}?tab=fills" class="{{ 'on' if tab == 'fills' }}">Исполнения</a>
+      {% if has_quotes %}<a href="/mm/{{ w.key }}?tab=quotes" class="{{ 'on' if tab == 'quotes' }}">Заявки</a>{% endif %}
+    </div>
+    {% if not has_quotes and tab == 'quotes' %}<div class="pane empty">Бот на живом потоке переставляет заявки за доли секунды и держит их в памяти — сохраняются только исполнения.</div>{% endif %}
+    <div class="pane scroll">
+      {% if error %}<div class="empty">Ошибка чтения базы ботов: {{ error }}</div>
+      {% elif not rows %}<div class="empty">{% if tab == 'fills' and w.key in ('mm_all', 'mm_sel') %}Исполнения бота на опросе считаются при расчёте итога закрытых маркетов — появятся после первого итога.{% else %}Пока пусто.{% endif %}</div>
+      {% elif tab == 'markets' %}
+      <table>
+        <thead><tr><th>Маркет</th><th>День</th><th>Вариант / вопрос</th><th>Итог маркета</th><th class="r">Исполнений</th><th class="r">«да» / «нет», долей</th><th class="r">Потрачено</th><th class="r">Склейки</th><th class="r">Остаток</th><th class="r">Итог</th><th>Посчитан</th></tr></thead>
+        <tbody>{% for r in rows %}<tr>
+          <td>{% if r.city in ('pol', 'own') %}{{ r.city_ru }}{% else %}<a href="/cities/{{ r.city }}">{{ r.city_ru }}</a>{% endif %}</td>
+          <td class="num">{% if r.city in ('pol', 'own') %}до {{ r.local_date[8:10] }}.{{ r.local_date[5:7] }}.{{ r.local_date[2:4] }}{% else %}{{ r.local_date[8:10] }}.{{ r.local_date[5:7] }}{% endif %}</td><td>{{ r.what }}</td>
+          <td>{% if r.final_yes is none %}—{% elif r.final_yes > 0.99 %}сбылся{% elif r.final_yes < 0.01 %}нет{% else %}по цене {{ '%.0f' | format(r.final_yes * 100) }}¢{% endif %}</td>
+          <td class="r num">{{ r.n_fills }}</td><td class="r num">{{ '%.0f' | format(r.sh_yes) }} / {{ '%.0f' | format(r.sh_no) }}</td><td class="r num">${{ '%.2f' | format(r.spent) }}</td>
+          <td class="r num {{ tone(r.merge_pnl) }}">{{ money(r.merge_pnl) }}</td><td class="r num {{ tone(r.inv_pnl) }}">{{ money(r.inv_pnl) }}</td>
+          <td class="r num {{ tone(r.pnl) }}"><b>{{ money(r.pnl) }}</b></td><td class="num muted">{{ r.settled or '—' }}</td></tr>{% endfor %}</tbody>
+      </table>
+      {% elif tab == 'fills' %}
+      <table>
+        <thead><tr><th>Время</th><th>Маркет</th><th>День</th><th>Вариант / вопрос</th><th>Купили</th><th class="r">Цена</th><th class="r">Долей</th><th class="r">Сумма</th>{% if rows[0].zone is defined %}<th>Зона</th>{% endif %}</tr></thead>
+        <tbody>{% for r in rows %}<tr><td class="num">{{ r.when }}</td>
+          <td>{% if r.city in ('pol', 'own') %}{{ r.city_ru }}{% else %}<a href="/cities/{{ r.city }}">{{ r.city_ru }}</a>{% endif %}</td>
+          <td class="num">{% if r.city in ('pol', 'own') %}до {{ r.local_date[8:10] }}.{{ r.local_date[5:7] }}.{{ r.local_date[2:4] }}{% else %}{{ r.local_date[8:10] }}.{{ r.local_date[5:7] }}{% endif %}</td><td>{{ r.what }}</td><td>{{ '«да»' if r.side == 'yes' else '«нет»' }}</td>
+          <td class="r num">{{ cents(r.price) }}</td><td class="r num">{{ '%.1f' | format(r.size) }}</td><td class="r num">${{ '%.2f' | format(r.price * r.size) }}</td>
+          {% if r.zone is defined %}<td class="muted">{{ r.zone or '' }}</td>{% endif %}</tr>{% endfor %}</tbody>
+      </table>
+      {% else %}
+      <table>
+        <thead><tr><th>Стояла с</th><th>по</th><th>Маркет</th><th>День</th><th>Вариант / вопрос</th><th class="r">Заявка «да»</th><th class="r">Заявка «нет»</th><th class="r">Долей</th><th class="r">Лучшая покупка / продажа в стакане</th></tr></thead>
+        <tbody>{% for r in rows %}<tr><td class="num">{{ r['from'] }}</td><td class="num">{{ r.to }}</td>
+          <td>{% if r.city in ('pol', 'own') %}{{ r.city_ru }}{% else %}<a href="/cities/{{ r.city }}">{{ r.city_ru }}</a>{% endif %}</td>
+          <td class="num">{% if r.city in ('pol', 'own') %}до {{ r.local_date[8:10] }}.{{ r.local_date[5:7] }}.{{ r.local_date[2:4] }}{% else %}{{ r.local_date[8:10] }}.{{ r.local_date[5:7] }}{% endif %}</td><td>{{ r.what }}</td>
+          <td class="r num">{{ cents(r.yes_bid) }}</td><td class="r num">{{ cents(r.no_bid) }}</td><td class="r num">{{ '%.0f' | format(r.size or 0) }}</td>
+          <td class="r num muted">{{ cents(r.best_bid) }} / {{ cents(r.best_ask) }}</td></tr>{% endfor %}</tbody>
+      </table>
+      {% endif %}
+    </div>
+    {% if pages > 1 %}
+    <div class="pager">
+      {% if p > 1 %}<a href="/mm/{{ w.key }}?tab={{ tab }}&p={{ p - 1 }}">← новее</a>{% endif %}
+      <span>страница {{ p }} из {{ pages }} · всего {{ total }}</span>
+      {% if p < pages %}<a href="/mm/{{ w.key }}?tab={{ tab }}&p={{ p + 1 }}">старше →</a>{% endif %}
+    </div>
+    {% elif total %}<div class="pager"><span>всего {{ total }}</span></div>{% endif %}
+  </section>
+  {% endif %}
+</div>
+{% endblock %}

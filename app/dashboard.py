@@ -14,7 +14,7 @@ from pathlib import Path
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -267,9 +267,12 @@ PAPER_WALLETS = {
     "ml4e_cal": "v4 среднее 3 + рынок (смесь)",
     "ens": "6 ансамблей + рынок (смесь)",
     "ml3_cal15": "Смесь — не дешевле 15¢",
+    "ml3_cal30": "Смесь — не дешевле 30¢",
+    "ml3_z": "Смесь — «да» 20-40¢",
     "no_cheap": "Против лотерейных билетов",
     "no_mid": "Против средних вариантов",
     "no_big": "Против сильно переоценённых",
+    "techno": "Дешёвые «да» среди фаворитов",
     "ml3_conf": "Смесь — не спорить с уверенным рынком",
     "ml5_cal": "v5 «от рынка» + рынок (смесь)",
     "fav": "Недооценённые фавориты",
@@ -281,7 +284,7 @@ PAPER_WALLETS = {
 }
 PAPER_START_BALANCE = 100.0
 # свой старт у кошелька (как weather_paper.START_BY_WALLET; совпадение проверяет preflight.py)
-WALLET_START = {"copy": 300.0, "ml": 300.0, "mm_mk": 300.0}  # как weather_paper.START_BY_WALLET (preflight сверяет)
+WALLET_START = {"copy": 1000.0, "ml": 300.0, "mm_mk": 300.0, "mm": 300.0}  # как weather_paper.START_BY_WALLET (preflight сверяет)
 PAPER_STAKE = 2.0  # ставка кошельков (weather_paper.STAKE): меньше на счёте — новых ставок нет
 # 2026-09-25 (просьба Alex — "много кошельков, не понять что к чему"):
 # одна главная модель наверху, остальные — компактно, по группам, с
@@ -303,6 +306,10 @@ WALLET_INFO = {
                   "Как «смесь», но ставка от $0.5 до $10: чем больше перевес, тем больше ставка (Келли ×0.25)"),
     "ml3_no": ("Другие версии обучаемой модели", "Главная v3 — ставки «против»",
                "Покупает «нет» на вариант, который модель считает переоценённым (перевес от 10 п.п.)"),
+    "ml3_z": ("Другие версии обучаемой модели", "Смесь — «да» только 20-40¢",
+              "Как «смесь», но «да» только за 20-40¢: единственная зона в плюсе и на честной истории (покупка по цене продавца), и на первой живой неделе"),
+    "ml3_cal30": ("Другие версии обучаемой модели", "Смесь — не дешевле 30¢",
+                  "Как «смесь», но выбирает только среди вариантов за 30¢ и дороже: дешёвые сбываются реже своей цены (разбор 27-29.09)"),
     "ml3_cal15": ("Другие версии обучаемой модели", "Смесь — не дешевле 15¢",
                   "Как «смесь», но не ставит на варианты дешевле 15¢: на всём рынке они сбываются реже своей цены"),
     "ml3_city": ("Другие версии обучаемой модели", "Смесь — лучшие города",
@@ -334,16 +341,29 @@ WALLET_INFO = {
                  "Как смесь v3 + рынок, но без ставок в маркетах, где фаворит стоит 60¢ и дороже: там рынок обычно прав"),
     "no_big": ("Перекосы рынка", "Против сильно переоценённых",
                "Покупает «нет» на вариант за 25-80¢, если смесь модели и рынка считает его переоценённым на 8+ п.п. (правило бота AadiXD200)"),
+    "techno": ("Перекосы рынка", "Дешёвые «да» среди фаворитов",
+               "Покупает «да» за 8-30¢ на одном из 4 самых дорогих вариантов, если смесь модели и рынка не ниже цены (правило бота technosheen)"),
     "fav": ("Перекосы рынка", "Недооценённые фавориты",
             "Покупает «да» на вариант за 50-95¢, который смесь модели и рынка считает недооценённым: рынок недоплачивает за фаворитов"),
     "copy": ("Повтор за сильными трейдерами", "Повтор за сильными трейдерами",
              "Повторяет покупки 30 лучших трейдеров погоды за 14 дней — только сделанные накануне дня маркета, не дороже их цены +2¢"),
+    "llm_gem": ("LLM каждый час", "LLM Gemini — прогноз каждый час",
+                "Gemini 3.8 Flash каждый час 08-19 видит замеры с утра, почасовой прогноз облаков и дождя, прогнозы моделей, "
+                "цены и свои прошлые ошибки — и называет максимум дня. 5 городов США, одна ставка на город в день"),
+    "llm_ds": ("LLM каждый час", "LLM DeepSeek — прогноз каждый час",
+               "То же, что LLM Gemini, но DeepSeek V4 Pro — для сравнения двух LLM"),
     "obs": ("Живые замеры", "По живым замерам станции", "Ставка против варианта, который станция уже исключила"),
+    "obs_fast": ("Живые замеры", "Быстрые замеры в минуту сводки",
+                 "Как «по живым замерам», но узнаёт значение сводки METAR раньше её публикации: 5-минутные замеры аэропортов США (Synoptic), Токио (JMA), Амстердам (KNMI), Мюнхен (DWD), Хельсинки (FMI); плюс Гонконг по «максимуму с полуночи» обсерватории и Тайбэй по сводкам"),
+    "obs_rt": ("Живые замеры", "Живые замеры — быстро",
+               "Как «по живым замерам», но постоянный процесс: новая сводка METAR проверяется раз в секунду в минуты выхода сводки, и «нет» на уже невозможный вариант покупается сразу (как HighTempTation)"),
+    "obs_wethr": ("Живые замеры", "Живые замеры — wethr (США)",
+                  "Как «живые замеры — быстро», но сводки METAR 5 городов США (Чикаго, Атланта, Остин, Денвер, Майами) приходят платным потоком wethr.net (~на минуту раньше NOAA)"),
     "obs_fmi": ("Живые замеры", "Хельсинки: 10-минутные замеры FMI",
                 "То же, что «по живым замерам», но по 10-минутным данным финской метеослужбы — раньше METAR"),
 }
 # кошельки по живым замерам (paper_obs_trades, колонка wallet) — weather_obs_live.py
-OBS_WALLETS = ("obs", "obs_fmi")
+OBS_WALLETS = ("obs", "obs_fmi", "obs_fast", "obs_rt", "obs_wethr")
 # 2026-09-25: страница кошелька в стиле банковского приложения — города по-русски,
 # у каждого счёта короткий значок вместо иконки.
 CITY_RU = {
@@ -358,10 +378,10 @@ CITY_RU = {
     "amsterdam": "Амстердам", "lucknow": "Лакхнау", "chongqing": "Чунцин", "chengdu": "Чэнду",
     "kuala_lumpur": "Куала-Лумпур", "jeddah": "Джидда", "karachi": "Карачи", "cape_town": "Кейптаун",
     "ankara": "Анкара", "moscow": "Москва", "tel_aviv": "Тель-Авив", "istanbul": "Стамбул",
-    "wuhan": "Ухань", "zhengzhou": "Чжэнчжоу",
+    "wuhan": "Ухань", "zhengzhou": "Чжэнчжоу", "hong_kong": "Гонконг", "taipei": "Тайбэй",
 }
 WALLET_BADGE = {"ml3": "v3", "ml2": "v2", "ml": "v1", "ml_shift": "v1+", "mm": "MX", "emos": "EM", "main": "GI",
-                "mm_mk": "MX", "emos_mk": "EM", "main_mk": "GI", "ml3_mk": "v3", "ml3_cal": "v3+", "ml3_no": "v3−", "ml3_cal_k": "v3$", "ml4": "v4", "ml4_cal": "v4+", "ml4e": "v4³", "ml4e_cal": "v4³+", "ens": "EN", "ml3_cal15": "v3+¢", "no_cheap": "НЕТ", "fav": "ФАВ", "no_mid": "НЕТ½", "no_big": "НЕТ+", "ml3_conf": "v3+У", "ml5_cal": "v5+", "ml3_city": "v3+Г", "copy": "CP", "obs": "OB", "obs_fmi": "FI"}
+                "mm_mk": "MX", "emos_mk": "EM", "main_mk": "GI", "ml3_mk": "v3", "ml3_cal": "v3+", "ml3_z": "v3Z", "ml3_no": "v3−", "ml3_cal_k": "v3$", "ml4": "v4", "ml4_cal": "v4+", "ml4e": "v4³", "ml4e_cal": "v4³+", "ens": "EN", "ml3_cal15": "v3+¢", "ml3_cal30": "v3+30", "no_cheap": "НЕТ", "fav": "ФАВ", "no_mid": "НЕТ½", "no_big": "НЕТ+", "techno": "ДА¢", "ml3_conf": "v3+У", "ml5_cal": "v5+", "ml3_city": "v3+Г", "copy": "CP", "obs": "OB", "obs_fmi": "FI", "obs_fast": "OB+", "obs_rt": "OB⚡", "obs_wethr": "OBW", "llm_gem": "LG", "llm_ds": "LD"}
 WALLET_GROUPS = ["Другие версии обучаемой модели", "Перекосы рынка", "Ансамбли погодных моделей", "Повтор за сильными трейдерами", "Прогноз по формулам (раньше)",
                  "Тот же сигнал, но покупка своей заявкой", "Живые замеры"]
 
@@ -626,7 +646,7 @@ def line_chart(labels, series, fmt, w=520, h=300, vline=None):
             "first": labels[0], "last": labels[-1], "vline": round(X(vline), 1) if vline is not None else None}
 
 
-SKILL_PARENT = {"main_mk": "main", "emos_mk": "emos", "mm_mk": "mm", "ml3_mk": "ml3", "ml3_cal_k": "ml3_cal", "ml3_cal15": "ml3_cal", "ml3_city": "ml3_cal"}  # «своя заявка» — сигнал родителя
+SKILL_PARENT = {"main_mk": "main", "emos_mk": "emos", "mm_mk": "mm", "ml3_mk": "ml3", "ml3_cal_k": "ml3_cal", "ml3_cal15": "ml3_cal", "ml3_cal30": "ml3_cal", "ml3_z": "ml3_cal", "ml3_city": "ml3_cal"}  # «своя заявка» — сигнал родителя
 
 
 def model_skill(conn, key):
@@ -1035,6 +1055,279 @@ def spark(rows, start=100.0, w=160, h=44):
             "base": round(Y(start), 1), "end": (round(X(len(vals) - 1), 1), round(Y(vals[-1]), 1)), "up": vals[-1] >= start}
 
 
+LLM_WALLETS = ("llm_gem", "llm_ds")
+LLM_LIMIT = {"llm_gem": 8.5, "llm_ds": 1.5}   # как weather_llm_hour.MONTH_LIMIT
+
+
+def _smooth(pts):
+    """Плавная линия через точки (Catmull-Rom → кривые Безье), без выбросов за точки по высоте."""
+    if len(pts) < 2:
+        return ""
+    d = f"M{pts[0][0]},{pts[0][1]}"
+    for i in range(len(pts) - 1):
+        p0, p1, p2 = pts[max(i - 1, 0)], pts[i], pts[i + 1]
+        p3 = pts[min(i + 2, len(pts) - 1)]
+        c1 = (p1[0] + (p2[0] - p0[0]) / 6, p1[1] + (p2[1] - p0[1]) / 6)
+        c2 = (p2[0] - (p3[0] - p1[0]) / 6, p2[1] - (p3[1] - p1[1]) / 6)
+        lo, hi = min(p1[1], p2[1]), max(p1[1], p2[1])
+        c1 = (c1[0], min(max(c1[1], lo), hi))
+        c2 = (c2[0], min(max(c2[1], lo), hi))
+        d += f" C{c1[0]:.1f},{c1[1]:.1f} {c2[0]:.1f},{c2[1]:.1f} {p2[0]},{p2[1]}"
+    return d
+
+
+def llm_chart(labels, series, fmt, w=760, h=300, tip=None):
+    """04.10 (просьба Alex): график страницы /llm — плавные линии, точка на каждом значении с подсказкой, подпись на конце
+    линии с последним значением. series: [{"name", "cls", "values"}]; tip(i) — заголовок подсказки для столбца i."""
+    series = [s_ for s_ in series if any(v is not None for v in s_["values"])]
+    vals = [v for s_ in series for v in s_["values"] if v is not None]
+    if len(labels) < 2 or not vals:
+        return None
+    lo, hi = min(vals), max(vals)
+    step = _nice_step(hi - lo if hi > lo else 1)
+    y0, y1 = step * ((lo - step * 0.3) // step), step * (-(-(hi + step * 0.3) // step))
+    L, R, T, B = 56, 150, 16, 40
+    pw, ph = w - L - R, h - T - B
+    X = lambda i: round(L + pw * i / (len(labels) - 1), 1)
+    Y = lambda v: round(T + ph * (1 - (v - y0) / (y1 - y0)), 1)
+    out = []
+    for s_ in series:
+        segs, cur, dots = [], [], []
+        for i, v in enumerate(s_["values"]):
+            if v is None:
+                if cur:
+                    segs.append(cur)
+                cur = []
+                continue
+            cur.append((X(i), Y(v)))
+            dots.append({"x": X(i), "y": Y(v), "tip": tip(i) if tip else f"{labels[i]} · {s_['name']}: {fmt(v)}"})
+        if cur:
+            segs.append(cur)
+        last_i = max(i for i, v in enumerate(s_["values"]) if v is not None)
+        out.append({"name": s_["name"], "cls": s_["cls"], "paths": [_smooth(sg) if len(sg) > 1 else "" for sg in segs], "dots": dots,
+                    "end": (X(last_i), Y(s_["values"][last_i])), "last": fmt(s_["values"][last_i])})
+    ends = sorted(out, key=lambda s_: s_["end"][1])
+    for i, e in enumerate(ends):
+        e["ly"] = e["end"][1] if i == 0 else max(e["end"][1], ends[i - 1]["ly"] + 18)
+    ticks, t = [], y0
+    while t <= y1 + 1e-9:
+        ticks.append({"y": Y(t), "label": f"{t:.0f}°" if step >= 1 else f"{t:.1f}°"})
+        t += step
+    every = max(1, round(len(labels) / 8))
+    xl = [{"x": X(i), "label": lab} for i, lab in enumerate(labels) if i % every == 0 or i == len(labels) - 1]
+    return {"w": w, "h": h, "L": L, "R": w - R, "T": T, "B": T + ph, "series": out, "ticks": ticks, "xl": xl}
+
+
+def _llm_center(lab):
+    """Центр варианта по подписи из weather_llm_hour.label: «66-67°F» → 66.5, «69°F or below» → 69."""
+    t = lab.replace("°F", "").replace("°C", "").replace(" or below", "").replace(" or higher", "")
+    a, _, b = t.partition("-")
+    return (float(a) + float(b)) / 2 if b else float(a)
+
+
+LLM_KEY_LIMIT = 10.0   # лимит на самом ключе OpenRouter (за всё время)
+LLM_CITIES = ("chicago", "atlanta", "austin", "miami", "dallas", "london")   # как weather_llm_hour.CITIES (Лондон с 04.10)
+LLM_MODEL_NAME = {"llm_gem": "Gemini 3.8 Flash", "llm_ds": "DeepSeek V4 Pro"}
+
+
+def _llm_fact_hourly(conn, city, day):
+    """Температура по факту по часам местного дня (в единицах маркета): сводки METAR (metar_seen_src), замер :51-:53 относим к следующему часу."""
+    from weather_cities import OBS_CITIES
+    cfg = OBS_CITIES.get(city)
+    if not cfg or not table_exists(conn, "metar_seen_src"):
+        return {}
+    tz = ZoneInfo(cfg["tz"])
+    d0 = datetime.fromisoformat(day + "T00:00").replace(tzinfo=tz)
+    a, b = (d0 - timedelta(hours=1)).astimezone(timezone.utc).isoformat(), (d0 + timedelta(hours=25)).astimezone(timezone.utc).isoformat()
+    out = {}
+    for t, tc in conn.execute("""SELECT obs_time_utc, MAX(temp_c) FROM metar_seen_src WHERE icao = ? AND obs_time_utc >= ? AND obs_time_utc < ?
+                                 AND temp_c IS NOT NULL GROUP BY obs_time_utc""", (cfg["icao"], a, b)):
+        lt = (datetime.fromisoformat(t) + timedelta(minutes=10)).astimezone(tz)
+        if lt.date().isoformat() == day:
+            out[lt.hour] = round(tc * 9 / 5 + 32, 1) if cfg["unit"] == "fahrenheit" else round(tc, 1)
+    return out
+
+
+def _city_tz(city):
+    from weather_cities import OBS_CITIES
+    return OBS_CITIES[city]["tz"]
+
+
+def _llm_clock(city):
+    """04.10 (просьба Alex): местное время города и работает ли LLM (запросы в :05 с 05 до 19 местного, weather_llm_hour.HOURS)."""
+    from weather_cities import OBS_CITIES
+    now = datetime.now(ZoneInfo(OBS_CITIES[city]["tz"]))
+    on = 5 <= now.hour < 20
+    if on:
+        nxt = now.replace(minute=5, second=0) + (timedelta(hours=1) if now.minute >= 5 else timedelta(0))
+        state = f"работает, следующий прогноз в {nxt:%H:%M}" if nxt.hour < 20 else "последний прогноз дня был в 19:05"
+    else:
+        state = "спит, первый прогноз в 05:05"
+    return {"time": f"{now:%H:%M}", "on": on, "state": state, "tz": now.strftime("%Z")}
+
+
+def llm_page_data(conn, key, city, day):
+    """04.10 (просьба Alex): LLM — отдельный раздел. Деньги и расход обеих LLM, график 24 ч и месяц (факт против прогноза),
+    что LLM видела в последний час и что ответила, как учится — по дням."""
+    have = table_exists(conn, "llm_hour_preds")
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(llm_hour_preds)")} if have else set()
+    month = datetime.now(timezone.utc).strftime("%Y-%m-01")
+    cards, spend_all, spend_month = [], 0.0, 0.0
+    for k in LLM_WALLETS:
+        rows = conn.execute("SELECT * FROM paper_trades WHERE wallet = ? AND status != 'skip'", (k,)).fetchall() if table_exists(conn, "paper_trades") else []
+        c = _wallet_card(WALLET_INFO[k][1], [r for r in rows if r["status"] != "nofill"], nofill=0, skipped=0)
+        sp = conn.execute("SELECT COUNT(*), COALESCE(SUM(cost), 0), COALESCE(SUM(CASE WHEN ts_utc >= ? THEN cost END), 0) FROM llm_hour_preds WHERE wallet = ?",
+                          (month, k)).fetchone() if have else (0, 0.0, 0.0)
+        c.update(key=k, model=LLM_MODEL_NAME[k], calls=sp[0], spent=sp[1], spent_month=sp[2], limit=LLM_LIMIT[k],
+                 free=c["balance"] - c["in_play"], per_call=sp[1] / sp[0] if sp[0] else None)
+        spend_all += sp[1]
+        spend_month += sp[2]
+        cards.append(c)
+    out = {"cards": cards, "spend": {"all": spend_all, "month": spend_month, "limit_month": sum(LLM_LIMIT.values()), "key_limit": LLM_KEY_LIMIT},
+           "key": key, "city": city, "cities": [(c, CITY_RU.get(c, c), _llm_clock(c)) for c in LLM_CITIES], "model": LLM_MODEL_NAME[key]}
+    if not have:
+        return out
+    days = [r[0] for r in conn.execute("SELECT DISTINCT local_date FROM llm_hour_preds WHERE wallet = ? AND city = ? ORDER BY local_date", (key, city))]
+    if not days:
+        return out
+    day = day if day in days else days[-1]
+    out["day"], out["days"] = day, days
+    sel = ", ".join(c if c in cols else f"NULL AS {c}" for c in ("prompt", "answer_json", "hourly_json", "lesson", "reflection"))
+    preds = conn.execute(f"""SELECT local_date, local_hour, pred_max, probs_json, market_json, max_so_far, reason, cost, ts_utc, {sel}
+                             FROM llm_hour_preds WHERE wallet = ? AND city = ? ORDER BY local_date, local_hour""", (key, city)).fetchall()
+    fact_max = {r[0]: r[1] for r in conn.execute("SELECT local_date, actual_max FROM weather_station_daily WHERE city = ?", (city,))}
+    # 24 часа: факт по часам и прогноз LLM на этот час из последнего запроса до него
+    fact = _llm_fact_hourly(conn, city, day)
+    from weather_cities import OBS_CITIES
+    u = "°F" if OBS_CITIES[city]["unit"] == "fahrenheit" else "°C"
+    out["unit"] = u
+    today = [p for p in preds if p["local_date"] == day]
+    # 05.10 (решение Alex): за день — только две линии. Факт — все часы; LLM — в каждом часу её прогноз на этот час, сделанный
+    # в :05 предыдущего часа (точка появляется заранее, факт догоняет). Только часы, когда LLM работала.
+    by_hour = {p["local_hour"]: p for p in today}
+    llm_h = {}
+    for h in range(24):
+        p = by_hour.get(h - 1)
+        if p is not None and p["hourly_json"]:
+            v = json.loads(p["hourly_json"]).get(f"{h:02d}")
+            if v is not None:
+                llm_h[h] = v
+    fc = llm_h
+    out["day_chart"] = llm_chart([f"{h:02d}:00" for h in range(24)], [
+        {"name": "Факт", "cls": "s-real", "values": [fact.get(h) for h in range(24)]},
+        {"name": "LLM", "cls": "s-model", "values": [llm_h.get(h) for h in range(24)]}], lambda v: f"{v:.1f}{u}",
+        tip=lambda i: f"{i:02d}:00" + (f" · факт {fact[i]:.1f}{u}" if i in fact else " · факт ещё не известен") + (f" · LLM {llm_h[i]:.1f}{u}" if i in llm_h else "")
+        + (f" · ошибка {llm_h[i] - fact[i]:+.1f}°" if i in fact and i in llm_h else ""))
+    out["day_rows"] = [{"h": h, "fact": fact.get(h), "llm": fc.get(h), "err": fc[h] - fact[h] if fc.get(h) is not None and h in fact else None,
+                        "naive_err": fact[h - 1] - fact[h] if h in fact and (h - 1) in fact and fc.get(h) is not None else None}
+                       for h in range(24) if h in fact or fc.get(h) is not None]
+    out["day_max"] = {"fact": fact_max.get(day), "seen": max(fact.values()) if fact else None,
+                      "pred": [(p["local_hour"], p["pred_max"]) for p in today]}
+    # месяц: максимум дня по факту, прогноз LLM в первый час дня и рынок в тот же час
+    mdays = days[-31:]
+    first = {}
+    for p in preds:
+        first.setdefault(p["local_date"], p)
+    def mkt_center(p):
+        mk = json.loads(p["market_json"] or "{}")
+        return _llm_center(max(mk, key=mk.get)) if mk else None
+    out["month_chart"] = llm_chart([f"{d[8:10]}.{d[5:7]}" for d in mdays], [
+        {"name": "Факт", "cls": "s-real", "values": [fact_max.get(d) for d in mdays]},
+        {"name": "LLM утром", "cls": "s-model", "values": [first[d]["pred_max"] for d in mdays]},
+        {"name": "Рынок утром", "cls": "s-market", "values": [mkt_center(first[d]) for d in mdays]}], lambda v: f"{v:.1f}{u}")
+    # как учится: по дням — прогнозы по часам, факт, ошибка и что LLM поняла
+    learn = []
+    for d in reversed(days[-14:]):
+        ps = [p for p in preds if p["local_date"] == d]
+        fm = fact_max.get(d)
+        errs = [p["pred_max"] - fm for p in ps if fm is not None and p["pred_max"] is not None]
+        lessons = [p["lesson"] for p in ps if p["lesson"]]
+        learn.append({"date": d, "fact": fm, "preds": [(p["local_hour"], p["pred_max"]) for p in ps],
+                      "err": sum(errs) / len(errs) if errs else None, "abs": sum(abs(e) for e in errs) / len(errs) if errs else None,
+                      "lesson": lessons[-1] if lessons else None, "lesson_first": lessons[0] if lessons else None})
+    out["learn"] = learn
+    # 04.10 (схема Alex «учится по каждому часу»): разбор каждого часа — прогноз на час вперёд против факта и что поняла
+    review, by_day_err, by_day_naive, fact_cache = [], {}, {}, {day: fact}
+    for p in preds:
+        if not p["hourly_json"]:
+            continue
+        tgt = p["local_hour"] + 1
+        f = json.loads(p["hourly_json"]).get(f"{tgt:02d}")
+        if p["local_date"] not in fact_cache:
+            fact_cache[p["local_date"]] = _llm_fact_hourly(conn, city, p["local_date"])
+        a = fact_cache[p["local_date"]].get(tgt)
+        if f is not None and a is not None:
+            by_day_err.setdefault(p["local_date"], []).append(abs(f - a))
+            prev = fact_cache[p["local_date"]].get(p["local_hour"])
+            by_day_naive.setdefault(p["local_date"], []).append(abs(prev - a) if prev is not None else None)
+        if p["local_date"] == day:
+            review.append({"h": p["local_hour"], "tgt": tgt, "f": f, "a": a, "refl": p["reflection"]})
+    out["review"] = review
+    ed = sorted(by_day_err)
+    out["hour_err_chart"] = llm_chart([f"{d[8:10]}.{d[5:7]}" for d in ed], [
+        {"name": "LLM", "cls": "s-model", "values": [sum(by_day_err[d]) / len(by_day_err[d]) for d in ed]},
+        {"name": "Повтор замера", "cls": "s-market", "values": [(lambda xs: sum(xs) / len(xs) if xs else None)([x for x in by_day_naive[d] if x is not None]) for d in ed]}],
+        lambda v: f"{v:.1f}°", h=240) if len(ed) >= 2 else None
+    nv = [x for x in by_day_naive.get(ed[-1], []) if x is not None] if ed else []
+    out["hour_err_now"] = (sum(by_day_err[ed[-1]]) / len(by_day_err[ed[-1]]), len(by_day_err[ed[-1]]), sum(nv) / len(nv) if nv else None) if ed else None
+    # тетрадь: текущие правила и как менялась
+    if table_exists(conn, "llm_notebook"):
+        nbs = conn.execute("SELECT local_date, local_hour, notes_json FROM llm_notebook WHERE wallet = ? AND city = ? ORDER BY ts_utc",
+                           (key, city)).fetchall()
+        out["notebook"] = json.loads(nbs[-1]["notes_json"]) if nbs else []
+        out["notebook_when"] = f"{nbs[-1]['local_date'][8:10]}.{nbs[-1]['local_date'][5:7]} {nbs[-1]['local_hour']:02d}:05" if nbs else None
+        seen, hist = set(), []
+        for r in nbs:
+            for x in json.loads(r["notes_json"]):
+                if x not in seen:
+                    seen.add(x)
+                    hist.append({"when": f"{r['local_date'][8:10]}.{r['local_date'][5:7]} {r['local_hour']:02d}:05", "rule": x,
+                                 "kept": x in (out["notebook"] or [])})
+        out["notebook_hist"] = list(reversed(hist))[:30]
+    # что LLM видела в последний час и что ответила
+    last = preds[-1]
+    ans = json.loads(last["answer_json"]) if last["answer_json"] else {}
+    probs = json.loads(last["probs_json"] or "{}") or {}
+    mk = json.loads(last["market_json"] or "{}")
+    out["last"] = {"when": f"{last['local_date'][8:10]}.{last['local_date'][5:7]} {last['local_hour']:02d}:05 местного", "prompt": last["prompt"], "reflection": last["reflection"],
+                   "pred": last["pred_max"], "seen": last["max_so_far"], "reason": last["reason"], "lesson": last["lesson"], "cost": last["cost"],
+                   "hourly": sorted((json.loads(last["hourly_json"]) if last["hourly_json"] else {}).items()),
+                   "probs": [(lab, p, mk.get(lab)) for lab, p in probs.items() if p >= 0.01 or (mk.get(lab) or 0) >= 0.01]}
+    bets = conn.execute("SELECT * FROM paper_trades WHERE wallet = ? AND status NOT IN ('skip', 'nofill') ORDER BY placed_at DESC LIMIT 40", (key,)).fetchall()
+    # 04.10 (просьба Alex «ставит LLM или нет»): открытые ставки обеих LLM и ставка по выбранному городу сегодня
+    ob = conn.execute("SELECT * FROM paper_trades WHERE wallet IN (?, ?) AND status = 'open' ORDER BY placed_at DESC", LLM_WALLETS).fetchall()
+    out["open_bets"] = [{"model": LLM_MODEL_NAME[b["wallet"]], "date": f"{b['local_date'][8:10]}.{b['local_date'][5:7]}", "city": CITY_RU.get(b["city"], b["city"]),
+                         "side": "да" if (b["side"] or "yes") == "yes" else "нет", "bucket": paper_bucket(b["bucket_lo"], b["bucket_hi"], b["unit"]),
+                         "price": b["price"], "chance": b["model_p"], "cost": b["stake"] + (b["fee"] or 0), "win": b["shares"],
+                         "when": (datetime.fromisoformat(b["placed_at"]).astimezone(ZoneInfo(_city_tz(b["city"])))).strftime("%H:%M") if b["placed_at"] else ""} for b in ob]
+    tb = conn.execute("SELECT * FROM paper_trades WHERE wallet = ? AND city = ? AND local_date = ? AND status NOT IN ('skip', 'nofill')", (key, city, day)).fetchone()
+    edge = None
+    if last["local_date"] == day and last["probs_json"]:
+        pr, mk = json.loads(last["probs_json"]) or {}, json.loads(last["market_json"] or "{}")
+        cand = [(pr[l] - mk[l], "да", l) for l in pr if l in mk and 0.10 <= mk[l] <= 0.90] + \
+               [((1 - pr[l]) - (1 - mk[l]), "нет", l) for l in pr if l in mk and 0.10 <= 1 - mk[l] <= 0.90]
+        edge = max(cand) if cand else None
+    out["city_bet"] = {"bet": {"side": "да" if (tb["side"] or "yes") == "yes" else "нет", "bucket": paper_bucket(tb["bucket_lo"], tb["bucket_hi"], tb["unit"]),
+                               "price": tb["price"], "chance": tb["model_p"], "status": tb["status"], "cost": tb["stake"] + (tb["fee"] or 0), "win": tb["shares"],
+                               "pnl": (tb["payout"] or 0) - tb["stake"] - (tb["fee"] or 0) if tb["status"] in ("won", "lost", "void") else None} if tb else None,
+                       "edge": edge}
+    out["bets"] = [{"date": f"{b['local_date'][8:10]}.{b['local_date'][5:7]}", "city": CITY_RU.get(b["city"], b["city"]), "side": "да" if (b["side"] or "yes") == "yes" else "нет",
+                    "bucket": paper_bucket(b["bucket_lo"], b["bucket_hi"], b["unit"]),
+                    "price": b["price"], "chance": b["model_p"], "cost": b["stake"] + (b["fee"] or 0), "status": b["status"],
+                    "pnl": (b["payout"] or 0) - b["stake"] - (b["fee"] or 0) if b["status"] in ("won", "lost", "void") else None, "why": b["reason"]} for b in bets]
+    return out
+
+
+@app.get("/llm", response_class=HTMLResponse)
+def llm_page(request: Request, w: str = "llm_gem", city: str = "chicago", d: str = ""):
+    conn = db()
+    w = w if w in LLM_WALLETS else LLM_WALLETS[0]
+    city = city if city in LLM_CITIES else LLM_CITIES[0]
+    data = llm_page_data(conn, w, city, d)
+    conn.close()
+    return TEMPLATES.TemplateResponse("llm.html", {"request": request, **data})
+
+
 @app.get("/paper", response_class=HTMLResponse)
 def paper(request: Request, w: str = ""):
     """Три таблицы (просьба Alex, 2026-09-23): ждём результата / результаты
@@ -1099,7 +1392,7 @@ def paper(request: Request, w: str = ""):
     for okey in OBS_WALLETS if table_exists(conn, "paper_obs_trades") else ():
         obs = conn.execute("SELECT * FROM paper_obs_trades WHERE wallet = ? ORDER BY placed_at DESC", (okey,)).fetchall()
         label = WALLET_INFO[okey][1]
-        src = "10-мин замер FMI" if okey == "obs_fmi" else "станция"
+        src = {"obs_fmi": "10-мин замер FMI", "obs_fast": "быстрый замер в минуту сводки", "obs_rt": "свежая сводка METAR", "obs_wethr": "свежая сводка METAR (wethr)"}.get(okey, "станция")
         card = _wallet_card(label, obs, nofill=sum(r["status"] == "nofill" for r in obs))
         card["key"] = okey
         wallets.append(card)
@@ -1109,7 +1402,7 @@ def paper(request: Request, w: str = ""):
             if r["status"] == "nofill":
                 skips.append({"local_date": r["local_date"], "city": r["city"], "wallet": label, "wkey": okey,
                               "kind": "не смогли купить",
-                              "reason": (f"{src} уже показал{'' if okey == 'obs_fmi' else 'а'} {r['obs_max']:.0f}{unit}, значит {bucket} невозможно; "
+                              "reason": (f"{src} уже показал{'' if okey in ('obs_fmi', 'obs_fast', 'obs_rt', 'obs_wethr') else 'а'} {r['obs_max']:.0f}{unit}, значит {bucket} невозможно; "
                                          + (r["reason"] if "reason" in r.keys() and r["reason"] else ""))})
                 continue
             item = {"local_date": r["local_date"], "city": r["city"], "wallet": label, "wkey": okey,
@@ -1295,7 +1588,14 @@ def training(request: Request):
     conn = db()
     alerts = active_alerts(conn)
     conn.close()
-    return TEMPLATES.TemplateResponse("training.html", {"request": request, "last": last, "runs": runs, "alerts": alerts})
+    ea = next((r.get("exam_all") for r in runs if r.get("exam_all")), None)
+    if ea:
+        for v in ea["versions"].values():
+            v["gap"] = ea["ll_market"] - v["ll_model"]
+            v["gap_b"] = ea["ll_market"] - v["ll_blend"]
+            v["verdict"] = _gap_verdict({"ll_model": v["ll_model"], "ll_market": ea["ll_market"]}, "model")
+            v["verdict_b"] = _gap_verdict({"ll_blend": v["ll_blend"], "ll_market": ea["ll_market"]}, "blend")
+    return TEMPLATES.TemplateResponse("training.html", {"request": request, "last": last, "runs": runs, "alerts": alerts, "exam_all": ea})
 
 
 # ---- /models: всё о каждой модели (2026-09-29, просьба Alex: «хочу видеть ВСЁ! От и до!») ----
@@ -1492,10 +1792,16 @@ def _train_runs(conn, info):
         if v is None:
             continue
         ex = d.get("exam") if info.get("exam") else None
+        # 30.09: экзамен всех версий (exam_all) — у каждой версии свой, на тех же днях, что у v3
+        va = ((d.get("exam_all") or {}).get("versions") or {}).get(info["train_key"])
+        if va and d.get("exam"):
+            ex = {**d["exam"], "ll_model": va["ll_model"], "ll_blend": va["ll_blend"], "err_model": va["err"],
+                  "ll_market": d["exam_all"].get("ll_market", d["exam"].get("ll_market"))}
         runs.append({"when": datetime.fromisoformat(r["trained_at"]).astimezone(VIEWER_TZ).strftime("%d.%m %H:%M"),
                      "ok": bool(r["ok"]), "dry": d.get("dry_run"), "dur": d.get("duration_s") or 0, "rows": v.get("rows"),
                      "features": v.get("features"), "note": v.get("note"), "data": d.get("data", {}), "exam": ex,
-                     "verdict": exam_verdict(ex) if ex else None, "importance": d.get("importance") if info.get("exam") else None})
+                     "verdict": exam_verdict(ex) if ex else None, "importance": d.get("importance") if info.get("exam") else None,
+                     "exam_all": d.get("exam_all"), "detail": (d.get("version_detail") or {}).get(info["train_key"])})
     return runs
 
 
@@ -1535,6 +1841,7 @@ def _model_card(conn, key, info):
         for r in rows:
             by[r["date"]] = by.get(r["date"], 0.0) + _ll(r["p_market"]) - _ll(r["p_model"])
         head["spark"] = spark(sorted(by.items()), 0.0)
+    info = {**info, "exam": info.get("exam") or any(r["exam"] for r in runs)}  # 30.09: экзамен всех версий
     return {"key": key, **info, "charts": ch, "money": money, "runs": runs, "head": head,
             "last_train": runs[-1]["when"] if runs else None}
 
@@ -1557,7 +1864,15 @@ def model_page(request: Request, key: str):
     conn = db()
     m = _model_card(conn, key, MODEL_INFO[key])
     m["exam_charts"] = _exam_charts(m["runs"])
-    last_imp = next((r["importance"] for r in reversed(m["runs"]) if r.get("importance")), None)
+    det = next((r for r in reversed(m["runs"]) if r.get("detail")), None)
+    if det:  # 30.09: как училась именно эта версия (weather_ml_report.version_detail)
+        m["learn"] = {**det["detail"], "when": det["when"], "night_dur": det["dur"]}
+        sg = det["detail"].get("sigmas")
+        if sg:
+            m["learn"]["sig_top"] = [{"ru": CITY_RU.get(x["city"], x["city"]), "s": x["s"]} for x in sg["cities"][:5]]
+            m["learn"]["sig_low"] = [{"ru": CITY_RU.get(x["city"], x["city"]), "s": x["s"]} for x in sg["cities"][-5:]]
+    last_imp = (det["detail"]["importance"] if det and det["detail"].get("importance")
+                else next((r["importance"] for r in reversed(m["runs"]) if r.get("importance")), None))
     if last_imp:
         top = max(i["pct"] for i in last_imp) or 1
         m["importance"] = [{"ru": feature_ru(i["name"]), "pct": i["pct"], "bar": round(100 * i["pct"] / top)} for i in last_imp]
@@ -1569,10 +1884,84 @@ def model_page(request: Request, key: str):
 
 # ---- /mm: виртуальный бот-мейкер по схеме Poligarch (2026-09-30, решение Alex) — weather_mm_paper.py / weather_mm_settle.py ----
 MM_DB = DB_PATH.parent / "mm.sqlite3"
-MM_WALLETS = {"mm_all": ("Все заявки бота", "Заявки на «да» и «нет» по всем погодным вариантам, кроме пауз (сводки METAR, вечер дня маркета)"),
-              "mm_sel": ("Только выгодные зоны", "Те же заявки, но только в зонах цены и времени, где стоять с заявкой было выгодно в обоих периодах истории"),
-              "mm_pol": ("Политика и прочее", "Те же заявки на не погодных маркетах, где Poligarch торговал за 7 дней; открытые маркеты — по текущей цене, пересчёт каждый день")}
+# 02.10 (решение Alex): сверху — по чему решаем (mm100) и тот же бот «в идеальном мире»; остальные — исследование
+MM_WALLETS = {
+    'mm100': ('Счёт $100 — строго как вживую', 'Банк ровно $100, заявки по 5 долей только на дешёвую сторону и только пока хватает свободных денег (заявка замораживает деньги, как на Polymarket). Исполнение — только гарантированное, отменённая заявка ещё 1 с может быть «подобрана», без возврата комиссии. С 02.10'),
+    'mm_ws_zone': ('Тот же бот в идеальном мире', 'Правила как у «Счёт $100», но без ограничения денег и с допущением «наша заявка всегда первая в очереди» — верхняя граница, вживую столько не будет. Разница со «Счёт $100» показывает, сколько прибыли держится на этом допущении'),
+    'mm_ws_zs': ('Живой поток: дешёвая сторона, строго', 'Как «только дешёвая сторона», но исполнение засчитывается, только если оно гарантировано вживую: заявка стояла ≥ 1 с и сделка прошла хуже нашей цены (весь наш уровень съеден). Нижняя оценка — с 02.10'),
+    'mm_ws_z30': ('Живой поток: только дешевле 30¢', 'Покупает только сторону дешевле 30¢: лучшая граница на первой половине истории (+17.9%), на проверке +18.4%, в худшем случае очереди +10.8%'),
+    'mm_ws_sel': ('Живой поток: выгодные зоны', 'Живой поток, только в выгодных зонах цены и времени'),
+    'mm_ws_all': ('Живой поток: все заявки', 'Те же заявки, но переставляются сразу при каждом изменении стакана (задержка ~0.03 с), исполнение — по живой сделке в ту же секунду'),
+    'mm_all': ('Все заявки бота', 'Заявки на «да» и «нет» по всем погодным вариантам, кроме пауз (сводки METAR, вечер дня маркета)'),
+    'mm_sel': ('Только выгодные зоны', 'Те же заявки, но только в зонах цены и времени, где стоять с заявкой было выгодно в обоих периодах истории'),
+    'mm_pol': ('Политика и прочее', 'Те же заявки на не погодных маркетах, где Poligarch торговал за 7 дней; открытые маркеты — по текущей цене, пересчёт каждый день'),
+    'mm_own': ('Свой выбор маркетов', 'Те же заявки на 40 не погодных маркетах, выбранных самим ботом: Polymarket платит за заявки, торговля за сутки от $5 000, до итога больше недели. Без Poligarch'),
+}
+MM_MAIN = ("mm100", "mm_ws_zone")
+MM_OFF = {"mm_all", "mm_sel", "mm_pol", "mm_own"}   # 02.10: остановлены (старый бот с опросом, не погода)
 MM_DECIDE = "2026-10-14"
+# 01.10 (Alex: «при клике видеть все заявки», «когда получили обновление»): откуда брать заявки и исполнения каждого бота.
+# Бот на живом потоке заявки держит в памяти (переставляет за доли секунды) — сохраняются только исполнения.
+MM_QUOTES = {"mm_all": "city NOT IN ('pol', 'own')", "mm_sel": "city NOT IN ('pol', 'own') AND (sel_yes = 1 OR sel_no = 1)",
+             "mm_pol": "city = 'pol'", "mm_own": "city = 'own'"}
+MM_PAGE = 200
+
+
+def _mm_dt(v):
+    """Время из unix-секунд или ISO-строки → «01.10 15:25» в часовом поясе сайта."""
+    if v is None:
+        return None
+    try:
+        d = datetime.fromtimestamp(float(v), VIEWER_TZ) if isinstance(v, (int, float)) else datetime.fromisoformat(v).astimezone(VIEWER_TZ)
+    except (ValueError, OSError):
+        return None
+    return d.strftime("%d.%m %H:%M")
+
+
+def _mm_fills_table(w):
+    return "mm_ws_fills" if w.startswith("mm_ws_") else "mm_fills"
+
+
+def _mm_updates(conn, w):
+    """Когда бот последний раз что-то получил: заявка (бот на опросе), исполнение, пересчёт итога."""
+    out = []
+    if w in MM_QUOTES and table_exists(conn, "mm_quotes"):
+        v = conn.execute(f"SELECT MAX(ts_to) FROM mm_quotes WHERE {MM_QUOTES[w]}").fetchone()[0]
+        out.append(("последняя заявка", _mm_dt(v) or "—"))
+    ft = _mm_fills_table(w)
+    if table_exists(conn, ft):
+        v = conn.execute(f"SELECT MAX(ts) FROM {ft} WHERE wallet = ?", (w,)).fetchone()[0]
+        out.append(("последнее исполнение", _mm_dt(v) or ("считается при расчёте итога" if w in ("mm_all", "mm_sel") else "—")))
+    if table_exists(conn, "mm_results"):
+        v = conn.execute("SELECT MAX(settled_at) FROM mm_results WHERE wallet = ?", (w,)).fetchone()[0]
+        out.append(("итог пересчитан", _mm_dt(v) or "ещё не было"))
+    return out
+
+
+def _mm_card(conn, w):
+    name, desc = MM_WALLETS[w]
+    c = {"key": w, "name": name, "desc": desc, "n": 0}
+    if table_exists(conn, "mm_results"):
+        r = conn.execute("""SELECT COUNT(*) AS m, SUM(n_fills > 0) AS mf, SUM(n_fills) AS n, SUM(sh_yes + sh_no) AS sh, SUM(spent) AS spent,
+                            SUM(merged) AS merged, SUM(merge_pnl) AS mp, SUM(inv_pnl) AS ip, SUM(rebate) AS rb, SUM(pnl) AS pnl
+                            FROM mm_results WHERE wallet = ?""", (w,)).fetchone()
+        c.update({k: (r[k] or 0) for k in r.keys()})
+        c["roi"] = 100 * c["pnl"] / c["spent"] if c["spent"] else None
+        c["cps"] = 100 * c["pnl"] / c["sh"] if c["sh"] else None
+    c["upd"] = _mm_updates(conn, w)
+    return c
+
+
+def _mm_titles():
+    """Вопросы не погодных маркетов (кэш списков бота) — чтобы на странице было понятно, что за маркет."""
+    out = {}
+    for f in ("mm_pol_markets.json", "mm_own_markets.json"):
+        try:
+            for m in json.loads((DB_PATH.parent / f).read_text()):
+                out[m["cid"]] = m.get("q")
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
+    return out
 
 
 def _mm_zone_rows(conn, wallet, expr, order=None):
@@ -1580,7 +1969,8 @@ def _mm_zone_rows(conn, wallet, expr, order=None):
                             FROM mm_fills WHERE wallet = ? GROUP BY k""", (wallet,)).fetchall()
     out = [{"k": r["k"], "n": r["n"], "sh": r["sh"] or 0, "spent": r["spent"] or 0, "pnl": r["pnl"] or 0,
             "c": 100 * (r["pnl"] or 0) / r["sh"] if r["sh"] else 0} for r in rows]
-    return sorted(out, key=order or (lambda x: x["k"] or ""))
+    # 02.10: корзина цены 0 (дешевле 10¢) превращалась в "" и не сравнивалась с числами — страница падала
+    return sorted(out, key=order or (lambda x: (x["k"] is None, x["k"] if x["k"] is not None else "")))
 
 
 @app.get("/mm", response_class=HTMLResponse)
@@ -1594,25 +1984,32 @@ def mm_page(request: Request):
             q = conn.execute("""SELECT COUNT(*) AS n, SUM(yes_bid IS NOT NULL) + SUM(no_bid IS NOT NULL) AS sides, SUM(sel_yes) + SUM(sel_no) AS sel,
                                 MAX(ts_to) AS last, COUNT(DISTINCT city) AS cities FROM mm_quotes WHERE ts_to >= ?""", (now - 90,)).fetchone()
             first = conn.execute("SELECT MIN(ts_from), MAX(ts_to), COUNT(DISTINCT condition_id) FROM mm_quotes").fetchone()
+            st100 = conn.execute("SELECT ts, cash, reserved, quotes FROM mm100_state ORDER BY ts DESC LIMIT 1").fetchone() \
+                if table_exists(conn, "mm100_state") else None
+            ctx["live100"] = {"on": bool(st100 and now - st100["ts"] < 300), "quotes": st100["quotes"] if st100 else 0,
+                              "reserved": st100["reserved"] if st100 else 0.0, "last": _mm_dt(st100["ts"]) if st100 else None}
             ctx["live"] = {"n": q["n"] or 0, "sides": q["sides"] or 0, "sel": q["sel"] or 0, "cities": q["cities"] or 0,
                            "since": datetime.fromtimestamp(first[0], VIEWER_TZ).strftime("%d.%m %H:%M") if first[0] else None,
                            "last": datetime.fromtimestamp(first[1], VIEWER_TZ).strftime("%d.%m %H:%M") if first[1] else None,
                            "markets": first[2] or 0, "on": bool(q["last"])}
             has_res = table_exists(conn, "mm_results")
             series, days_all = [], set()
-            for w, (name, desc) in MM_WALLETS.items():
-                c = {"key": w, "name": name, "desc": desc, "n": 0}
+            for w in MM_WALLETS:
+                c = _mm_card(conn, w)
+                if w == "mm100" and table_exists(conn, "mm100_state"):   # 02.10: счёт как в банке
+                    st = conn.execute("SELECT ts, cash, reserved, quotes FROM mm100_state ORDER BY ts DESC LIMIT 1").fetchone()
+                    if st:
+                        settled = conn.execute("SELECT COALESCE(SUM(pnl), 0) FROM mm_results WHERE wallet = 'mm100'").fetchone()[0] if has_res else 0.0
+                        acct = 100.0 + settled
+                        c["bank"] = {"acct": acct, "free": st["cash"] - st["reserved"], "orders": st["reserved"], "quotes": st["quotes"],
+                                     "pos": max(0.0, acct - st["cash"]), "when": _mm_dt(st["ts"])}
                 if has_res:
-                    r = conn.execute("""SELECT COUNT(*) AS m, SUM(n_fills > 0) AS mf, SUM(n_fills) AS n, SUM(sh_yes + sh_no) AS sh, SUM(spent) AS spent,
-                                        SUM(merged) AS merged, SUM(merge_pnl) AS mp, SUM(inv_pnl) AS ip, SUM(rebate) AS rb, SUM(pnl) AS pnl
-                                        FROM mm_results WHERE wallet = ?""", (w,)).fetchone()
-                    c.update({k: (r[k] or 0) for k in r.keys()})
-                    c["roi"] = 100 * c["pnl"] / c["spent"] if c["spent"] else None
-                    c["cps"] = 100 * c["pnl"] / c["sh"] if c["sh"] else None
                     by = dict(conn.execute("SELECT local_date, SUM(pnl) FROM mm_results WHERE wallet = ? GROUP BY local_date", (w,)).fetchall())
-                    if w != "mm_pol":  # у политики «день» — дата окончания маркета, на график по дням не кладём
+                    if w not in ("mm_pol", "mm_own"):  # у не погоды «день» — дата окончания маркета, на график по дням не кладём
                         days_all |= set(by)
                     c["by_day"] = by
+                c["main"] = w in MM_MAIN
+                c["off"] = w in MM_OFF
                 ctx["wallets"].append(c)
             days = sorted(days_all)
             if len(days) >= 2:
@@ -1632,7 +2029,7 @@ def mm_page(request: Request):
                     x["ru"] = CITY_RU.get(x["k"], x["k"])
                 ctx["cities"] = cs
                 ctx["recent"] = [dict(r) | {"city_ru": CITY_RU.get(r["city"], r["city"])} for r in conn.execute(
-                    """SELECT * FROM mm_results WHERE wallet = 'mm_all' AND n_fills > 0 ORDER BY local_date DESC, pnl DESC LIMIT 40""")]
+                    """SELECT * FROM mm_results WHERE wallet = 'mm100' AND n_fills > 0 ORDER BY local_date DESC, pnl DESC LIMIT 40""")]
                 for r in ctx["recent"]:
                     from weather_cities import OBS_CITIES
                     r["what"] = paper_bucket(r["bucket_lo"], r["bucket_hi"], OBS_CITIES.get(r["city"], {}).get("unit", "celsius"))
@@ -1643,12 +2040,81 @@ def mm_page(request: Request):
     return TEMPLATES.TemplateResponse("mm.html", ctx)
 
 
+@app.get("/mm/{key}", response_class=HTMLResponse)
+def mm_wallet_page(request: Request, key: str, tab: str = "markets", p: int = 1):
+    """Страница одного бота: все маркеты с итогом, все исполнения, все заявки (где они хранятся) — по 200 на страницу."""
+    if key not in MM_WALLETS:
+        raise HTTPException(status_code=404, detail="нет такого бота")
+    from weather_cities import OBS_CITIES
+    ctx = {"request": request, "w": None, "tab": tab, "p": max(p, 1), "rows": [], "pages": 1, "total": 0,
+           "has_quotes": key in MM_QUOTES, "decide": MM_DECIDE}
+    if not MM_DB.exists():
+        return TEMPLATES.TemplateResponse("mm_wallet.html", ctx)
+    conn = sqlite3.connect(f"file:{MM_DB}?mode=ro", uri=True, timeout=10)
+    conn.row_factory = sqlite3.Row
+    titles = _mm_titles()
+
+    def what(city, lo, hi, cid):
+        if city in ("pol", "own"):
+            return titles.get(cid) or (cid[:10] + "…")
+        return paper_bucket(lo, hi, OBS_CITIES.get(city, {}).get("unit", "celsius"))
+
+    try:
+        ctx["w"] = _mm_card(conn, key)
+        off = (ctx["p"] - 1) * MM_PAGE
+        if tab == "fills":
+            ft = _mm_fills_table(key)
+            if table_exists(conn, ft):
+                ctx["total"] = conn.execute(f"SELECT COUNT(*) FROM {ft} WHERE wallet = ?", (key,)).fetchone()[0]
+                rows = conn.execute(f"SELECT * FROM {ft} WHERE wallet = ? ORDER BY ts DESC LIMIT ? OFFSET ?", (key, MM_PAGE, off)).fetchall()
+                cache = {}
+                for r in rows:
+                    d = dict(r)
+                    if "bucket_lo" not in d:   # mm_fills: варианта нет в строке — берём из заявок
+                        if d["condition_id"] not in cache:
+                            q = conn.execute("SELECT bucket_lo, bucket_hi FROM mm_quotes WHERE condition_id = ? LIMIT 1", (d["condition_id"],)).fetchone()
+                            cache[d["condition_id"]] = (q[0], q[1]) if q else (None, None)
+                        d["bucket_lo"], d["bucket_hi"] = cache[d["condition_id"]]
+                    d["when"] = _mm_dt(d["ts"])
+                    d["city_ru"] = {"pol": "политика и прочее", "own": "свой выбор"}.get(d["city"], CITY_RU.get(d["city"], d["city"]))
+                    d["what"] = what(d["city"], d["bucket_lo"], d["bucket_hi"], d["condition_id"])
+                    ctx["rows"].append(d)
+        elif tab == "quotes" and key in MM_QUOTES and table_exists(conn, "mm_quotes"):
+            ctx["total"] = conn.execute(f"SELECT COUNT(*) FROM mm_quotes WHERE {MM_QUOTES[key]}").fetchone()[0]
+            for r in conn.execute(f"SELECT * FROM mm_quotes WHERE {MM_QUOTES[key]} ORDER BY ts_from DESC LIMIT ? OFFSET ?", (MM_PAGE, off)):
+                d = dict(r)
+                d["from"], d["to"] = _mm_dt(d["ts_from"]), _mm_dt(d["ts_to"])
+                d["city_ru"] = {"pol": "политика и прочее", "own": "свой выбор"}.get(d["city"], CITY_RU.get(d["city"], d["city"]))
+                d["what"] = what(d["city"], d["bucket_lo"], d["bucket_hi"], d["condition_id"])
+                if key == "mm_sel":
+                    d["yes_bid"] = d["yes_bid"] if d["sel_yes"] else None
+                    d["no_bid"] = d["no_bid"] if d["sel_no"] else None
+                ctx["rows"].append(d)
+        else:
+            ctx["tab"] = "markets"
+            if table_exists(conn, "mm_results"):
+                ctx["total"] = conn.execute("SELECT COUNT(*) FROM mm_results WHERE wallet = ?", (key,)).fetchone()[0]
+                for r in conn.execute("SELECT * FROM mm_results WHERE wallet = ? ORDER BY local_date DESC, settled_at DESC LIMIT ? OFFSET ?",
+                                      (key, MM_PAGE, off)):
+                    d = dict(r)
+                    d["city_ru"] = {"pol": "политика и прочее", "own": "свой выбор"}.get(d["city"], CITY_RU.get(d["city"], d["city"]))
+                    d["what"] = what(d["city"], d["bucket_lo"], d["bucket_hi"], d["condition_id"])
+                    d["settled"] = _mm_dt(d["settled_at"])
+                    ctx["rows"].append(d)
+        ctx["pages"] = max(1, -(-ctx["total"] // MM_PAGE))
+    except sqlite3.Error as e:
+        ctx["error"] = str(e)
+    finally:
+        conn.close()
+    return TEMPLATES.TemplateResponse("mm_wallet.html", ctx)
+
+
 # ---- /bets: все ставки всех кошельков — открытые и закрытые отдельно (2026-09-27, просьба Alex) ----
 # Оформление по пяти присланным макетам: пастельные плитки (Payoneer), «движение денег» по дням (Fundcy),
 # «последние» плиткой 2×2 со статусами (Finance Health), «ждут итога» с датой квадратиком (Upcoming Payments),
 # закрытые списком с круглым значком (Analytics / VISA).
 GROUP_TONE = {"Главная модель": "g1", "Другие версии обучаемой модели": "g2", "Прогноз по формулам (раньше)": "g3",
-              "Тот же сигнал, но покупка своей заявкой": "g4", "Повтор за сильными трейдерами": "g5", "Живые замеры": "g5"}
+              "Тот же сигнал, но покупка своей заявкой": "g4", "Повтор за сильными трейдерами": "g5", "Живые замеры": "g5", "LLM каждый час": "g2"}
 
 
 def _close_dt(city, local_date):
@@ -2219,6 +2685,15 @@ def audit_page(request: Request):
             last["data"]["last_snap_when"] = _when(_dt(last["data"]["last_snap"]), nv)
         if last["cron"].get("since"):
             last["cron"]["since_when"] = _when(_dt(last["cron"]["since"]), nv)
+    # 2026-10-02: резервная копия на HDD (backup_db.sh, крон 03:10) — итог последней копии
+    backup = None
+    try:
+        backup = json.loads((DB_PATH.parent.parent / "backup_status.json").read_text())
+        bt = datetime.fromisoformat(backup["at"])
+        backup.update(when=_when(bt, datetime.now(VIEWER_TZ)), size_txt=_size(backup.get("size_bytes", 0)),
+                      fresh=backup.get("status") == "ok" and (datetime.now(timezone.utc) - bt).total_seconds() < 26 * 3600)
+    except (OSError, ValueError, KeyError):
+        backup = None
     # 2026-09-28: вечерняя проверка перед ночью (weather_night_check.py, 23:30)
     night = None
     conn = db()
@@ -2246,7 +2721,7 @@ def audit_page(request: Request):
                 n["active"] = latest is not None and n["mode"] == latest["mode"]
     finally:
         conn.close()
-    return TEMPLATES.TemplateResponse("audit.html", {"request": request, "a": last, "history": history, "night": night})
+    return TEMPLATES.TemplateResponse("audit.html", {"request": request, "a": last, "history": history, "night": night, "backup": backup})
 
 
 # ---- живое обновление (2026-09-28, просьба Alex: «видеть, что сайт обновился, без перезагрузки») ----
@@ -2331,8 +2806,11 @@ def notes_page(request: Request):
     import notes
     today = notes.today()
     items = notes.all_notes()
+    now_t = datetime.now(notes.TZ).strftime("%H:%M")
     for n in items:
         n["days"] = (date.fromisoformat(n["due"]) - date.fromisoformat(today)).days
+        n["due_time"] = n.get("due_time") or notes.DEFAULT_TIME
+        n["time_passed"] = n["days"] < 0 or (n["days"] == 0 and now_t >= n["due_time"])   # 03.10: время уже наступило
     groups = [("Сегодня и просрочено", [n for n in items if not n["done_at"] and n["days"] <= 0], "due"),
               ("Впереди", [n for n in items if not n["done_at"] and n["days"] > 0], "next"),
               ("Сделано", [n for n in items if n["done_at"]], "done")]
@@ -2346,7 +2824,7 @@ async def notes_add(request: Request):
     try:
         every = d.get("every_days")
         nid = notes.add(str(d.get("due", "")), str(d.get("title", "")), str(d.get("body", "")),
-                        int(every) if every else None)
+                        int(every) if every else None, str(d.get("due_time") or "") or None)
     except ValueError as e:
         return {"ok": False, "error": f"не сохранено: {e}"}
     _NAV_CACHE["v"] = None

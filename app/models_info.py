@@ -27,8 +27,8 @@ MODELS = {
         "name": "v3 — главная", "badge": "v3", "kind": "ml", "status": "главная",
         "short": "Распределение максимума по 16 погодным моделям, утренним замерам и мнению рынка. Кандидат на реальные деньги.",
         "skill": "ml3", "skill_blend": "ml3_cal", "train_key": "ml3", "exam": True, "since": "2026-09-25",
-        "wallets": ["ml3", "ml3_cal", "ml3_mk", "ml3_no", "ml3_cal_k", "ml3_cal15", "ml3_city", "ml3_conf",
-                    "no_cheap", "no_mid", "no_big", "fav"],
+        "wallets": ["ml3", "ml3_cal", "ml3_mk", "ml3_no", "ml3_cal_k", "ml3_cal15", "ml3_cal30", "ml3_z", "ml3_city", "ml3_conf",
+                    "no_cheap", "no_mid", "no_big", "fav", "techno"],
         "how": [
             ("Идея", ["Модель учится по истории, насколько ошибается среднее 16 погодных моделей в каждом городе, "
                       "и поправляет его. Выдаёт не одно число, а шанс каждого варианта температуры.",

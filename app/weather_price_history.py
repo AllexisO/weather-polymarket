@@ -61,8 +61,8 @@ def ensure_schema(conn):
             t_utc INTEGER NOT NULL,
             p REAL,
             PRIMARY KEY (city, local_date, bucket_lo, t_utc)
-        )
-        """
+        ) WITHOUT ROWID
+        """   # 02.10: строка хранится один раз (без отдельного индекса) — −2 ГБ, чтение быстрее
     )
     conn.execute(
         """

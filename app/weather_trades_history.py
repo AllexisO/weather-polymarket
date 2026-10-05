@@ -93,8 +93,9 @@ def main():
     conn = sqlite3.connect(DB_PATH, timeout=60)
     conn.execute("""CREATE TABLE IF NOT EXISTS poly_trades (
         tx TEXT, condition_id TEXT, asset TEXT, outcome TEXT, side TEXT, price REAL, size REAL,
-        ts INTEGER, city TEXT, local_date TEXT,
-        PRIMARY KEY (tx, asset, ts, price, size, side))""")
+        ts INTEGER, city TEXT, local_date TEXT, wallet TEXT,
+        PRIMARY KEY (condition_id, ts, tx, asset, price, size, side)) WITHOUT ROWID""")
+    # 02.10: строка хранится один раз, ключ «маркет, время» первым — поиск сделок маркета в 2.6 раза быстрее, база на 0.6 ГБ меньше
     conn.execute("""CREATE TABLE IF NOT EXISTS poly_market_final (
         condition_id TEXT PRIMARY KEY, city TEXT, local_date TEXT, bucket_lo REAL, bucket_hi REAL, final_yes REAL)""")
     conn.execute("CREATE TABLE IF NOT EXISTS poly_trades_days (city TEXT, local_date TEXT, n INTEGER, PRIMARY KEY (city, local_date))")

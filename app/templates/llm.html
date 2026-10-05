@@ -1,0 +1,273 @@
+{% extends "base.html" %}
+{% block title %}LLM — weather-lab<div class="ltip" id="ltip" hidden></div>
+<script>
+(function () {
+  // 04.10 (просьба Alex): подсказка у точки графика — при наведении мышью и при нажатии на телефоне
+  var tip = document.getElementById('ltip');
+  function show(el) {
+    var r = el.getBoundingClientRect();
+    tip.textContent = el.getAttribute('data-tip').split(' · ').join('\n');
+    tip.style.whiteSpace = 'pre-line';
+    tip.hidden = false;
+    var x = Math.min(window.innerWidth - tip.offsetWidth - 8, Math.max(8, r.left + r.width / 2 - tip.offsetWidth / 2));
+    var y = r.top - tip.offsetHeight - 8;
+    tip.style.left = x + 'px'; tip.style.top = (y < 8 ? r.bottom + 8 : y) + 'px';
+  }
+  document.querySelectorAll('.viz .hit').forEach(function (el) {
+    el.querySelector('title') && el.querySelector('title').remove();
+    el.addEventListener('mouseenter', function () { show(el); });
+    el.addEventListener('focus', function () { show(el); });
+    el.addEventListener('click', function (e) { e.stopPropagation(); show(el); });
+    el.addEventListener('mouseleave', function () { tip.hidden = true; });
+  });
+  document.addEventListener('click', function () { tip.hidden = true; });
+  window.addEventListener('scroll', function () { tip.hidden = true; }, { passive: true });
+})();
+</script>
+{% endblock %}
+{% block content %}
+{#
+  04.10 (просьба Alex): LLM — отдельный раздел. Две LLM (weather_llm_hour.py) каждый час прогнозируют максимум дня и
+  температуру по часам; здесь — деньги и расход, факт против прогноза (24 ч и месяц), что LLM видела и что ответила,
+  как учится по дням. Данные — llm_page_data() в dashboard.py.
+#}
+{% macro money(v) -%}{{ '−' if v < -0.005 else ('+' if v > 0.005 else '') }}${{ '%.2f' | format(v | abs) }}{%- endmacro %}
+{% macro tone(v) -%}{{ 'pos' if v > 0.005 else ('neg' if v < -0.005 else '') }}{%- endmacro %}
+{% macro lines(c, title) -%}
+<svg class="viz" viewBox="0 0 {{ c.w }} {{ c.h }}" role="img" aria-label="{{ title }}">
+  <g class="grid">{% for t in c.ticks %}<line x1="{{ c.L }}" x2="{{ c.R }}" y1="{{ t.y }}" y2="{{ t.y }}"/><text class="ax" x="{{ c.L - 8 }}" y="{{ t.y + 4 }}" text-anchor="end">{{ t.label }}</text>{% endfor %}</g>
+  {% for x in c.xl %}<text class="ax" x="{{ x.x }}" y="{{ c.h - 12 }}" text-anchor="middle">{{ x.label }}</text>{% endfor %}
+  {% for s in c.series %}{% for d in s.paths %}{% if d %}<path class="ln {{ s.cls }}" d="{{ d }}"/>{% endif %}{% endfor %}{% endfor %}
+  {% for s in c.series %}{% for p in s.dots %}<circle class="pt {{ s.cls }}" cx="{{ p.x }}" cy="{{ p.y }}" r="3.6"/>
+    <circle class="hit" cx="{{ p.x }}" cy="{{ p.y }}" r="13" tabindex="0" data-tip="{{ p.tip }}"><title>{{ p.tip }}</title></circle>{% endfor %}
+    <text class="lab {{ s.cls }}" x="{{ s.end[0] + 12 }}" y="{{ s.ly + 5 }}">{{ s.name }} · {{ s.last }}</text>{% endfor %}
+</svg>
+{%- endmacro %}
+{% include "_mm_style.html" %}
+<style>
+  .viz .ln.s-market { stroke: #D3DDFB; } .viz .end.s-market { fill: #D3DDFB; }
+  .viz .ln { stroke-width: 2.6; stroke-linecap: round; }
+  .viz .pt { stroke: var(--bk-card); stroke-width: 1.5; } .viz .pt.s-real { fill: #A3E39A; } .viz .pt.s-model { fill: #FFD58A; } .viz .pt.s-market { fill: #D3DDFB; }
+  .viz .hit { fill: transparent; cursor: pointer; outline: none; } .viz .hit:hover, .viz .hit:focus { fill: rgba(255,255,255,.10); }
+  .viz text.lab { font-size: 13px; font-weight: 600; } .viz text.lab.s-real { fill: #A3E39A; } .viz text.lab.s-model { fill: #FFD58A; } .viz text.lab.s-market { fill: #D3DDFB; }
+  .viz text.ax { font-size: 12px; }
+  @media (max-width: 640px) { .viz text.ax { font-size: 21px; } .viz text.lab { font-size: 22px; } .viz .pt { r: 5.5; } .viz .ln { stroke-width: 3.5; } }
+  .ltip { position: fixed; z-index: 50; pointer-events: none; background: #262628; color: var(--bk-text); border: 1px solid var(--bk-line);
+          border-radius: 10px; padding: 7px 10px; font-size: 13.5px; max-width: 280px; box-shadow: 0 6px 20px rgba(0,0,0,.4); }
+  .key { display: inline-block; width: 14px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 6px; }
+  .key.s-real { background: #A3E39A; } .key.s-model { background: #FFD58A; } .key.s-market { background: #D3DDFB; }
+  .tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 14px; }
+  .tabs a { padding: 7px 14px; border-radius: 999px; border: 1px solid var(--bk-line); color: var(--bk-muted); text-decoration: none; font-size: 14px; }
+  .tabs a.on { border-color: var(--bk-accent); color: var(--bk-text); box-shadow: inset 0 0 0 1px var(--bk-accent); }
+  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)); gap: 14px; }
+  .big { font-size: 28px; font-weight: 600; display: block; margin: 4px 0; }
+  .bar { height: 6px; background: var(--bk-raise); border-radius: 3px; overflow: hidden; margin-top: 8px; }
+  .bar i { display: block; height: 100%; background: var(--bk-accent); }
+  pre.letter { white-space: pre-wrap; word-break: break-word; background: var(--bk-raise); border-radius: 12px; padding: 14px 16px; font-size: 13px;
+               line-height: 1.5; max-height: 520px; overflow: auto; margin: 0; font-family: ui-monospace, Menlo, monospace; }
+  table.t { width: 100%; border-collapse: collapse; font-size: 14px; }
+  table.t th { text-align: left; color: var(--bk-muted); font-weight: 500; padding: 6px 8px; border-bottom: 1px solid var(--bk-line); }
+  table.t td { padding: 7px 8px; border-bottom: 1px solid var(--bk-line); vertical-align: top; }
+  .tw { overflow-x: auto; }
+  table.hours td, table.hours th { text-align: center; padding: 5px 6px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  table.hours td:first-child, table.hours th:first-child { text-align: left; position: sticky; left: 0; background: var(--bk-card); }
+  table.hours th.both { color: var(--bk-text); }
+  .hr { display: flex; flex-wrap: wrap; gap: 2px 12px; align-items: baseline; } .hr span { white-space: nowrap; }
+  .bk { overflow-wrap: anywhere; } .pane { min-width: 0; } .grid2 > * { min-width: 0; }
+  .lesson { color: var(--bk-text); } .muted { color: var(--bk-muted); }
+  .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+  .steps div { background: var(--bk-raise); border-radius: 12px; padding: 12px 14px; font-size: 14px; }
+  .steps b { display: block; margin-bottom: 4px; }
+</style>
+<div class="bk">
+  <div class="top">
+    <h1>LLM <span class="tag">виртуально</span></h1>
+    <p>Две языковые модели каждый час с 05:00 до 19:00 по местному времени (ставки — с 08:00) смотрят всё, что известно о дне в 5 городах США и Лондоне, и называют
+      максимум дня и температуру по часам. Если шанс варианта по их мнению выше цены — ставят $2 (одна ставка на город в день).
+      Учатся на своих ошибках: в каждом запросе видят свои прошлые прогнозы рядом с настоящей температурой. Решение — 18.10.</p>
+  </div>
+
+  <!-- деньги и расход -->
+  <section class="sec">
+    <div class="grid2">
+      {% for c in cards %}
+      <a class="pane" href="/llm?w={{ c.key }}&city={{ city }}" style="text-decoration: none; color: inherit;{% if c.key == key %} box-shadow: inset 0 0 0 1px var(--bk-accent);{% endif %}">
+        <h3 style="margin: 0;">{{ c.model }} <span class="muted" style="font-size: 13px; font-weight: 400;">{{ c.key }}</span></h3>
+        <span class="big num">${{ '%.2f' | format(c.free) }}</span>
+        <div class="muted" style="font-size: 13.5px;">свободно из $100 · в игре ${{ '%.2f' | format(c.in_play) }} ({{ c.open }} ставок)</div>
+        <div style="margin-top: 8px; font-size: 14px;">Закрыто ставок: <b>{{ c.n }}</b>{% if c.n %}, угадано {{ c.won }} · итог <b class="{{ tone(c.pnl) }}">{{ money(c.pnl) }}</b>{% if c.roi is not none %} ({{ '%+.0f' | format(c.roi) }}%){% endif %}{% endif %}</div>
+      </a>
+      {% endfor %}
+      <div class="pane">
+        <h3 style="margin: 0;">Потрачено на LLM</h3>
+        <span class="big num">${{ '%.2f' | format(spend.month) }}</span>
+        <div class="muted" style="font-size: 13.5px;">в этом месяце из ${{ '%.2f' | format(spend.limit_month) }} (лимит в коде)</div>
+        <div class="bar"><i style="width: {{ [100, 100 * spend.month / spend.limit_month] | min }}%;"></i></div>
+        <div style="margin-top: 10px; font-size: 13.5px;">
+          {% for c in cards %}{{ c.model }}: ${{ '%.2f' | format(c.spent_month) }} из ${{ '%.2f' | format(c.limit) }} · {{ c.calls }} запросов{% if c.per_call %}, ~${{ '%.4f' | format(c.per_call) }} за запрос{% endif %}<br>{% endfor %}
+          <span class="muted">Всего за всё время ${{ '%.2f' | format(spend.all) }} из ${{ '%.0f' | format(spend.key_limit) }} на ключе OpenRouter.</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- открытые ставки (04.10, просьба Alex «ставит LLM или нет») -->
+  <section class="sec">
+    <div class="sec-head"><h2>Открытые ставки</h2><span class="aside">ждут итога маркета; правило — одна ставка на город в день, если шанс LLM выше цены на 5 п.п., с 08:05</span></div>
+    <div class="pane tw">
+      {% if open_bets %}<table class="t"><thead><tr><th>LLM</th><th>День</th><th>Город</th><th>Ставка</th><th>Купила</th><th>Цена</th><th>Шанс LLM</th><th>Потрачено</th><th>Если выиграет</th></tr></thead><tbody>
+        {% for b in open_bets %}<tr><td>{{ b.model }}</td><td>{{ b.date }}</td><td>{{ b.city }}</td><td><b>«{{ b.side }}» {{ b.bucket }}</b></td><td>{{ b.when }}</td>
+          <td>{{ '%.0f' | format(b.price * 100) }}¢</td><td>{{ '%.0f' | format(b.chance * 100) if b.chance is not none else '—' }}%</td>
+          <td>${{ '%.2f' | format(b.cost) }}</td><td class="pos">+${{ '%.2f' | format(b.win - b.cost) }}</td></tr>{% endfor %}
+      </tbody></table>
+      <p class="foot" style="margin: 8px 0 0;">Всего открыто {{ open_bets | length }}. «Если выиграет» — выплата $1 за долю минус потраченное; проиграет — минус «потрачено». Итог считается после закрытия маркета (обычно ночью).</p>
+      {% else %}<p style="margin: 0;">Сейчас открытых ставок нет. LLM ставит, только когда её шанс выше цены на 5 п.п.; по закрытым — таблица «Ставки» внизу.</p>{% endif %}
+    </div>
+  </section>
+
+  <!-- выбор LLM и города -->
+  <div class="tabs">{% for c in cards %}<a href="/llm?w={{ c.key }}&city={{ city }}" class="{{ 'on' if c.key == key }}">{{ c.model }}</a>{% endfor %}</div>
+  <div class="tabs">{% for c, ru, ck in cities %}<a href="/llm?w={{ key }}&city={{ c }}" class="{{ 'on' if c == city }}" title="{{ ck.state }}">{{ ru }}
+    <span class="num" style="margin-left: 6px; color: {{ 'var(--bk-pos)' if ck.on else 'var(--bk-faint)' }};">{{ ck.time }}</span></a>{% endfor %}</div>
+  {% set ck = (cities | selectattr(0, 'equalto', city) | first)[2] %}
+  <p class="foot" style="margin: -6px 0 14px;">Сейчас в городе {{ ck.time }} ({{ ck.tz }}) — LLM {{ ck.state }}. Работает с 05:05 до 19:05 по местному времени, раз в час (ставки — с 08:05); зелёное время — работает, серое — спит.</p>
+
+  {% if not day %}
+  <div class="pane"><p style="margin: 0;">По этому городу у {{ model }} ещё нет прогнозов.</p></div>
+  {% else %}
+  <div class="pane" style="margin-bottom: 14px; padding-top: 14px; padding-bottom: 14px;">
+    {% if city_bet.bet %}{% set b = city_bet.bet %}<b>Ставка {{ model }} здесь сегодня:</b> «{{ b.side }}» {{ b.bucket }} по {{ '%.0f' | format(b.price * 100) }}¢ (шанс LLM {{ '%.0f' | format(b.chance * 100) }}%), потрачено ${{ '%.2f' | format(b.cost) }} —
+      {% if b.pnl is not none %}<b class="{{ tone(b.pnl) }}">{{ 'выиграла' if b.status == 'won' else ('проиграла' if b.status == 'lost' else 'отменён') }} {{ money(b.pnl) }}</b>{% else %}<span class="muted">ждём итога, если выиграет +${{ '%.2f' | format(b.win - b.cost) }}</span>{% endif %}
+    {% else %}<b>Ставки {{ model }} здесь сегодня нет.</b> {% if city_bet.edge %}В последний час лучший перевес — {{ '%+.0f' | format(city_bet.edge[0] * 100) }} п.п. на «{{ city_bet.edge[1] }}» {{ city_bet.edge[2] }} (по средней цене рынка; ставка — от +5 п.п. по цене продавца).{% else %}LLM ставит с 08:05, если её шанс выше цены на 5 п.п.{% endif %}{% endif %}
+  </div>
+
+  <!-- 24 часа -->
+  <section class="sec">
+    <div class="sec-head"><h2>24 часа · {{ day[8:10] }}.{{ day[5:7] }}</h2>
+      <span class="aside">{% for dd in days[-7:] %}<a href="/llm?w={{ key }}&city={{ city }}&d={{ dd }}" style="margin-left: 8px;{% if dd == day %} color: var(--bk-text); font-weight: 600;{% endif %}">{{ dd[8:10] }}.{{ dd[5:7] }}</a>{% endfor %}</span></div>
+    <div class="pane chart">
+      <div class="muted" style="font-size: 13.5px; margin-bottom: 6px;"><span class="key s-real"></span>факт — температура в аэропорту за сегодня
+        <span class="key s-model" style="margin-left: 14px;"></span>LLM — её прогноз на этот час (точка появляется в :05 часом раньше, факт догоняет)</div>
+      {% if day_chart %}{{ lines(day_chart, "Температура по часам: факт и прогноз LLM") }}{% else %}<div class="empty">Мало точек для графика.</div>{% endif %}
+      {% if day_rows %}<div class="tw" style="margin-top: 10px;"><table class="t hours">
+        <tr><th>Час</th>{% for r in day_rows %}<th class="{{ 'both' if r.err is not none }}">{{ '%02d' | format(r.h) }}</th>{% endfor %}</tr>
+        <tr><td style="color: #A3E39A;">Факт</td>{% for r in day_rows %}<td>{{ '%.1f' | format(r.fact) if r.fact is not none else '·' }}</td>{% endfor %}</tr>
+        <tr><td style="color: #FFD58A;">LLM</td>{% for r in day_rows %}<td>{{ '%.1f' | format(r.llm) if r.llm is not none else '·' }}</td>{% endfor %}</tr>
+        <tr><td>Ошибка LLM</td>{% for r in day_rows %}<td>{% if r.err is not none %}<b class="{{ 'neg' if r.err | abs > 2 else ('pos' if r.err | abs <= 1 else '') }}">{{ '%+.1f' | format(r.err) }}</b>{% else %}·{% endif %}</td>{% endfor %}</tr>
+      </table></div>
+      <p class="foot" style="margin: 6px 0 0;">Где точки легли друг на друга — LLM почти угадала. Ошибка: зелёным — до 1°, персиковым — больше 2°.</p>{% endif %}
+      <p class="foot" style="margin: 8px 0 0;">Максимум дня: по факту <b>{{ ('%.0f' | format(day_max.fact)) ~ unit if day_max.fact is not none else ('пока ' ~ (('%.0f' | format(day_max.seen)) ~ unit) if day_max.seen is not none else 'ждём') }}</b>{% if day_max.fact is none %} (итог считается ночью){% endif %}.
+        LLM по часам: {% for h, v in day_max.pred %}<span style="white-space: nowrap;">{{ '%02d' | format(h) }}:00 — <b>{{ '%.0f' | format(v) if v is not none else '—' }}°</b></span>{% if not loop.last %} · {% endif %}{% endfor %}.
+       </p>
+    </div>
+  </section>
+
+  <!-- месяц -->
+  <section class="sec">
+    <div class="sec-head"><h2>Месяц: максимум дня</h2><span class="aside">прогноз — первый за день (утро), факт — итог дня</span></div>
+    <div class="pane chart">
+      <div class="muted" style="font-size: 13.5px; margin-bottom: 6px;"><span class="key s-real"></span>факт <span class="key s-model" style="margin-left: 14px;"></span>LLM утром
+        <span class="key s-market" style="margin-left: 14px;"></span>рынок утром (самый дорогой вариант)</div>
+      {% if month_chart %}{{ lines(month_chart, "Максимум дня: факт, LLM и рынок утром") }}{% else %}<div class="empty">График появится со второго дня.</div>{% endif %}
+      <p class="foot" style="margin: 8px 0 0;">Если LLM учится, жёлтая линия со временем прижимается к зелёной — и ближе, чем лавандовая (рынок).</p>
+    </div>
+  </section>
+
+  <!-- как учится -->
+  <section class="sec">
+    <div class="sec-head"><h2>Как учится: что мы ей дали и что она поняла</h2></div>
+    <div class="steps" style="margin-bottom: 14px;">
+      <div><b>1. Разбор прошлого часа</b>Каждый час в :05 она видит, что предсказала на прошлый час и что было по факту, и пишет, где ошиблась и почему.</div>
+      <div><b>2. Тетрадь</b>Свои выводы она записывает правилами про эту станцию (до 12). Тетрадь переходит из часа в час и из дня в день — это её память.</div>
+      <div><b>3. Прогноз</b>С тетрадью, замерами, положением солнца, облаками, ветром и прогнозами моделей — температура на каждый оставшийся час и максимум дня.</div>
+      <div><b>4. Ставка</b>Если шанс варианта по её прогнозу выше цены на 5 п.п. — $2. Учится — значит ошибка «на час вперёд» от дня к дню падает.</div>
+    </div>
+    <div class="grid2" style="margin-bottom: 14px; grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr));">
+      <div class="pane">
+        <h3 style="margin: 0 0 8px;">Тетрадь {{ model }} · {{ (cities | selectattr(0, 'equalto', city) | first)[1] }}</h3>
+        {% if notebook %}<ol style="margin: 0; padding-left: 20px; line-height: 1.55;">{% for x in notebook %}<li>{{ x }}</li>{% endfor %}</ol>
+        <p class="foot" style="margin: 8px 0 0;">Обновлена {{ notebook_when }} местного. Эти правила она видит в каждом запросе.</p>
+        {% else %}<p class="muted" style="margin: 0;">Тетрадь пока пуста — она начнёт её со следующего часа.</p>{% endif %}
+      </div>
+      <div class="pane chart">
+        <h3 style="margin: 0 0 8px;">Учится ли: ошибка прогноза на час вперёд</h3>
+        <div class="muted" style="font-size: 13px; margin-bottom: 4px;"><span class="key s-model"></span>LLM <span class="key s-market" style="margin-left: 12px;"></span>«через час будет как сейчас» — LLM должна быть ниже</div>
+        {% if hour_err_chart %}{{ lines(hour_err_chart, "Средняя ошибка прогноза на час вперёд по дням") }}
+        {% elif hour_err_now %}<p style="margin: 0;">Сегодня в среднем <b>{{ '%.1f' | format(hour_err_now[0]) }}{{ unit }}</b> ({{ hour_err_now[1] }} ч){% if hour_err_now[2] is not none %}; «просто повторить последний замер» — {{ '%.1f' | format(hour_err_now[2]) }}{{ unit }}{% endif %}. График по дням — со второго дня; если она учится, линия идёт вниз.</p>
+        {% else %}<p class="muted" style="margin: 0;">Появится после первого часа, который можно сравнить.</p>{% endif %}
+      </div>
+    </div>
+    {% if review %}
+    <div class="pane tw" style="margin-bottom: 14px;">
+      <h3 style="margin: 0 0 8px;">Разбор каждого часа · {{ day[8:10] }}.{{ day[5:7] }}</h3>
+      <table class="t"><thead><tr><th>Запрос</th><th>Сказала на следующий час</th><th>Было</th><th>Ошибка</th><th>Её разбор прошлого часа</th></tr></thead><tbody>
+        {% for r in review | reverse %}<tr><td>{{ '%02d' | format(r.h) }}:05</td>
+          <td>{{ '%02d' | format(r.tgt) }}:00 — <b>{{ '%.1f' | format(r.f) if r.f is not none else '—' }}°</b></td>
+          <td>{{ '%.1f°' | format(r.a) if r.a is not none else 'ждём' }}</td>
+          <td>{% if r.f is not none and r.a is not none %}<b class="{{ 'neg' if (r.f - r.a) | abs > 2 else '' }}">{{ '%+.1f' | format(r.f - r.a) }}°</b>{% else %}—{% endif %}</td>
+          <td class="lesson">{{ r.refl or '—' }}</td></tr>{% endfor %}
+      </tbody></table>
+      <p class="foot" style="margin: 8px 0 0;">Разбор в строке написан в этот час — про прошлый час. Ошибка: плюс — завысила, минус — занизила.</p>
+    </div>
+    {% endif %}
+    {% if notebook_hist %}
+    <details class="pane" style="margin-bottom: 14px;"><summary style="cursor: pointer;">Как менялась тетрадь · {{ notebook_hist | length }} правил</summary>
+      <table class="t" style="margin-top: 8px;"><thead><tr><th>Когда записала</th><th>Правило</th><th></th></tr></thead><tbody>
+        {% for r in notebook_hist %}<tr><td>{{ r.when }}</td><td>{{ r.rule }}</td><td>{% if r.kept %}<span class="pos">в тетради</span>{% else %}<span class="muted">вычеркнула</span>{% endif %}</td></tr>{% endfor %}
+      </tbody></table></details>
+    {% endif %}
+    <div class="pane tw">
+      <table class="t">
+        <thead><tr><th>День</th><th>Факт</th><th>Её прогнозы по часам</th><th>Ошибка</th><th>Главный вывод дня</th></tr></thead>
+        <tbody>
+        {% for r in learn %}<tr>
+          <td>{{ r.date[8:10] }}.{{ r.date[5:7] }}</td>
+          <td>{{ '%.0f°' | format(r.fact) if r.fact is not none else 'ждём' }}</td>
+          <td><div class="hr">{% for h, v in r.preds %}<span>{{ '%02d' | format(h) }}:00 <b>{{ '%.0f' | format(v) if v is not none else '—' }}</b></span>{% endfor %}</div></td>
+          <td>{% if r.err is not none %}<b class="{{ 'neg' if r.abs > 2 else '' }}">{{ '%+.1f' | format(r.err) }}°</b>{% else %}—{% endif %}</td>
+          <td class="lesson">{{ r.lesson or '—' }}</td></tr>{% endfor %}
+        </tbody>
+      </table>
+      <p class="foot" style="margin: 8px 0 0;">Ошибка — среднее (прогноз − факт) по всем часам дня: плюс — завышала, минус — занижала. Учится — значит ошибка от дня к дню уменьшается, а выводы становятся конкретнее.</p>
+    </div>
+  </section>
+
+  <!-- что видела в последний час -->
+  {% if last %}
+  <section class="sec">
+    <div class="sec-head"><h2>Что LLM видела в последний час</h2><span class="aside">{{ last.when }} · запрос ${{ '%.4f' | format(last.cost or 0) }}</span></div>
+    <div class="grid2" style="grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr));">
+      <div class="pane">
+        <h3 style="margin: 0 0 8px;">Письмо целиком</h3>
+        {% if last.prompt %}<pre class="letter">{{ last.prompt }}</pre>
+        {% else %}<p class="muted" style="margin: 0;">Письма сохраняются с 04.10 — этот запрос был раньше.</p>{% endif %}
+        <p class="foot" style="margin: 8px 0 0;">Её ошибки в письме — блоки «YOUR NOTEBOOK» (её тетрадь), «YOUR HOUR-AHEAD FORECASTS vs ACTUAL» (прогнозы на час вперёд против факта) и в конце — максимумы прошлых дней.</p>
+      </div>
+      <div class="pane">
+        <h3 style="margin: 0 0 8px;">Что ответила</h3>
+        <div style="font-size: 15px;">Максимум дня: <b>{{ '%.1f' | format(last.pred) if last.pred is not none else '—' }}{{ unit }}</b> <span class="muted">(уже измерено {{ '%.0f' | format(last.seen) if last.seen is not none else '—' }}{{ unit }})</span></div>
+        {% if last.reflection %}<p style="margin: 10px 0 0;"><span class="muted">Разбор прошлого часа:</span> <span class="lesson">{{ last.reflection }}</span></p>{% endif %}
+        {% if last.lesson %}<p style="margin: 10px 0 0;"><span class="muted">Что поняла из ошибок:</span> <span class="lesson">{{ last.lesson }}</span></p>{% endif %}
+        {% if last.reason %}<p style="margin: 8px 0 0;"><span class="muted">Почему:</span> {{ last.reason }}</p>{% endif %}
+        {% if last.hourly %}<p class="hr" style="margin: 10px 0 0;"><span class="muted">По часам:</span> {% for h, v in last.hourly %}<span>{{ h }}:00 <b>{{ '%.0f' | format(v) }}°</b></span>{% endfor %}</p>{% endif %}
+        <table class="t" style="margin-top: 10px;"><thead><tr><th>Вариант</th><th>Шанс LLM</th><th>Цена рынка</th></tr></thead><tbody>
+          {% for lab, p, m in last.probs %}<tr><td>{{ lab }}</td><td><b>{{ '%.0f' | format(p * 100) }}%</b></td><td>{{ '%.0f' | format(m * 100) if m is not none else '—' }}¢</td></tr>{% endfor %}
+        </tbody></table>
+      </div>
+    </div>
+  </section>
+  {% endif %}
+  {% endif %}
+
+  <!-- ставки -->
+  <section class="sec">
+    <div class="sec-head"><h2>Ставки {{ model }}</h2><span class="aside">все города, последние 40</span></div>
+    <div class="pane tw">
+      {% if bets %}<table class="t"><thead><tr><th>День</th><th>Город</th><th>Ставка</th><th>Цена</th><th>Шанс LLM</th><th>Потрачено</th><th>Итог</th></tr></thead><tbody>
+        {% for b in bets %}<tr title="{{ b.why }}"><td>{{ b.date }}</td><td>{{ b.city }}</td><td>«{{ b.side }}» {{ b.bucket }}</td><td>{{ '%.0f' | format(b.price * 100) }}¢</td>
+          <td>{{ '%.0f' | format(b.chance * 100) if b.chance is not none else '—' }}%</td><td>${{ '%.2f' | format(b.cost) }}</td>
+          <td>{% if b.pnl is not none %}<b class="{{ tone(b.pnl) }}">{{ money(b.pnl) }}</b>{% else %}<span class="muted">ждём</span>{% endif %}</td></tr>{% endfor %}
+      </tbody></table>{% else %}<p class="muted" style="margin: 0;">Ставок пока нет.</p>{% endif %}
+    </div>
+  </section>
+</div>
+{% endblock %}

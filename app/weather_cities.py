@@ -142,3 +142,14 @@ OBS_CITIES = {
 }
 
 _with_coords()
+
+
+# 2026-09-30 (Alex: проверить Гонконг и Тайбэй): города ТОЛЬКО для кошельков по замерам (obs_fast) — не входят в 48 городов
+# прогнозов и ставок моделей (список городов — решение Alex). Гонконг резолвится по «Absolute Daily Max» Гонконгской
+# обсерватории (HKO, «максимум с полуночи» — открытые данные каждые 10 мин), Тайбэй — по Weather Underground RCSS (METAR).
+EXTRA_OBS_CITIES = {
+    "hong_kong": {"icao": None, "iem": None, "tz": "Asia/Hong_Kong", "unit": "celsius", "poly_slug": "hong-kong", "nws5": False,
+                  "hko": "HK Observatory"},
+    "taipei": _c("RCSS", "Asia/Taipei", "celsius", "taipei"),
+}
+ALL_OBS_CITIES = {**OBS_CITIES, **EXTRA_OBS_CITIES}

@@ -56,6 +56,7 @@ import os
 import re
 import sqlite3
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
@@ -64,7 +65,7 @@ from zoneinfo import ZoneInfo
 import requests
 
 from polyexec import final_price, simulate_buy, trading_stopped
-from weather_cities import OBS_CITIES
+from weather_cities import ALL_OBS_CITIES, OBS_CITIES
 from weather_edge import GAMMA, month_day_year_slug, parse_bucket
 from weather_poly_resolve import fetch_winning_bucket
 
@@ -188,7 +189,7 @@ def fetch_missing_outcomes(conn, now):
         """
     ).fetchall():
         try:
-            win = fetch_winning_bucket(OBS_CITIES[r["city"]]["poly_slug"], datetime.fromisoformat(r["local_date"]).date())
+            win = fetch_winning_bucket(ALL_OBS_CITIES[r["city"]]["poly_slug"], datetime.fromisoformat(r["local_date"]).date())
         except requests.RequestException:
             continue
         if win:
@@ -203,7 +204,7 @@ def settle(conn, now):
     """Выплата = доли No × цена закрытия доли No (1 / 0 / 0.5 при отмене)."""
     cache = {}
     for r in conn.execute("SELECT * FROM paper_obs_trades WHERE status = 'open' AND stake > 0").fetchall():
-        slug = (f"highest-temperature-in-{OBS_CITIES[r['city']]['poly_slug']}-on-"
+        slug = (f"highest-temperature-in-{ALL_OBS_CITIES[r['city']]['poly_slug']}-on-"
                 f"{month_day_year_slug(datetime.fromisoformat(r['local_date']).date())}")
         try:
             fp = final_price(slug, (r["bucket_lo"], r["bucket_hi"]), "no", parse_bucket, cache)
@@ -273,8 +274,16 @@ def run():
     # 2026-09-28: aviationweather не ответил за 30 с — раньше падал весь запуск; теперь идём дальше на втором
     # источнике (tgftp ниже), а сбой — пропуск («с пропусками» на /status), не падение.
     try:
-        r = requests.get(METAR_API, params={"ids": ",".join(icaos), "hours": 30, "format": "json"}, timeout=30)
-        r.raise_for_status()
+        # 2026-09-30: разовая задержка aviationweather (1 раз из 2171 запуска) — одна повторная попытка через 5 с
+        for attempt in range(2):
+            try:
+                r = requests.get(METAR_API, params={"ids": ",".join(icaos), "hours": 30, "format": "json"}, timeout=30)
+                r.raise_for_status()
+                break
+            except requests.RequestException:
+                if attempt:
+                    raise
+                time.sleep(5)
         awc = r.json()
         if not isinstance(awc, list):
             raise ValueError(f"ответ не список: {str(awc)[:100]}")

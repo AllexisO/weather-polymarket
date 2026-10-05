@@ -80,7 +80,7 @@
 <div class="bk">
   <div class="top">
     <h1>Обучение модели</h1>
-    <p>Каждую ночь в 05:20 обучаемые модели (v1, v2 и главная v3) заново учатся на всей истории — с 01.06.2025 по вчерашний день.
+    <p>Каждую ночь в 05:20 обучаемые модели (v1, v2, главная v3, v4, v4e, v5) заново учатся на всей истории — с 01.06.2025 по вчерашний день.
       Здесь видно, что именно произошло: какие данные взяты, что обучено, как модель сдала экзамен и на что она смотрит.</p>
   </div>
 
@@ -147,6 +147,24 @@
       </ol>
     </div>
   </section>
+
+  {% if exam_all %}
+  <section class="sec">
+    <h2>Экзамен всех версий</h2>
+    <div class="pane scroll">
+      <p class="muted" style="margin: 0 0 8px; font-size: 14px;">Каждая версия заново учится без последних 14 дней ({{ exam_all['from'][8:10] }}.{{ exam_all['from'][5:7] }}–{{ exam_all.to[8:10] }}.{{ exam_all.to[5:7] }}) и сдаёт их как незнакомые — на одних и тех же {{ exam_all.n_prob }} город-днях. Логошибка рынка — <b class="num">{{ '%.3f' | format(exam_all.ll_market) }}</b>, меньше — лучше.</p>
+      <table>
+        <thead><tr><th>Версия</th><th>Сама модель</th><th>Против рынка</th><th>Смесь 35/65 с рынком</th><th>Против рынка</th><th>Ошибка, °C</th></tr></thead>
+        <tbody>{% for k, v in exam_all.versions.items() %}<tr>
+          <td><a href="/models/{{ {'ml': 'v1', 'ml2': 'v2', 'ml3': 'v3', 'ml4': 'v4', 'ml4e': 'v4e', 'ml5': 'v5'}[k] }}"><b>{{ v.name }}</b></a>{% if k == 'ml3' %} <span class="muted">(главная)</span>{% endif %}</td>
+          <td class="num">{{ '%.3f' | format(v.ll_model) }}</td><td><span class="badge {{ TONE[v.verdict.tone] }}">{{ v.verdict.label.replace('опережаем', 'опережает').replace('отстаём', 'отстаёт') }}</span></td>
+          <td class="num">{{ '%.3f' | format(v.ll_blend) }}</td><td><span class="badge {{ TONE[v.verdict_b.tone] }}">{{ v.verdict_b.label.replace('опережаем', 'опережает').replace('отстаём', 'отстаёт') }}</span></td>
+          <td class="num">{{ '%.2f' | format(v.err) }}</td></tr>{% endfor %}</tbody>
+      </table>
+      <p class="foot">Разница меньше 0.015 — «наравне» (обычный разброс между обучениями). Соседние ночи делят 13 из 14 дней — смотреть на тенденцию, а не на одну ночь.</p>
+    </div>
+  </section>
+  {% endif %}
 
   {% if last.importance %}
   <section class="sec">

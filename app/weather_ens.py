@@ -34,6 +34,7 @@ from weather_edge import CITIES
 
 DB_PATH = Path(os.environ.get("POLY_LAB_DB", Path(__file__).parent.parent / "data" / "db" / "polymarket_lab.sqlite3"))
 ENS_API = "https://ensemble-api.open-meteo.com/v1/ensemble"
+MODEL_RU = {"ecmwf_ifs025": "ECMWF", "gfs025": "GEFS", "icon_seamless": "ICON", "ecmwf_aifs025": "AIFS", "ukmo_global": "UKMO", "gem_global": "GEM"}
 MODELS = {"ecmwf_ifs025": "ecmwf_ifs025_ensemble", "gfs025": "ncep_gefs025", "icon_seamless": "icon_seamless_eps",
           # 2026-09-28: + нейросеть ECMWF (AIFS), британский и канадский ансамбли — больше независимых
           # мнений о разбросе. Австралийский (bom_access_global_ensemble) Open-Meteo отдаёт пустым — не берём.
@@ -71,13 +72,17 @@ def main():
     conn.commit()
     # собран = есть сами варианты (до 28.09 писали только сводку — такие дни в окне догружаем)
     done = {(r[0], r[1]) for r in conn.execute("SELECT DISTINCT city, local_date FROM ens_forecasts WHERE members_json IS NOT NULL")}
-    n_ok = 0
+    n_ok, n_wait, n_done = 0, 0, 0
     for city, cfg in OBS_CITIES.items():
         with item_guard(city, conn):
             tz = ZoneInfo(cfg["tz"])
             now = datetime.now(tz)
             d = now.date().isoformat()
-            if now.hour not in WINDOW or (city, d) in done or city not in CITIES:
+            if (city, d) in done:
+                n_done += 1
+                continue
+            if now.hour not in WINDOW or city not in CITIES:
+                n_wait += 1
                 continue
             c = CITIES[city]
             try:
@@ -100,8 +105,19 @@ def main():
                                 p10_c, p50_c, p90_c, members_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", rows)
             conn.commit()
             n_ok += bool(rows)
+            if rows:   # 01.10 (Alex: «побольше информации»): что именно собрано по городу — в лог запуска
+                f = cfg["unit"] == "fahrenheit"
+                u = (lambda x: x * 9 / 5 + 32) if f else (lambda x: x)
+                allv = [u(v) for r in rows for v in json.loads(r[10])]
+                per = sorted(((MODEL_RU.get(r[2], r[2]), u(r[5]), r[4]) for r in rows), key=lambda x: x[1])
+                miss = [MODEL_RU[k] for k in MODELS if k not in {r[2] for r in rows}]
+                deg = "°F" if f else "°C"
+                print(f"{city} ({d[8:10]}.{d[5:7]}, {now:%H:%M} местного): {len(rows)} ансамблей, {len(allv)} вариантов; максимум: середина "
+                      f"{q(allv, 0.5):.1f}{deg}, 10-90% {q(allv, 0.1):.1f}…{q(allv, 0.9):.1f}{deg}; по моделям: "
+                      + ", ".join(f"{m} {v:.1f} ({n})" for m, v, n in per)
+                      + f"; расхождение моделей {per[-1][1] - per[0][1]:.1f}{deg}" + (f"; нет: {', '.join(miss)}" if miss else ""), flush=True)
             time.sleep(2)
-    print(f"ансамбли: записано городов {n_ok}")
+    print(f"ансамбли: записано городов {n_ok}; уже собраны сегодня {n_done}; ждут окна 05-08 местного {n_wait}")
     from jobmark import mark
     mark(conn, "weather_ens")
     conn.close()
