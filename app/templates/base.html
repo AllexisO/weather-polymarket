@@ -410,6 +410,7 @@
       <div class="side-group-label">Инструменты</div>
       {{ navlink('/status', 'здоровье системы', 'status', path == '/status', nc.alerts if nc.alerts else none, 'bad' if nc.alerts else '') }}
       {{ navlink('/events', 'события', 'news', path == '/events') }}
+      {{ navlink('/services', 'сервисы', 'plug', path == '/services') }}
       {{ navlink('/notes', 'заметки', 'notes', path == '/notes', nc.notes if nc.notes else none, 'warn' if nc.notes else '') }}
       {{ navlink('/audit', 'проверка', 'target', path == '/audit', ('ok' if nc.audit == 0 else nc.audit) if nc.audit is not none else none, 'good' if nc.audit == 0 else ('bad' if nc.audit else '')) }}
      </div>

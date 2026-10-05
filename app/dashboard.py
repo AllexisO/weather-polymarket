@@ -2814,6 +2814,30 @@ async def api_stream(request: Request):
 
 
 # ---- заметки с датой (2026-09-28, просьба Alex: «до 12 октября я всё забуду») — notes.py ----
+@app.get("/services", response_class=HTMLResponse)
+def services_page(request: Request):
+    """05.10 (просьба Alex): все внешние сервисы и подписки — список в services_info.py; расход OpenRouter — живой из базы."""
+    from services_info import SERVICES, SUBSCRIPTIONS
+    today = datetime.now(VIEWER_TZ).date()
+    subs = []
+    for x in SUBSCRIPTIONS:
+        x = dict(x)
+        x["days"] = (date.fromisoformat(x["ends"]) - today).days if x.get("ends") else None
+        if x.get("openrouter"):
+            conn = db()
+            month = datetime.now(timezone.utc).strftime("%Y-%m-01")
+            x["spent_month"] = conn.execute("SELECT COALESCE(SUM(cost), 0) FROM llm_hour_preds WHERE ts_utc >= ?", (month,)).fetchone()[0] \
+                if table_exists(conn, "llm_hour_preds") else 0.0
+            conn.close()
+            x["limit"] = sum(LLM_LIMIT.values())
+        subs.append(x)
+    monthly = sum(x["monthly"] for x in subs if x["status"] == "active" and x.get("monthly"))
+    n = sum(len(items) for _, items in SERVICES)
+    live = sum(1 for _, items in SERVICES for i in items if i["mode"] == "live")
+    return TEMPLATES.TemplateResponse("services.html", {"request": request, "groups": SERVICES, "subs": subs, "monthly": monthly,
+                                                        "n": n, "live": live})
+
+
 @app.get("/notes", response_class=HTMLResponse)
 def notes_page(request: Request):
     import notes
