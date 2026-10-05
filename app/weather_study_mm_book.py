@@ -118,7 +118,7 @@ def run_bucket(cid, book, trades, city, ld, allow=None):
 
 def load():
     data = []
-    for f in glob.glob("/data/research/falcon/book/*.json.gz"):
+    for f in glob.glob(os.environ.get("BOOK_DIR", "/data/research/falcon/book") + "/*.json.gz"):  # 05.10: BOOK_DIR — другой период
         cid = f.split("/")[-1].split(".")[0]
         d = json.load(gzip.open(f, "rt"))
         if d["city"] not in OBS_CITIES or not d["snaps"]:

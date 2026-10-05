@@ -42,6 +42,13 @@ STRICT_AGE = 1.0
 #  • без возврата части комиссии мейкеру (в жизни будет чуть лучше).
 BANK = 100.0
 SIZE100 = 5.0
+# 05.10 (Alex: свои стаканы вместо платного Falcon): полный стакан «да» по каждому варианту ведём из событий book / price_change,
+# раз в BOOK_EVERY с пишем 5 лучших уровней заявок и предложений тех вариантов, где стакан изменился, — тот же вид, что снимки
+# Falcon (data/research/falcon/book), для проверок бота на истории. Отдельная база BOOKS_DB (не в data/db — большая и
+# восстанавливается только из себя; в ночную копию не входит). Ошибка записи стакана бота не останавливает.
+BOOKS_DB = os.environ.get("BOOKS_DB", "/data/books/books.sqlite3")
+BOOK_EVERY = 60
+BOOK_TOP = 5
 # 2026-09-30: правило из проверки на настоящих стаканах Falcon (weather_study_mm_book.py, зоны выбраны на 19.08-07.09,
 # проверка 08.09-27.09: +6.9%, каждую неделю в плюсе; все заявки подряд — около 0%): покупать только ДЕШЁВУЮ сторону
 # варианта — ниже 50¢ (с 15:00 до 18:00 дня маркета — ниже 30¢); дорогую сторону не покупать.
@@ -114,6 +121,8 @@ class Bot:
         self.fills = []
         self.cash100 = BANK   # свободные деньги mm100 (без замороженных под заявки); пересчитывается при старте из базы
         self.res100 = {}      # cid -> замороженно под текущую заявку mm100
+        self.l2 = {}          # cid -> ({цена: доли} заявок «да», {цена: доли} предложений «да») — для записи стаканов
+        self.l2_dirty = set()
 
     def requote(self, cid, now, ev_ts=None):
         m = self.m[cid]
@@ -255,12 +264,24 @@ class Bot:
                     bids = [float(x["price"]) for x in d.get("bids", []) if float(x["size"]) > 0]
                     asks = [float(x["price"]) for x in d.get("asks", []) if float(x["size"]) > 0]
                     self.book[tok[0]] = (max(bids) if bids else None, min(asks) if asks else None)
+                    self.l2[tok[0]] = ({float(x["price"]): float(x["size"]) for x in d.get("bids", []) if float(x["size"]) > 0},
+                                       {float(x["price"]): float(x["size"]) for x in d.get("asks", []) if float(x["size"]) > 0})
+                    self.l2_dirty.add(tok[0])
                     self.requote(tok[0], now, int(d.get("timestamp") or 0) / 1000 or None)
             elif et == "price_change":
                 for c in d.get("price_changes", []):
                     tok = self.by_token.get(c.get("asset_id"))
                     if not tok or tok[1] != "yes":
                         continue
+                    lv = self.l2.get(tok[0])
+                    if lv is not None and c.get("price") is not None and c.get("side") in ("BUY", "SELL"):
+                        side_l = lv[0] if c["side"] == "BUY" else lv[1]
+                        px, sz = float(c["price"]), float(c.get("size") or 0)
+                        if sz > 0:
+                            side_l[px] = sz
+                        else:
+                            side_l.pop(px, None)
+                        self.l2_dirty.add(tok[0])
                     bb, ba = c.get("best_bid"), c.get("best_ask")
                     self.book[tok[0]] = (float(bb) if bb not in (None, "", "0") else None, float(ba) if ba not in (None, "", "0") else None)
                     self.requote(tok[0], now, int(d.get("timestamp") or 0) / 1000 or None)
@@ -269,6 +290,28 @@ class Bot:
                 if tok:
                     self.stats["trades"] += 1
                     self.on_trade(tok[0], tok[1], d.get("side"), float(d["price"]), float(d["size"]), int(d["timestamp"]) / 1000)
+
+
+def books_db():
+    os.makedirs(os.path.dirname(BOOKS_DB), exist_ok=True)
+    b = sqlite3.connect(BOOKS_DB, timeout=30)
+    b.execute("PRAGMA journal_mode=WAL")
+    b.execute("""CREATE TABLE IF NOT EXISTS book_snaps (condition_id TEXT, ts INTEGER, token TEXT, bids TEXT, asks TEXT,
+                 PRIMARY KEY (condition_id, ts)) WITHOUT ROWID""")
+    return b
+
+
+def save_books(bdb, bot):
+    """Снимок 5 лучших уровней по вариантам, где стакан изменился с прошлого снимка: [[цена, доли], ...] как у Falcon."""
+    ts, rows = int(time.time()), []
+    for cid in bot.l2_dirty:
+        bids, asks = bot.l2.get(cid, ({}, {}))
+        rows.append((cid, ts, bot.m[cid]["token"], json.dumps(sorted(bids.items(), reverse=True)[:BOOK_TOP]),
+                     json.dumps(sorted(asks.items())[:BOOK_TOP])))
+    with bdb:
+        bdb.executemany("INSERT OR REPLACE INTO book_snaps VALUES (?,?,?,?,?)", rows)
+    bot.l2_dirty.clear()
+    return len(rows)
 
 
 def main():
@@ -295,7 +338,13 @@ def main():
     print(f"mm100: свободно ${bot.cash100:.2f} из ${BANK:.0f}", flush=True)
     toks = [t for m in markets for t in (m["token"], m["token_no"])]
     end = time.time() + LISTEN_MIN * 60
-    reconnects, last_flush, last_sweep = 0, time.time(), time.time()
+    reconnects, last_flush, last_sweep, last_book = 0, time.time(), time.time(), time.time()
+    try:
+        bdb = books_db()
+    except sqlite3.Error as e:
+        bdb = None
+        print(f"база стаканов недоступна ({e}) — стаканы в этот запуск не пишу", flush=True)
+    n_book = 0
     from jobmark import mark_alive
     alive = {}
     print(f"вариантов {len(markets)}, токенов {len(toks)}", flush=True)
@@ -327,6 +376,12 @@ def main():
                     except sqlite3.OperationalError:
                         pass
                     last_flush = time.time()
+                if bdb is not None and time.time() - last_book > BOOK_EVERY:
+                    try:
+                        n_book += save_books(bdb, bot)
+                    except sqlite3.Error as e:  # база стаканов занята — изменения останутся отмеченными, запишутся в следующий раз
+                        print(f"стаканы не записались ({e})", flush=True)
+                    last_book = time.time()
                 # паузы вокруг сводок наступают по времени, а не по событию — раз в 20 с пересчитываем все заявки
                 if time.time() - last_sweep > 20:
                     now = datetime.now(timezone.utc)
@@ -347,7 +402,9 @@ def main():
                    (hour, bot.stats["events"], bot.stats["trades"], bot.stats["fills"], bot.stats["quotes"], reconnects))
     db.close()
     print(f"событий {bot.stats['events']}, сделок {bot.stats['trades']}, наших исполнений {bot.stats['fills']}, "
-          f"новых заявок {bot.stats['quotes']}, переподключений {reconnects}", flush=True)
+          f"новых заявок {bot.stats['quotes']}, переподключений {reconnects}, снимков стаканов {n_book}", flush=True)
+    if bdb is not None:
+        bdb.close()
     from jobmark import mark
     c = sqlite3.connect(os.environ.get("POLY_LAB_DB", "/data/db/polymarket_lab.sqlite3"), timeout=60)
     mark(c, "weather_mm_ws")

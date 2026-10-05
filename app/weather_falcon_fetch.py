@@ -5,6 +5,8 @@
 окно — с 12:00 местного накануне до 18:00 местного в день маркета (как работает живой бот). Жёсткий предел MAX_REQ
 запросов. Каждый вариант — файл data/research/falcon/book/<condition_id>.json.gz: [(ts, [[цена, объём] заявок топ-5],
 [[цена, объём] предложений топ-5]), ...] по токену «да». Уже скачанные не перекачиваются. Только чтение рабочей базы (копия).
+05.10 (Alex: докачать остаток 3 256 кредитов): период и папка — DATE_FROM / DATE_TO / OUT_DIR (по умолчанию как было);
+по счётчику сайта 1 запрос обошёлся ~2.8 кредита, а не 2 — предел MAX_REQ ставить с запасом. Предел проверяется на каждой странице.
 """
 import gzip
 import json
@@ -22,7 +24,8 @@ import requests
 from weather_cities import OBS_CITIES
 
 URL = "https://narrative.agent.heisenberg.so/api/v2/semantic/retrieve/parameterized"
-OUT = Path("/data/research/falcon/book")
+OUT = Path(os.environ.get("OUT_DIR", "/data/research/falcon/book"))
+D_FROM, D_TO = os.environ.get("DATE_FROM", "2026-08-19"), os.environ.get("DATE_TO", "2026-09-27")
 N_DAYS, PER_DAY, MAX_PAGES = 2000, 3, 7
 MAX_REQ = int(os.environ.get("MAX_REQ", "9600"))
 conn = sqlite3.connect("/data/research/research.sqlite3")
@@ -50,7 +53,7 @@ def post(token, s_ms, e_ms, offset):
 
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
-    days = conn.execute("""SELECT DISTINCT city, local_date FROM poly_market_final WHERE local_date BETWEEN '2026-08-19' AND '2026-09-27'""").fetchall()
+    days = conn.execute("""SELECT DISTINCT city, local_date FROM poly_market_final WHERE local_date BETWEEN ? AND ?""", (D_FROM, D_TO)).fetchall()
     days = [d for d in days if d[0] in OBS_CITIES]
     random.Random(7).shuffle(days)
     days = days[:N_DAYS]  # случайный порядок: при пределе запросов обе половины периода представлены поровну
@@ -58,8 +61,8 @@ def main():
     top = {}
     for city, ld, cid, token, n in conn.execute("""SELECT f.city, f.local_date, t.condition_id, t.asset, COUNT(*) FROM poly_trades t
                                                   JOIN poly_market_final f ON f.condition_id = t.condition_id
-                                                  WHERE t.outcome = 'Yes' AND f.local_date BETWEEN '2026-08-19' AND '2026-09-27'
-                                                  GROUP BY t.condition_id, t.asset"""):
+                                                  WHERE t.outcome = 'Yes' AND f.local_date BETWEEN ? AND ?
+                                                  GROUP BY t.condition_id, t.asset""", (D_FROM, D_TO)):
         top.setdefault((city, ld), []).append((n, cid, token))
     jobs = []
     for city, ld in days:
@@ -78,6 +81,8 @@ def main():
             return
         snaps = []
         for page in range(MAX_PAGES):
+            if state["req"] >= MAX_REQ:
+                return  # недокачанный вариант не записываем
             d = post(token, int(s_.timestamp() * 1000), int(e_.timestamp() * 1000), 200 * page)
             if d is None:
                 return  # не записываем — докачается в следующий раз
