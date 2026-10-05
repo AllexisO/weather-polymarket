@@ -1076,9 +1076,10 @@ def _smooth(pts):
     return d
 
 
-def llm_chart(labels, series, fmt, w=760, h=300, tip=None):
+def llm_chart(labels, series, fmt, w=760, h=300, tip=None, wide=False):
     """04.10 (просьба Alex): график страницы /llm — плавные линии, точка на каждом значении с подсказкой, подпись на конце
-    линии с последним значением. series: [{"name", "cls", "values"}]; tip(i) — заголовок подсказки для столбца i."""
+    линии с последним значением. series: [{"name", "cls", "values"}]; tip(i) — заголовок подсказки для столбца i.
+    wide (05.10, просьба Alex) — во всю ширину без поля справа, подпись каждого столбца; подпись у правого края — слева от точки."""
     series = [s_ for s_ in series if any(v is not None for v in s_["values"])]
     vals = [v for s_ in series for v in s_["values"] if v is not None]
     if len(labels) < 2 or not vals:
@@ -1086,7 +1087,7 @@ def llm_chart(labels, series, fmt, w=760, h=300, tip=None):
     lo, hi = min(vals), max(vals)
     step = _nice_step(hi - lo if hi > lo else 1)
     y0, y1 = step * ((lo - step * 0.3) // step), step * (-(-(hi + step * 0.3) // step))
-    L, R, T, B = 56, 150, 16, 40
+    L, R, T, B = (34, 16, 18, 34) if wide else (56, 150, 16, 40)
     pw, ph = w - L - R, h - T - B
     X = lambda i: round(L + pw * i / (len(labels) - 1), 1)
     Y = lambda v: round(T + ph * (1 - (v - y0) / (y1 - y0)), 1)
@@ -1109,13 +1110,19 @@ def llm_chart(labels, series, fmt, w=760, h=300, tip=None):
     ends = sorted(out, key=lambda s_: s_["end"][1])
     for i, e in enumerate(ends):
         e["ly"] = e["end"][1] if i == 0 else max(e["end"][1], ends[i - 1]["ly"] + 18)
+        e["lx"], e["anchor"] = e["end"][0] + 12, "start"
+        if wide and e["end"][0] > w - R - 150:
+            e["lx"], e["anchor"], e["ly"] = e["end"][0] - 10, "end", e["ly"] - 14
     ticks, t = [], y0
     while t <= y1 + 1e-9:
         ticks.append({"y": Y(t), "label": f"{t:.0f}°" if step >= 1 else f"{t:.1f}°"})
         t += step
-    every = max(1, round(len(labels) / 8))
+    every = max(1, round(len(labels) / (24 if wide else 8)))
     xl = [{"x": X(i), "label": lab} for i, lab in enumerate(labels) if i % every == 0 or i == len(labels) - 1]
-    return {"w": w, "h": h, "L": L, "R": w - R, "T": T, "B": T + ph, "series": out, "ticks": ticks, "xl": xl}
+    return {"w": w, "h": h, "L": L, "R": w - R, "T": T, "B": T + ph, "series": out, "ticks": ticks, "xl": xl,
+            "ax_x": 0 if wide else L - 8, "ax_a": "start" if wide else "end",
+            # лента часов под графиком: столбец i — точно под точкой i (отступ слева в % ширины графика)
+            "strip_left": round(100 * (L - pw / (len(labels) - 1) / 2) / w, 2)}
 
 
 def _llm_center(lab):
@@ -1213,14 +1220,14 @@ def llm_page_data(conn, key, city, day):
             if v is not None:
                 llm_h[h] = v
     fc = llm_h
-    out["day_chart"] = llm_chart([f"{h:02d}:00" for h in range(24)], [
+    out["day_chart"] = llm_chart([f"{h:02d}" for h in range(24)], [
         {"name": "Факт", "cls": "s-real", "values": [fact.get(h) for h in range(24)]},
         {"name": "LLM", "cls": "s-model", "values": [llm_h.get(h) for h in range(24)]}], lambda v: f"{v:.1f}{u}",
         tip=lambda i: f"{i:02d}:00" + (f" · факт {fact[i]:.1f}{u}" if i in fact else " · факт ещё не известен") + (f" · LLM {llm_h[i]:.1f}{u}" if i in llm_h else "")
-        + (f" · ошибка {llm_h[i] - fact[i]:+.1f}°" if i in fact and i in llm_h else ""))
+        + (f" · ошибка {llm_h[i] - fact[i]:+.1f}°" if i in fact and i in llm_h else ""), wide=True)
     out["day_rows"] = [{"h": h, "fact": fact.get(h), "llm": fc.get(h), "err": fc[h] - fact[h] if fc.get(h) is not None and h in fact else None,
                         "naive_err": fact[h - 1] - fact[h] if h in fact and (h - 1) in fact and fc.get(h) is not None else None}
-                       for h in range(24) if h in fact or fc.get(h) is not None]
+                       for h in range(24)]
     out["day_max"] = {"fact": fact_max.get(day), "seen": max(fact.values()) if fact else None,
                       "pred": [(p["local_hour"], p["pred_max"]) for p in today]}
     # месяц: максимум дня по факту, прогноз LLM в первый час дня и рынок в тот же час
@@ -1256,20 +1263,26 @@ def llm_page_data(conn, key, city, day):
         if p["local_date"] not in fact_cache:
             fact_cache[p["local_date"]] = _llm_fact_hourly(conn, city, p["local_date"])
         a = fact_cache[p["local_date"]].get(tgt)
-        if f is not None and a is not None:
+        prev = fact_cache[p["local_date"]].get(p["local_hour"])
+        if f is not None and a is not None and prev is not None:  # только часы, где есть с чем сравнить обе
             by_day_err.setdefault(p["local_date"], []).append(abs(f - a))
-            prev = fact_cache[p["local_date"]].get(p["local_hour"])
-            by_day_naive.setdefault(p["local_date"], []).append(abs(prev - a) if prev is not None else None)
+            by_day_naive.setdefault(p["local_date"], []).append(abs(prev - a))
         if p["local_date"] == day:
             review.append({"h": p["local_hour"], "tgt": tgt, "f": f, "a": a, "refl": p["reflection"]})
     out["review"] = review
     ed = sorted(by_day_err)
+    avg = lambda xs: sum(xs) / len(xs)
     out["hour_err_chart"] = llm_chart([f"{d[8:10]}.{d[5:7]}" for d in ed], [
-        {"name": "LLM", "cls": "s-model", "values": [sum(by_day_err[d]) / len(by_day_err[d]) for d in ed]},
-        {"name": "Повтор замера", "cls": "s-market", "values": [(lambda xs: sum(xs) / len(xs) if xs else None)([x for x in by_day_naive[d] if x is not None]) for d in ed]}],
-        lambda v: f"{v:.1f}°", h=240) if len(ed) >= 2 else None
-    nv = [x for x in by_day_naive.get(ed[-1], []) if x is not None] if ed else []
-    out["hour_err_now"] = (sum(by_day_err[ed[-1]]) / len(by_day_err[ed[-1]]), len(by_day_err[ed[-1]]), sum(nv) / len(nv) if nv else None) if ed else None
+        {"name": "LLM", "cls": "s-model", "values": [avg(by_day_err[d]) for d in ed]},
+        {"name": "Повтор замера", "cls": "s-market", "values": [avg(by_day_naive[d]) for d in ed]}],
+        lambda v: f"{v:.1f}°", h=240, wide=True,
+        tip=lambda i: f"{ed[i][8:10]}.{ed[i][5:7]} · сравнено часов: {len(by_day_err[ed[i]])} · LLM {avg(by_day_err[ed[i]]):.1f}°"
+        f" · повтор замера {avg(by_day_naive[ed[i]]):.1f}°") if len(ed) >= 2 else None
+    out["hour_err_now"] = (avg(by_day_err[ed[-1]]), len(by_day_err[ed[-1]]), avg(by_day_naive[ed[-1]])) if ed else None
+    # 05.10 (вопрос Alex «LLM лучше?»): итог за все дни — сколько часов, средние ошибки, в скольких часах LLM точнее
+    le, ne = [x for d in ed for x in by_day_err[d]], [x for d in ed for x in by_day_naive[d]]
+    out["hour_err_sum"] = {"n": len(le), "llm": avg(le), "naive": avg(ne), "wins": sum(a < b for a, b in zip(le, ne)),
+                           "ties": sum(a == b for a, b in zip(le, ne)), "days": [(f"{d[8:10]}.{d[5:7]}", len(by_day_err[d])) for d in ed]} if le else None
     # тетрадь: текущие правила и как менялась
     if table_exists(conn, "llm_notebook"):
         nbs = conn.execute("SELECT local_date, local_hour, notes_json FROM llm_notebook WHERE wallet = ? AND city = ? ORDER BY ts_utc",

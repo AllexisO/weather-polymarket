@@ -1,30 +1,5 @@
 {% extends "base.html" %}
-{% block title %}LLM — weather-lab<div class="ltip" id="ltip" hidden></div>
-<script>
-(function () {
-  // 04.10 (просьба Alex): подсказка у точки графика — при наведении мышью и при нажатии на телефоне
-  var tip = document.getElementById('ltip');
-  function show(el) {
-    var r = el.getBoundingClientRect();
-    tip.textContent = el.getAttribute('data-tip').split(' · ').join('\n');
-    tip.style.whiteSpace = 'pre-line';
-    tip.hidden = false;
-    var x = Math.min(window.innerWidth - tip.offsetWidth - 8, Math.max(8, r.left + r.width / 2 - tip.offsetWidth / 2));
-    var y = r.top - tip.offsetHeight - 8;
-    tip.style.left = x + 'px'; tip.style.top = (y < 8 ? r.bottom + 8 : y) + 'px';
-  }
-  document.querySelectorAll('.viz .hit').forEach(function (el) {
-    el.querySelector('title') && el.querySelector('title').remove();
-    el.addEventListener('mouseenter', function () { show(el); });
-    el.addEventListener('focus', function () { show(el); });
-    el.addEventListener('click', function (e) { e.stopPropagation(); show(el); });
-    el.addEventListener('mouseleave', function () { tip.hidden = true; });
-  });
-  document.addEventListener('click', function () { tip.hidden = true; });
-  window.addEventListener('scroll', function () { tip.hidden = true; }, { passive: true });
-})();
-</script>
-{% endblock %}
+{% block title %}LLM — weather-lab{% endblock %}
 {% block content %}
 {#
   04.10 (просьба Alex): LLM — отдельный раздел. Две LLM (weather_llm_hour.py) каждый час прогнозируют максимум дня и
@@ -35,27 +10,54 @@
 {% macro tone(v) -%}{{ 'pos' if v > 0.005 else ('neg' if v < -0.005 else '') }}{%- endmacro %}
 {% macro lines(c, title) -%}
 <svg class="viz" viewBox="0 0 {{ c.w }} {{ c.h }}" role="img" aria-label="{{ title }}">
-  <g class="grid">{% for t in c.ticks %}<line x1="{{ c.L }}" x2="{{ c.R }}" y1="{{ t.y }}" y2="{{ t.y }}"/><text class="ax" x="{{ c.L - 8 }}" y="{{ t.y + 4 }}" text-anchor="end">{{ t.label }}</text>{% endfor %}</g>
+  <g class="grid">{% for t in c.ticks %}<line x1="{{ c.L }}" x2="{{ c.R }}" y1="{{ t.y }}" y2="{{ t.y }}"/><text class="ax" x="{{ c.ax_x }}" y="{{ t.y + 4 }}" text-anchor="{{ c.ax_a }}">{{ t.label }}</text>{% endfor %}</g>
   {% for x in c.xl %}<text class="ax" x="{{ x.x }}" y="{{ c.h - 12 }}" text-anchor="middle">{{ x.label }}</text>{% endfor %}
   {% for s in c.series %}{% for d in s.paths %}{% if d %}<path class="ln {{ s.cls }}" d="{{ d }}"/>{% endif %}{% endfor %}{% endfor %}
   {% for s in c.series %}{% for p in s.dots %}<circle class="pt {{ s.cls }}" cx="{{ p.x }}" cy="{{ p.y }}" r="3.6"/>
     <circle class="hit" cx="{{ p.x }}" cy="{{ p.y }}" r="13" tabindex="0" data-tip="{{ p.tip }}"><title>{{ p.tip }}</title></circle>{% endfor %}
-    <text class="lab {{ s.cls }}" x="{{ s.end[0] + 12 }}" y="{{ s.ly + 5 }}">{{ s.name }} · {{ s.last }}</text>{% endfor %}
+    <text class="lab {{ s.cls }}" x="{{ s.lx }}" y="{{ s.ly + 5 }}" text-anchor="{{ s.anchor }}">{{ s.name }} · {{ s.last }}</text>{% endfor %}
 </svg>
 {%- endmacro %}
 {% include "_mm_style.html" %}
 <style>
   .viz .ln.s-market { stroke: #D3DDFB; } .viz .end.s-market { fill: #D3DDFB; }
-  .viz .ln { stroke-width: 2.6; stroke-linecap: round; }
+  .viz .ln { stroke-width: 1.9; stroke-linecap: round; }
   .viz .pt { stroke: var(--bk-card); stroke-width: 1.5; } .viz .pt.s-real { fill: #A3E39A; } .viz .pt.s-model { fill: #FFD58A; } .viz .pt.s-market { fill: #D3DDFB; }
   .viz .hit { fill: transparent; cursor: pointer; outline: none; } .viz .hit:hover, .viz .hit:focus { fill: rgba(255,255,255,.10); }
   .viz text.lab { font-size: 13px; font-weight: 600; } .viz text.lab.s-real { fill: #A3E39A; } .viz text.lab.s-model { fill: #FFD58A; } .viz text.lab.s-market { fill: #D3DDFB; }
   .viz text.ax { font-size: 12px; }
-  @media (max-width: 640px) { .viz text.ax { font-size: 21px; } .viz text.lab { font-size: 22px; } .viz .pt { r: 5.5; } .viz .ln { stroke-width: 3.5; } }
+  @media (max-width: 640px) { .viz text.ax { font-size: 21px; } .viz text.lab { font-size: 22px; } .viz .pt { r: 5.5; } .viz .ln { stroke-width: 2.6; } }
   .ltip { position: fixed; z-index: 50; pointer-events: none; background: #262628; color: var(--bk-text); border: 1px solid var(--bk-line);
           border-radius: 10px; padding: 7px 10px; font-size: 13.5px; max-width: 280px; box-shadow: 0 6px 20px rgba(0,0,0,.4); }
   .key { display: inline-block; width: 14px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 6px; }
   .key.s-real { background: #A3E39A; } .key.s-model { background: #FFD58A; } .key.s-market { background: #D3DDFB; }
+  /* 05.10: лента часов под графиком */
+  .hsum { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }
+  .hsum > div { background: var(--bk-raise); border-radius: 12px; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; }
+  .hsum span { font-size: 12px; color: var(--bk-muted); } .hsum b { font-size: 17px; font-weight: 600; }
+  .hsum i { font-style: normal; font-size: 12px; color: var(--bk-faint); }
+  .hsum em { font-style: normal; } .hsum em.m { color: #FFD58A; } .hsum em.n { color: #D3DDFB; font-size: 13px; font-weight: 500; }
+  @media (max-width: 600px) { .hsum { grid-template-columns: 1fr; } }
+  .pane.chart.tight { padding: 14px 12px 16px; }
+  .hstrip { display: grid; grid-template-columns: repeat(24, minmax(0, 1fr)); gap: 0; margin-top: 14px; }
+  .hc { margin: 0 2px; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 8px 0 7px; border-radius: 10px; background: var(--bk-raise);
+        border: 1px solid transparent; min-height: 92px; }
+  .hc.fut { background: transparent; border-color: var(--bk-line); }
+  .hc.fut .hh { color: var(--bk-faint); }
+  .hc.wait { border: 1px dashed var(--bk-accent); background: var(--bk-accent-bg); }
+  .hc.hit { box-shadow: inset 0 0 0 1px rgba(255, 213, 138, .35); }
+  .hc .hh { font-size: 11.5px; color: var(--bk-muted); letter-spacing: .03em; }
+  .hc .hf { font-size: 13.5px; font-weight: 600; color: #A3E39A; min-height: 1.3em; }
+  .hc .hl { font-size: 12px; color: #FFD58A; min-height: 1.3em; }
+  .hc .he { font-size: 11px; font-weight: 600; padding: 1px 5px; border-radius: 999px; min-height: 1.4em; color: var(--bk-muted); }
+  .hc .he.num { background: rgba(255, 255, 255, .07); }
+  .hc .he.good { color: var(--bk-pos); background: var(--bk-pos-bg); } .hc .he.bad { color: var(--bk-neg); background: rgba(244, 167, 127, .14); }
+  .hkey { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 10px; font-size: 12.5px; color: var(--bk-muted); }
+  .hkey .sw { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+  .hkey .sw.f { background: #A3E39A; } .hkey .sw.l { background: #FFD58A; } .hkey .sw.e { background: rgba(255, 255, 255, .25); }
+  .hkey .sw.w { border: 1px dashed var(--bk-accent); background: var(--bk-accent-bg); }
+  @media (max-width: 900px) { .hstrip { grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 4px 0; margin-left: 0 !important; } }
+  @media (max-width: 480px) { .hstrip { grid-template-columns: repeat(6, minmax(0, 1fr)); } }
   .tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 14px; }
   .tabs a { padding: 7px 14px; border-radius: 999px; border: 1px solid var(--bk-line); color: var(--bk-muted); text-decoration: none; font-size: 14px; }
   .tabs a.on { border-color: var(--bk-accent); color: var(--bk-text); box-shadow: inset 0 0 0 1px var(--bk-accent); }
@@ -69,9 +71,6 @@
   table.t th { text-align: left; color: var(--bk-muted); font-weight: 500; padding: 6px 8px; border-bottom: 1px solid var(--bk-line); }
   table.t td { padding: 7px 8px; border-bottom: 1px solid var(--bk-line); vertical-align: top; }
   .tw { overflow-x: auto; }
-  table.hours td, table.hours th { text-align: center; padding: 5px 6px; white-space: nowrap; font-variant-numeric: tabular-nums; }
-  table.hours td:first-child, table.hours th:first-child { text-align: left; position: sticky; left: 0; background: var(--bk-card); }
-  table.hours th.both { color: var(--bk-text); }
   .hr { display: flex; flex-wrap: wrap; gap: 2px 12px; align-items: baseline; } .hr span { white-space: nowrap; }
   .bk { overflow-wrap: anywhere; } .pane { min-width: 0; } .grid2 > * { min-width: 0; }
   .lesson { color: var(--bk-text); } .muted { color: var(--bk-muted); }
@@ -144,16 +143,21 @@
   <section class="sec">
     <div class="sec-head"><h2>24 часа · {{ day[8:10] }}.{{ day[5:7] }}</h2>
       <span class="aside">{% for dd in days[-7:] %}<a href="/llm?w={{ key }}&city={{ city }}&d={{ dd }}" style="margin-left: 8px;{% if dd == day %} color: var(--bk-text); font-weight: 600;{% endif %}">{{ dd[8:10] }}.{{ dd[5:7] }}</a>{% endfor %}</span></div>
-    <div class="pane chart">
+    <div class="pane chart tight">
       <div class="muted" style="font-size: 13.5px; margin-bottom: 6px;"><span class="key s-real"></span>факт — температура в аэропорту за сегодня
         <span class="key s-model" style="margin-left: 14px;"></span>LLM — её прогноз на этот час (точка появляется в :05 часом раньше, факт догоняет)</div>
       {% if day_chart %}{{ lines(day_chart, "Температура по часам: факт и прогноз LLM") }}{% else %}<div class="empty">Мало точек для графика.</div>{% endif %}
-      {% if day_rows %}<div class="tw" style="margin-top: 10px;"><table class="t hours">
-        <tr><th>Час</th>{% for r in day_rows %}<th class="{{ 'both' if r.err is not none }}">{{ '%02d' | format(r.h) }}</th>{% endfor %}</tr>
-        <tr><td style="color: #A3E39A;">Факт</td>{% for r in day_rows %}<td>{{ '%.1f' | format(r.fact) if r.fact is not none else '·' }}</td>{% endfor %}</tr>
-        <tr><td style="color: #FFD58A;">LLM</td>{% for r in day_rows %}<td>{{ '%.1f' | format(r.llm) if r.llm is not none else '·' }}</td>{% endfor %}</tr>
-        <tr><td>Ошибка LLM</td>{% for r in day_rows %}<td>{% if r.err is not none %}<b class="{{ 'neg' if r.err | abs > 2 else ('pos' if r.err | abs <= 1 else '') }}">{{ '%+.1f' | format(r.err) }}</b>{% else %}·{% endif %}</td>{% endfor %}</tr>
-      </table></div>
+      {% if day_rows %}
+      {# 05.10 (просьба Alex): вместо таблицы — лента из 24 плиток: час, факт крупно, LLM, плашка ошибки #}
+      <div class="hstrip"{% if day_chart %} style="margin-left: {{ day_chart.strip_left }}%;"{% endif %}>{% for r in day_rows %}
+        <div class="hc{{ ' fut' if r.fact is none and r.llm is none }}{{ ' wait' if r.fact is none and r.llm is not none }}{{ ' hit' if r.err is not none }}">
+          <span class="hh">{{ '%02d' | format(r.h) }}</span>
+          <b class="hf num">{{ '%.1f' | format(r.fact) if r.fact is not none else '' }}</b>
+          <span class="hl num">{{ '%.1f' | format(r.llm) if r.llm is not none else '' }}</span>
+          {% if r.err is not none %}<span class="he num {{ 'good' if r.err | abs <= 1 else ('bad' if r.err | abs > 2 else '') }}">{{ '%+.1f' | format(r.err) }}</span>{% else %}<span class="he"></span>{% endif %}
+        </div>{% endfor %}
+      </div>
+      <div class="hkey"><span><b class="sw f"></b>факт</span><span><b class="sw l"></b>прогноз LLM</span><span><b class="sw e"></b>ошибка LLM</span><span><b class="sw w"></b>ждём факт</span></div>
       <p class="foot" style="margin: 6px 0 0;">Где точки легли друг на друга — LLM почти угадала. Ошибка: зелёным — до 1°, персиковым — больше 2°.</p>{% endif %}
       <p class="foot" style="margin: 8px 0 0;">Максимум дня: по факту <b>{{ ('%.0f' | format(day_max.fact)) ~ unit if day_max.fact is not none else ('пока ' ~ (('%.0f' | format(day_max.seen)) ~ unit) if day_max.seen is not none else 'ждём') }}</b>{% if day_max.fact is none %} (итог считается ночью){% endif %}.
         LLM по часам: {% for h, v in day_max.pred %}<span style="white-space: nowrap;">{{ '%02d' | format(h) }}:00 — <b>{{ '%.0f' | format(v) if v is not none else '—' }}°</b></span>{% if not loop.last %} · {% endif %}{% endfor %}.
@@ -181,7 +185,7 @@
       <div><b>3. Прогноз</b>С тетрадью, замерами, положением солнца, облаками, ветром и прогнозами моделей — температура на каждый оставшийся час и максимум дня.</div>
       <div><b>4. Ставка</b>Если шанс варианта по её прогнозу выше цены на 5 п.п. — $2. Учится — значит ошибка «на час вперёд» от дня к дню падает.</div>
     </div>
-    <div class="grid2" style="margin-bottom: 14px; grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr));">
+    <div class="grid2" style="margin-bottom: 14px; align-items: start; grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr));">
       <div class="pane">
         <h3 style="margin: 0 0 8px;">Тетрадь {{ model }} · {{ (cities | selectattr(0, 'equalto', city) | first)[1] }}</h3>
         {% if notebook %}<ol style="margin: 0; padding-left: 20px; line-height: 1.55;">{% for x in notebook %}<li>{{ x }}</li>{% endfor %}</ol>
@@ -192,6 +196,15 @@
         <h3 style="margin: 0 0 8px;">Учится ли: ошибка прогноза на час вперёд</h3>
         <div class="muted" style="font-size: 13px; margin-bottom: 4px;"><span class="key s-model"></span>LLM <span class="key s-market" style="margin-left: 12px;"></span>«через час будет как сейчас» — LLM должна быть ниже</div>
         {% if hour_err_chart %}{{ lines(hour_err_chart, "Средняя ошибка прогноза на час вперёд по дням") }}
+        {% if hour_err_sum %}{% set hs = hour_err_sum %}
+        <div class="hsum">
+          <div><span>сравнено часов</span><b class="num">{{ hs.n }}</b><i>{% for d, n in hs.days %}{{ d }} — {{ n }}{% if not loop.last %} · {% endif %}{% endfor %}</i></div>
+          <div><span>ошибка в среднем</span><b class="num"><em class="m">{{ '%.1f' | format(hs.llm) }}°</em> <em class="n">против {{ '%.1f' | format(hs.naive) }}°</em></b>
+            <i>{% if hs.llm < hs.naive %}LLM на {{ '%.0f' | format(100 * (1 - hs.llm / hs.naive)) }}% точнее повтора{% else %}LLM не точнее повтора{% endif %}</i></div>
+          <div><span>LLM точнее</span><b class="num">{{ hs.wins }} из {{ hs.n }}</b><i>{% if hs.ties %}ничьих {{ hs.ties }}, {% endif %}повтор точнее в {{ hs.n - hs.wins - hs.ties }}</i></div>
+        </div>
+        {% if hs.n < 50 %}<p class="foot" style="margin: 8px 0 0;">Пока мало часов ({{ hs.n }}) — один-два удачных часа сильно двигают точку дня. Смотреть, держится ли разница при 50+ часах.</p>{% endif %}
+        {% endif %}
         {% elif hour_err_now %}<p style="margin: 0;">Сегодня в среднем <b>{{ '%.1f' | format(hour_err_now[0]) }}{{ unit }}</b> ({{ hour_err_now[1] }} ч){% if hour_err_now[2] is not none %}; «просто повторить последний замер» — {{ '%.1f' | format(hour_err_now[2]) }}{{ unit }}{% endif %}. График по дням — со второго дня; если она учится, линия идёт вниз.</p>
         {% else %}<p class="muted" style="margin: 0;">Появится после первого часа, который можно сравнить.</p>{% endif %}
       </div>
@@ -270,4 +283,29 @@
     </div>
   </section>
 </div>
+<div class="ltip" id="ltip" hidden></div>
+<script>
+(function () {
+  // 04.10 (просьба Alex): подсказка у точки графика — при наведении мышью и при нажатии на телефоне
+  var tip = document.getElementById('ltip');
+  function show(el) {
+    var r = el.getBoundingClientRect();
+    tip.textContent = el.getAttribute('data-tip').split(' · ').join('\n');
+    tip.style.whiteSpace = 'pre-line';
+    tip.hidden = false;
+    var x = Math.min(window.innerWidth - tip.offsetWidth - 8, Math.max(8, r.left + r.width / 2 - tip.offsetWidth / 2));
+    var y = r.top - tip.offsetHeight - 8;
+    tip.style.left = x + 'px'; tip.style.top = (y < 8 ? r.bottom + 8 : y) + 'px';
+  }
+  document.querySelectorAll('.viz .hit').forEach(function (el) {
+    el.querySelector('title') && el.querySelector('title').remove();
+    el.addEventListener('mouseenter', function () { show(el); });
+    el.addEventListener('focus', function () { show(el); });
+    el.addEventListener('click', function (e) { e.stopPropagation(); show(el); });
+    el.addEventListener('mouseleave', function () { tip.hidden = true; });
+  });
+  document.addEventListener('click', function () { tip.hidden = true; });
+  window.addEventListener('scroll', function () { tip.hidden = true; }, { passive: true });
+})();
+</script>
 {% endblock %}
