@@ -276,7 +276,12 @@ def prompt(conn, wallet, city, day, lnow, obs, hrs, mk, sun=None, now=None):
     return "\n".join(text), mx
 
 
-def ask(model, text, extra=None):
+BAD_JSON_DIR = "/data/logs/llm_bad_json"
+FIX_NOTE = ("\n\nВАЖНО: прошлый ответ был не разобран — сломанный JSON. Ответь строго валидным JSON: кавычки внутри текста "
+            "экранируй (\\\") или заменяй на «», без комментариев и запятых в конце.")
+
+
+def _ask_once(model, text, extra):
     r = requests.post(OR_URL, timeout=120, headers={"Authorization": f"Bearer {os.environ['OPENROUTER_API_KEY']}"},
                       json={"model": model, "messages": [{"role": "system", "content": SYSTEM}, {"role": "user", "content": text}],
                             "response_format": {"type": "json_object"}, "temperature": 0.2, "usage": {"include": True}, **(extra or {})})
@@ -284,10 +289,32 @@ def ask(model, text, extra=None):
     d = r.json()
     raw = d["choices"][0]["message"]["content"].strip().removeprefix("```json").removesuffix("```")
     u = d.get("usage") or {}
+    return raw, float(u.get("cost") or 0), int(u.get("total_tokens") or 0)
+
+
+def _parse(raw):
     # 05.10: Gemini иногда пишет перенос строки прямо внутри текста (разбор, тетрадь) — strict=False принимает такие символы;
     # текст до/после JSON отрезаем по крайним скобкам (раньше город пропускался: «Invalid control character»)
     a, b = raw.find("{"), raw.rfind("}")
-    return json.loads(raw[a:b + 1] if a >= 0 and b > a else raw, strict=False), float(u.get("cost") or 0), int(u.get("total_tokens") or 0)
+    return json.loads(raw[a:b + 1] if a >= 0 and b > a else raw, strict=False)
+
+
+def ask(model, text, extra=None):
+    """05.10: сломанный JSON (Gemini, Лондон: «Expecting ',' delimiter» — кавычка внутри текста) — ответ сохраняем
+    в BAD_JSON_DIR для разбора и один раз переспрашиваем с просьбой о валидном JSON; цена обоих запросов идёт в расход."""
+    raw, cost, tok = _ask_once(model, text, extra)
+    try:
+        return _parse(raw), cost, tok
+    except json.JSONDecodeError as e:
+        try:
+            os.makedirs(BAD_JSON_DIR, exist_ok=True)
+            with open(f"{BAD_JSON_DIR}/{datetime.now(timezone.utc):%Y%m%d_%H%M%S}_{model.split('/')[-1]}.txt", "w") as fh:
+                fh.write(f"{e}\n\n{raw}")
+        except OSError:
+            pass
+        print(f"{model}: сломанный JSON ({e}) — переспрашиваю", flush=True)
+        raw2, cost2, tok2 = _ask_once(model, text + FIX_NOTE, extra)
+        return _parse(raw2), cost + cost2, tok + tok2
 
 
 def probs_for(ans, mk, mx):
