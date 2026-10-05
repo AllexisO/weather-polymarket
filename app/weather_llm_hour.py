@@ -284,7 +284,10 @@ def ask(model, text, extra=None):
     d = r.json()
     raw = d["choices"][0]["message"]["content"].strip().removeprefix("```json").removesuffix("```")
     u = d.get("usage") or {}
-    return json.loads(raw), float(u.get("cost") or 0), int(u.get("total_tokens") or 0)
+    # 05.10: Gemini иногда пишет перенос строки прямо внутри текста (разбор, тетрадь) — strict=False принимает такие символы;
+    # текст до/после JSON отрезаем по крайним скобкам (раньше город пропускался: «Invalid control character»)
+    a, b = raw.find("{"), raw.rfind("}")
+    return json.loads(raw[a:b + 1] if a >= 0 and b > a else raw, strict=False), float(u.get("cost") or 0), int(u.get("total_tokens") or 0)
 
 
 def probs_for(ans, mk, mx):
