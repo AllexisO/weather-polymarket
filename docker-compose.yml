@@ -14,7 +14,6 @@ services:
     environment:
       TZ: Europe/Chisinau
       POLY_LAB_DB: /data/db/polymarket_lab.sqlite3
-      OLLAMA_URL: http://192.168.1.16:11434
     profiles:
       - cli
 

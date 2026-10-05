@@ -33,7 +33,7 @@ import requests
 from weather_cities import OBS_CITIES
 
 DB_PATH = Path(os.environ.get("POLY_LAB_DB", Path(__file__).parent.parent / "data" / "db" / "polymarket_lab.sqlite3"))
-OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://192.168.1.16:11434")
+OLLAMA_URL = os.environ.get("OLLAMA_URL")  # адрес сервера в домашней сети — только в .env (05.10: не светить в github)
 OLLAMA_MODEL = "qwen3:8b"
 AFOS = "https://mesonet.agron.iastate.edu/cgi-bin/afos/retrieve.py"
 HISTORY_START = date(2026, 6, 1)
@@ -102,6 +102,8 @@ def latest_afd(wfo, before_utc):
 
 
 def ask_llm(text, issued_local, day, station):
+    if not OLLAMA_URL:
+        raise RuntimeError("OLLAMA_URL нет в .env — адрес Ollama в домашней сети")
     r = requests.post(f"{OLLAMA_URL}/api/chat", json={
         "model": OLLAMA_MODEL, "stream": False, "think": False, "format": "json", "options": {"temperature": 0},
         "messages": [{"role": "user", "content": PROMPT.format(issued=issued_local, day=day, station=station, text=text)}]},
