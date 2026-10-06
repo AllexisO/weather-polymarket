@@ -16,7 +16,7 @@ from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -52,184 +52,17 @@ def db():
     return conn
 
 
-def unit_symbol(city_rows):
-    return "°F" if city_rows and city_rows[0]["unit"] == "fahrenheit" else "°C"
-
-
 def table_exists(conn, name):
     return conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
     ).fetchone() is not None
 
 
-@app.get("/", response_class=HTMLResponse)
-def index(request: Request):
-    conn = db()
-    cities = [r["city"] for r in conn.execute("SELECT DISTINCT city FROM snapshots ORDER BY city")]
-
-    cards = []
-    for city in cities:
-        latest_ts = conn.execute(
-            "SELECT MAX(ts_utc) AS ts FROM snapshots WHERE city = ?", (city,)
-        ).fetchone()["ts"]
-        rows = conn.execute(
-            """
-            SELECT * FROM snapshots
-            WHERE city = ? AND ts_utc = ?
-            ORDER BY bucket_lo
-            """,
-            (city, latest_ts),
-        ).fetchall()
-        if not rows:
-            continue
-        best = max(rows, key=lambda r: abs(r["edge"]))
-        cards.append(
-            {
-                "city": city,
-                "local_date": rows[0]["local_date"],
-                "local_hour": rows[0]["local_hour"],
-                "unit": unit_symbol(rows),
-                "best_edge": best["edge"],
-                "best_lo": best["bucket_lo"],
-                "best_hi": best["bucket_hi"],
-                "market_p": best["market_p"],
-                "model_p": best["model_p"],
-                "event_vol": rows[0]["event_vol"],
-                "n_snapshots": conn.execute(
-                    "SELECT COUNT(DISTINCT ts_utc) AS n FROM snapshots WHERE city = ?", (city,)
-                ).fetchone()["n"],
-            }
-        )
-    weather_results = []
-    if table_exists(conn, "weather_station_daily"):
-        weather_results = compute_weather_results(conn)
-
-    conn.close()
-    cards.sort(key=lambda c: abs(c["best_edge"]), reverse=True)
-    return TEMPLATES.TemplateResponse(
-        "index.html", {"request": request, "cards": cards, "weather_results": weather_results}
-    )
-
-
-@app.get("/city/{city}", response_class=HTMLResponse)
-def city_detail(request: Request, city: str):
-    conn = db()
-    latest_ts = conn.execute(
-        "SELECT MAX(ts_utc) AS ts FROM snapshots WHERE city = ?", (city,)
-    ).fetchone()["ts"]
-    buckets = conn.execute(
-        """
-        SELECT * FROM snapshots WHERE city = ? AND ts_utc = ? ORDER BY bucket_lo
-        """,
-        (city, latest_ts),
-    ).fetchall()
-
-    history = conn.execute(
-        """
-        SELECT ts_utc, local_date, local_hour,
-               MAX(ABS(edge)) AS max_abs_edge
-        FROM snapshots
-        WHERE city = ?
-        GROUP BY ts_utc
-        ORDER BY ts_utc DESC
-        LIMIT 100
-        """,
-        (city,),
-    ).fetchall()
-    conn.close()
-
-    return TEMPLATES.TemplateResponse(
-        "city.html",
-        {
-            "request": request,
-            "city": city,
-            "unit": unit_symbol(buckets),
-            "buckets": buckets,
-            "history": history,
-        },
-    )
-
-
-def _one_snapshot_per_day(rows):
-    # 2026-08-31: раньше группировали по (city, local_date, ts_utc) —
-    # то есть КАЖДЫЙ снимок в течение дня считался отдельным "случаем".
-    # Крон дёргает коллектор каждые 2 часа, так что один день давал
-    # 5-6 сильно скоррелированных строк подряд (тот же факт, почти тот
-    # же прогноз) — n был раздут в разы, а не отражал число реально
-    # независимых проверенных дней. Берём только САМЫЙ РАННИЙ снимок
-    # дня — как уже делает compute_weather_results для /results.
-    by_day = {}
-    for r in rows:
-        key = (r["city"], r["local_date"])
-        by_day.setdefault(key, []).append(r)
-    groups = {}
-    for key, day_rows in by_day.items():
-        first_ts = min(r["ts_utc"] for r in day_rows)
-        groups[key] = [r for r in day_rows if r["ts_utc"] == first_ts]
-    return groups
-
-
-def format_bucket(lo, hi, unit_symbol):
-    if lo <= -900:
-        return f"до {hi}{unit_symbol}"
-    if hi >= 900:
-        return f"от {lo}{unit_symbol}"
-    return f"{lo}–{hi}{unit_symbol}"
-
-
-def row_verdict(source_hit, market_hit):
-    # Построчный вердикт для /results — конкретный случай, не проценты.
-    if source_hit and not market_hit:
-        return {"tone": "good", "label": "мы правы, рынок ошибся"}
-    if market_hit and not source_hit:
-        return {"tone": "bad", "label": "рынок прав, мы ошиблись"}
-    if source_hit and market_hit:
-        return {"tone": "neutral", "label": "оба правы"}
-    return {"tone": "insufficient", "label": "оба мимо"}
-
-
-def compute_weather_results(conn):
-    rows = conn.execute(
-        """
-        SELECT s.ts_utc, s.city, s.local_date, s.local_hour, s.unit, s.bucket_lo, s.bucket_hi,
-               s.market_p, s.model_p, o.actual_max
-        FROM snapshots s
-        JOIN weather_station_daily o ON s.city = o.city AND s.local_date = o.local_date
-        WHERE s.ts_utc >= ? AND s.local_hour < 12
-        ORDER BY s.city, s.local_date, s.ts_utc
-        """,
-        (WEATHER_COORD_FIX_TS,),
-    ).fetchall()
-
-    groups = {}
-    for r in rows:
-        key = (r["city"], r["local_date"])
-        groups.setdefault(key, []).append(r)
-
-    results = []
-    for (city, local_date), grp in groups.items():
-        first_ts = grp[0]["ts_utc"]
-        first_grp = [r for r in grp if r["ts_utc"] == first_ts]
-        actual = first_grp[0]["actual_max"]
-        unit_symbol = "°F" if first_grp[0]["unit"] == "fahrenheit" else "°C"
-        model_pick = max(first_grp, key=lambda r: r["model_p"])
-        market_pick = max(first_grp, key=lambda r: r["market_p"])
-        model_hit = model_pick["bucket_lo"] < actual <= model_pick["bucket_hi"]
-        market_hit = market_pick["bucket_lo"] < actual <= market_pick["bucket_hi"]
-        results.append(
-            {
-                "city": city,
-                "local_date": local_date,
-                "local_hour": first_grp[0]["local_hour"],
-                "actual": actual,
-                "unit": unit_symbol,
-                "model_range": format_bucket(model_pick["bucket_lo"], model_pick["bucket_hi"], unit_symbol),
-                "market_range": format_bucket(market_pick["bucket_lo"], market_pick["bucket_hi"], unit_symbol),
-                "verdict": row_verdict(model_hit, market_hit),
-            }
-        )
-    results.sort(key=lambda r: (r["local_date"], r["city"]), reverse=True)
-    return results
+# 06.10 (решение Alex): вкладка «Погода» (/, /city/<город>) удалена — остаток первого прототипа: перевесы модели
+# по формулам (кошелёк main), а не главной v3; ею не пользовались. Главная страница — кошельки.
+@app.get("/", include_in_schema=False)
+def index():
+    return RedirectResponse("/paper")
 
 
 VIEWER_TZ = ZoneInfo("Europe/Chisinau")
@@ -276,6 +109,8 @@ PAPER_WALLETS = {
     "techno": "Дешёвые «да» среди фаворитов",
     "ml3_conf": "Смесь — не спорить с уверенным рынком",
     "ml5_cal": "v5 «от рынка» + рынок (смесь)",
+    "ml5": "v5 «от рынка» — сама модель",
+    "ml_day": "Дневная модель (10/12/14 ч)",
     "fav": "Недооценённые фавориты",
     "ml3_city": "Смесь — лучшие города",
     "copy": "Повтор за сильными трейдерами",
@@ -336,6 +171,10 @@ WALLET_INFO = {
                  "Покупает «нет» на вариант за 5-15¢, который смесь модели и рынка считает переоценённым: люди переплачивают за дешёвые варианты"),
     "no_mid": ("Перекосы рынка", "Против средних вариантов",
                "Покупает «нет» на вариант за 30-55¢, если смесь модели и рынка считает его переоценённым на 3+ п.п."),
+    "ml_day": ("Другие версии обучаемой модели", "Дневная модель (10/12/14 ч)",
+               "LightGBM в 10, 12 и 14 часов видит замеры с утра и цену рынка в этот час; смесь 35/65 с рынком, перевес от 3 п.п., одна ставка на город в день"),
+    "ml5": ("Другие версии обучаемой модели", "v5 «от рынка» — сама модель",
+            "Чистая v5 без смеси с рынком, перевес от 10 п.п. — пара к главной v3 (ml3): какая модель сама по себе зарабатывает больше"),
     "ml5_cal": ("Другие версии обучаемой модели", "v5 «от рынка» + рынок (смесь)",
                 "Модель учит не температуру, а поправку к рынку — где и насколько рынок ошибается; смесь 35/65 с рынком, перевес от 3 п.п."),
     "ml3_conf": ("Другие версии обучаемой модели", "Смесь — не спорить с уверенным рынком",
@@ -384,7 +223,7 @@ CITY_RU = {
     "wuhan": "Ухань", "zhengzhou": "Чжэнчжоу", "hong_kong": "Гонконг", "taipei": "Тайбэй",
 }
 WALLET_BADGE = {"ml3": "v3", "ml2": "v2", "ml": "v1", "ml_shift": "v1+", "mm": "MX", "emos": "EM", "main": "GI",
-                "mm_mk": "MX", "emos_mk": "EM", "main_mk": "GI", "ml3_mk": "v3", "ml3_cal": "v3+", "ml3_z": "v3Z", "ml3_no": "v3−", "ml3_cal_k": "v3$", "ml4": "v4", "ml4_cal": "v4+", "ml4e": "v4³", "ml4e_cal": "v4³+", "ens": "EN", "ml3_cal15": "v3+¢", "ml3_cal30": "v3+30", "no_cheap": "НЕТ", "fav": "ФАВ", "no_mid": "НЕТ½", "no_big": "НЕТ+", "techno": "ДА¢", "ml3_conf": "v3+У", "ml5_cal": "v5+", "ml3_city": "v3+Г", "copy": "CP", "obs": "OB", "obs_fmi": "FI", "obs_fast": "OB+", "obs_rt": "OB⚡", "obs_wethr": "OBW", "llm_gem": "LG", "llm_ds": "LD"}
+                "mm_mk": "MX", "emos_mk": "EM", "main_mk": "GI", "ml3_mk": "v3", "ml3_cal": "v3+", "ml3_z": "v3Z", "ml3_no": "v3−", "ml3_cal_k": "v3$", "ml4": "v4", "ml4_cal": "v4+", "ml4e": "v4³", "ml4e_cal": "v4³+", "ens": "EN", "ml3_cal15": "v3+¢", "ml3_cal30": "v3+30", "no_cheap": "НЕТ", "fav": "ФАВ", "no_mid": "НЕТ½", "no_big": "НЕТ+", "techno": "ДА¢", "ml3_conf": "v3+У", "ml5_cal": "v5+", "ml5": "v5", "ml_day": "ДН", "ml3_city": "v3+Г", "copy": "CP", "obs": "OB", "obs_fmi": "FI", "obs_fast": "OB+", "obs_rt": "OB⚡", "obs_wethr": "OBW", "llm_gem": "LG", "llm_ds": "LD"}
 WALLET_GROUPS = ["Другие версии обучаемой модели", "Перекосы рынка", "Ансамбли погодных моделей", "Повтор за сильными трейдерами", "Прогноз по формулам (раньше)",
                  "Тот же сигнал, но покупка своей заявкой", "Живые замеры"]
 

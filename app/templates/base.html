@@ -45,10 +45,10 @@
     font-size: 14px;
     line-height: 1.55;
   }
-  table, .edge, .bar-fill, .bucket-label, .meta, td, .legend, .status-stat, code {
+  table, .meta, td, .legend, .status-stat, code {
     font-variant-numeric: tabular-nums;
   }
-  code, .mono, th, td, .edge, .status-stat b { font-family: var(--font-mono); }
+  code, .mono, th, td, .status-stat b { font-family: var(--font-mono); }
 
   /* ---- accessibility ---- */
   .skip-link {
@@ -66,7 +66,7 @@
     transition: top 0.15s ease;
   }
   .skip-link:focus { top: 0; }
-  a:focus-visible, .card:focus-visible, button:focus-visible, label:focus-visible, [tabindex]:focus-visible {
+  a:focus-visible, button:focus-visible, label:focus-visible, [tabindex]:focus-visible {
     outline: 2px solid var(--accent-strong);
     outline-offset: 2px;
     border-radius: 4px;
@@ -199,7 +199,7 @@
   main { padding: 28px 32px 60px; max-width: 1120px; width: 100%; margin: 0 auto; }
   main a { color: var(--accent-strong); text-underline-offset: 2px; }
   main a:hover { color: var(--text); }
-  .card, .toc a, .status-link, .side-link { text-decoration: none; }
+  .toc a, .status-link, .side-link { text-decoration: none; }
 
   @media (max-width: 900px) {
     .sidebar, .side-collapsed .sidebar {
@@ -237,47 +237,10 @@
     grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
     gap: 14px;
   }
-  .card {
-    position: relative;
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 16px 18px 16px 20px;
-    text-decoration: none;
-    color: var(--text);
-    display: block;
-    overflow: hidden;
-  }
-  .card::before {
-    content: "";
-    position: absolute; left: 0; top: 0; bottom: 0;
-    width: 3px;
-    background: var(--border);
-  }
-  .card:has(.edge.pos)::before { background: var(--pos); }
-  .card:has(.edge.neg)::before { background: var(--neg); }
-  .card:hover { border-color: var(--accent); }
-  @media (prefers-reduced-motion: no-preference) {
-    .card { transition: border-color 0.15s ease, transform 0.15s ease; }
-    .card:hover { transform: translateY(-2px); }
-  }
-  .card h2 { margin: 0 0 4px 0; font-size: 15.5px; font-weight: 600; text-transform: capitalize; }
-  .card .meta { color: var(--muted); font-size: 12px; margin-bottom: 12px; }
-  .edge { font-size: 24px; font-weight: 600; letter-spacing: -0.01em; }
-  .edge.pos { color: var(--pos); }
-  .edge.neg { color: var(--neg); }
-  .bucket-label { color: var(--muted); font-size: 12px; margin-top: 2px; }
-
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
   th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--border-soft); }
   th { color: var(--muted); font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; font-family: var(--font-ui); }
   tbody tr:hover { background: var(--bg-raised); }
-
-  .bar-row { display: flex; align-items: center; gap: 8px; }
-  .bar-track { flex: 1; background: var(--track); border-radius: 5px; height: 14px; position: relative; overflow: hidden; }
-  .bar-fill { position: absolute; top: 0; left: 0; height: 100%; border-radius: 5px; }
-  .bar-fill.market { background: var(--accent); opacity: 0.55; }
-  .bar-fill.model { background: var(--pos); opacity: 0.9; height: 6px; top: 4px; }
 
   .empty {
     color: var(--muted);
@@ -297,22 +260,6 @@
   .icon { width: 18px; height: 18px; vertical-align: -4px; flex-shrink: 0; }
   .block > h1 .icon { width: 20px; height: 20px; vertical-align: -5px; margin-right: 9px; color: var(--accent-strong); }
   .side-link-icon { width: 18px; height: 18px; }
-
-  .verdict-pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    padding: 4px 11px;
-    border-radius: 999px;
-    font-size: 12px;
-    font-weight: 600;
-    white-space: nowrap;
-    font-family: var(--font-ui);
-  }
-  .verdict-pill.good { background: var(--pos-bg); color: var(--pos); }
-  .verdict-pill.bad { background: var(--neg-bg); color: var(--neg); }
-  .verdict-pill.neutral { background: var(--accent-bg); color: var(--accent-strong); }
-  .verdict-pill.insufficient, .verdict-pill.none { background: var(--track); color: var(--muted); }
 
   .block {
     background: var(--panel);
@@ -403,7 +350,6 @@
       {{ navlink('/bets', 'ставки', 'trending', path == '/bets', nc.open) }}
       {{ navlink('/cities', 'города', 'globe', path.startswith('/cities'), nc.cities if nc.cities else none) }}
       {{ navlink('/traders', 'трейдеры', 'shuffle', path.startswith('/traders'), nc.traders if nc.traders else none) }}
-      {{ navlink('/', 'погода', 'weather', path == '/' or path.startswith('/city/')) }}
       {{ navlink('/training', 'обучение модели', 'sliders', path == '/training') }}
      </div>
      <div class="side-block">

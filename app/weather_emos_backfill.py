@@ -65,7 +65,7 @@ def run():
         by_city_day.setdefault(key, []).append(r)
 
     # один день = самый ранний снимок (та же логика, что в
-    # _one_snapshot_per_day в dashboard.py) — иначе несколько снимков в
+    # как раньше _one_snapshot_per_day в dashboard.py, удалён 06.10) — иначе несколько снимков в
     # день считались бы отдельными точками для регрессии.
     days_by_city = {}
     for (city, local_date), grp in by_city_day.items():
