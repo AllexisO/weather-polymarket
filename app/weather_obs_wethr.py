@@ -28,7 +28,17 @@ import requests
 
 from weather_cities import OBS_CITIES
 from weather_obs_live import cash, ensure_schema
-from weather_obs_rt import FRESH_SEC, Books, Markets, buy_dead, check_watch, value
+from weather_obs_rt import FRESH_SEC, Books, Markets, buy_dead, check_watch
+from weather_obs_rt import value as value_exact
+
+
+def value(temp_c, cfg):
+    """06.10: поток wethr присылает сводку в целых °C (Майами 05.10 16:53: 32.0 при T-группе 31.7 → посчитали 90°F вместо 89,
+    купили «нет» на 88-89°F по 51¢ и проиграли). Целые °C для города в °F — точный °F неизвестен (32°C = 88.7…90.3°F):
+    берём нижнюю границу (31.5°C → 89°F). Иногда упустим ставку, но не купим «нет» на вариант, который ещё может выиграть."""
+    if cfg["unit"] == "fahrenheit" and float(temp_c).is_integer():
+        return value_exact(temp_c - 0.5, cfg)
+    return value_exact(temp_c, cfg)
 
 DB_PATH = os.environ.get("POLY_LAB_DB", "/data/db/polymarket_lab.sqlite3")
 FAST_DB = os.path.join(os.path.dirname(DB_PATH), "fastobs.sqlite3")
