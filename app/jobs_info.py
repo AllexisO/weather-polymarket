@@ -31,7 +31,7 @@ JOBS = [
     ("weather_pws_live", "Народные станции США (CWOP, сбор)", "weather_pws_live.py", "каждый час 11:00-19:00", 26 * 60, "weather_pws_live.log"),
     ("weather_alerts", "Проверки и тревоги", "weather_alerts.py", "каждые 30 мин", 70, "weather_alerts.log"),
     ("weather_fastobs", "Быстрые замеры (Synoptic, JMA, DWD, FMI) + кошелёк obs_fast", "weather_fastobs.py", "каждую минуту", 5, "weather_fastobs.log"),
-    ("weather_llm_hour", "LLM-прогноз каждый час (кошельки llm_gem и llm_ds, OpenRouter, 5 городов США)", "weather_llm_hour.py", "каждый час в :05", 75, "weather_llm_hour.log"),
+    ("weather_llm_hour", "LLM-прогноз каждый час (кошельки llm_gem, llm_ds и смесь llm_mix, OpenRouter, 5 городов США)", "weather_llm_hour.py", "каждый час в :05", 75, "weather_llm_hour.log"),
     ("weather_obs_wethr", "Живые замеры — wethr (кошелёк obs_wethr, платный поток wethr.net, 5 городов США)", "weather_obs_wethr.py", "каждый час с :07, 57 мин", 75, "weather_obs_wethr.log"),
     ("weather_obs_rt", "Живые замеры — быстро (кошелёк obs_rt, постоянный опрос NOAA)", "weather_obs_rt.py", "каждый час с :07, 57 мин", 75, "weather_obs_rt.log"),
     ("weather_netatmo", "Частные станции Netatmo у аэропортов (сбор для проверки)", "weather_netatmo.py", "каждые 5 мин", 20, "weather_netatmo.log"),

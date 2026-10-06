@@ -7,6 +7,7 @@ gold-sim (8090-8092).
 import json
 import math
 import os
+import re
 import sqlite3
 import time
 from pathlib import Path
@@ -352,6 +353,8 @@ WALLET_INFO = {
                 "цены и свои прошлые ошибки — и называет максимум дня. 5 городов США, одна ставка на город в день"),
     "llm_ds": ("LLM каждый час", "LLM DeepSeek — прогноз каждый час",
                "То же, что LLM Gemini, но DeepSeek V4 Pro — для сравнения двух LLM"),
+    "llm_mix": ("LLM каждый час", "LLM + LightGBM — смесь",
+                "Шансы Gemini этого часа и утренний прогноз LightGBM v3 поровну; ставит по тем же правилам, что LLM. Своих запросов к LLM нет — $0"),
     "obs": ("Живые замеры", "По живым замерам станции", "Ставка против варианта, который станция уже исключила"),
     "obs_fast": ("Живые замеры", "Быстрые замеры в минуту сводки",
                  "Как «по живым замерам», но узнаёт значение сводки METAR раньше её публикации: 5-минутные замеры аэропортов США (Synoptic), Токио (JMA), Амстердам (KNMI), Мюнхен (DWD), Хельсинки (FMI); плюс Гонконг по «максимуму с полуночи» обсерватории и Тайбэй по сводкам"),
@@ -1055,8 +1058,9 @@ def spark(rows, start=100.0, w=160, h=44):
             "base": round(Y(start), 1), "end": (round(X(len(vals) - 1), 1), round(Y(vals[-1]), 1)), "up": vals[-1] >= start}
 
 
-LLM_WALLETS = ("llm_gem", "llm_ds")
-LLM_LIMIT = {"llm_gem": 8.5, "llm_ds": 1.5}   # как weather_llm_hour.MONTH_LIMIT
+LLM_WALLETS = ("llm_gem", "llm_ds")   # LLM со своими запросами — вкладки страницы
+LLM_BET_WALLETS = (*LLM_WALLETS, "llm_mix")   # 06.10: и смесь Gemini + LightGBM (weather_llm_hour.MIX_WALLET) — карточки, ставки, деньги
+LLM_LIMIT = {"llm_gem": 8.5, "llm_ds": 1.5, "llm_mix": 0.0}   # как weather_llm_hour.MONTH_LIMIT; у смеси своих запросов нет
 
 
 def _smooth(pts):
@@ -1132,9 +1136,26 @@ def _llm_center(lab):
     return (float(a) + float(b)) / 2 if b else float(a)
 
 
+_RE_LLM_LAB = re.compile(r"^(-?\d+)(?:-(-?\d+))?°[FC]( or below| or higher)?$")
+
+
+def _llm_range(lab):
+    """Границы варианта по подписи — как weather_edge.parse_bucket: «66-67°F» → (65.5, 67.5), «69°F or below» → (-999, 69.5)."""
+    m = _RE_LLM_LAB.match(lab.strip())
+    if not m:
+        return None
+    a, b, tail = float(m.group(1)), m.group(2), m.group(3)
+    if tail == " or below":
+        return (-999.0, a + 0.5)
+    if tail == " or higher":
+        return (a - 0.5, 999.0)
+    return (a - 0.5, (float(b) if b else a) + 0.5)
+
+
+LLM_V2_FROM = "2026-10-06T09:45:00+00:00"   # как weather_llm_hour.V2_FROM: с этого запуска — обучение v2 (LightGBM, ошибки, деньги, поправка шансов)
 LLM_KEY_LIMIT = 10.0   # лимит на самом ключе OpenRouter (за всё время)
 LLM_CITIES = ("chicago", "atlanta", "austin", "miami", "dallas", "london")   # как weather_llm_hour.CITIES (Лондон с 04.10)
-LLM_MODEL_NAME = {"llm_gem": "Gemini 3.8 Flash", "llm_ds": "DeepSeek V4 Pro"}
+LLM_MODEL_NAME = {"llm_gem": "Gemini 3.8 Flash", "llm_ds": "DeepSeek V4 Pro", "llm_mix": "Смесь Gemini + LightGBM"}
 
 
 def _llm_fact_hourly(conn, city, day):
@@ -1161,15 +1182,15 @@ def _city_tz(city):
 
 
 def _llm_clock(city):
-    """04.10 (просьба Alex): местное время города и работает ли LLM (запросы в :05 с 05 до 19 местного, weather_llm_hour.HOURS)."""
+    """04.10 (просьба Alex): местное время города и работает ли LLM (запросы в :05 с 08 до 19 местного, weather_llm_hour.HOURS; до 06.10 — с 05)."""
     from weather_cities import OBS_CITIES
     now = datetime.now(ZoneInfo(OBS_CITIES[city]["tz"]))
-    on = 5 <= now.hour < 20
+    on = 8 <= now.hour < 20
     if on:
         nxt = now.replace(minute=5, second=0) + (timedelta(hours=1) if now.minute >= 5 else timedelta(0))
         state = f"работает, следующий прогноз в {nxt:%H:%M}" if nxt.hour < 20 else "последний прогноз дня был в 19:05"
     else:
-        state = "спит, первый прогноз в 05:05"
+        state = "спит, первый прогноз в 08:05"
     return {"time": f"{now:%H:%M}", "on": on, "state": state, "tz": now.strftime("%Z")}
 
 
@@ -1180,17 +1201,23 @@ def llm_page_data(conn, key, city, day):
     cols = {r[1] for r in conn.execute("PRAGMA table_info(llm_hour_preds)")} if have else set()
     month = datetime.now(timezone.utc).strftime("%Y-%m-01")
     cards, spend_all, spend_month = [], 0.0, 0.0
-    for k in LLM_WALLETS:
+    for k in LLM_BET_WALLETS:
         rows = conn.execute("SELECT * FROM paper_trades WHERE wallet = ? AND status != 'skip'", (k,)).fetchall() if table_exists(conn, "paper_trades") else []
         c = _wallet_card(WALLET_INFO[k][1], [r for r in rows if r["status"] != "nofill"], nofill=0, skipped=0)
         sp = conn.execute("SELECT COUNT(*), COALESCE(SUM(cost), 0), COALESCE(SUM(CASE WHEN ts_utc >= ? THEN cost END), 0) FROM llm_hour_preds WHERE wallet = ?",
                           (month, k)).fetchone() if have else (0, 0.0, 0.0)
         c.update(key=k, model=LLM_MODEL_NAME[k], calls=sp[0], spent=sp[1], spent_month=sp[2], limit=LLM_LIMIT[k],
                  free=c["balance"] - c["in_play"], per_call=sp[1] / sp[0] if sp[0] else None)
+        # 06.10: итог до и после обучения v2 — по времени ставки
+        for part, sel in (("before", lambda r: (r["placed_at"] or "") < LLM_V2_FROM), ("after", lambda r: (r["placed_at"] or "") >= LLM_V2_FROM)):
+            st = [r for r in rows if r["status"] in ("won", "lost", "void") and sel(r)]
+            pnl, cost = sum(_pnl(r) for r in st), sum(r["stake"] + _fee(r) for r in st)
+            c[part] = {"n": len(st), "won": sum(r["status"] == "won" for r in st), "pnl": pnl, "roi": 100 * pnl / cost if cost else None,
+                       "open": sum(1 for r in rows if r["status"] == "open" and sel(r))}
         spend_all += sp[1]
         spend_month += sp[2]
         cards.append(c)
-    out = {"cards": cards, "spend": {"all": spend_all, "month": spend_month, "limit_month": sum(LLM_LIMIT.values()), "key_limit": LLM_KEY_LIMIT},
+    out = {"v2_from": LLM_V2_FROM, "cards": cards, "spend": {"all": spend_all, "month": spend_month, "limit_month": sum(LLM_LIMIT.values()), "key_limit": LLM_KEY_LIMIT},
            "key": key, "city": city, "cities": [(c, CITY_RU.get(c, c), _llm_clock(c)) for c in LLM_CITIES], "model": LLM_MODEL_NAME[key]}
     if not have:
         return out
@@ -1308,7 +1335,8 @@ def llm_page_data(conn, key, city, day):
                    "probs": [(lab, p, mk.get(lab)) for lab, p in probs.items() if p >= 0.01 or (mk.get(lab) or 0) >= 0.01]}
     bets = conn.execute("SELECT * FROM paper_trades WHERE wallet = ? AND status NOT IN ('skip', 'nofill') ORDER BY placed_at DESC LIMIT 40", (key,)).fetchall()
     # 04.10 (просьба Alex «ставит LLM или нет»): открытые ставки обеих LLM и ставка по выбранному городу сегодня
-    ob = conn.execute("SELECT * FROM paper_trades WHERE wallet IN (?, ?) AND status = 'open' ORDER BY placed_at DESC", LLM_WALLETS).fetchall()
+    ob = conn.execute(f"SELECT * FROM paper_trades WHERE wallet IN ({','.join('?' * len(LLM_BET_WALLETS))}) AND status = 'open' ORDER BY placed_at DESC",
+                      LLM_BET_WALLETS).fetchall()
     out["open_bets"] = [{"model": LLM_MODEL_NAME[b["wallet"]], "date": f"{b['local_date'][8:10]}.{b['local_date'][5:7]}", "city": CITY_RU.get(b["city"], b["city"]),
                          "side": "да" if (b["side"] or "yes") == "yes" else "нет", "bucket": paper_bucket(b["bucket_lo"], b["bucket_hi"], b["unit"]),
                          "price": b["price"], "chance": b["model_p"], "cost": b["stake"] + (b["fee"] or 0), "win": b["shares"],
@@ -1331,12 +1359,110 @@ def llm_page_data(conn, key, city, day):
     return out
 
 
+LLM_VS_HOURS = (8, 10, 12, 14, 16, 18)
+
+
+def _bucket_score(bk, a):
+    """bk — [(lo, hi, шанс)], a — факт. → (шанс на верный вариант, угадан ли самый вероятный, ошибка середины распределения)."""
+    s = sum(p for *_, p in bk)
+    if not s:
+        return None
+    bk = sorted((lo, hi, p / s) for lo, hi, p in bk)
+    top, cum, mid = max(bk, key=lambda x: x[2]), 0.0, None
+    for lo, hi, p in bk:
+        cum += p
+        if cum >= 0.5:
+            mid = hi - 1 if lo < -900 else (lo + 1 if hi > 900 else (lo + hi) / 2)
+            break
+    return sum(p for lo, hi, p in bk if lo <= a < hi), top[0] <= a < top[1], abs(mid - a)
+
+
+def llm_vs_ml(conn):
+    """06.10 (вопрос Alex «LightGBM точнее LLM?»): обе LLM против главной модели v3 (LightGBM) и рынка на одних и тех же городах и днях.
+    v3 решает один раз в день — в 08:00 местного (snapshots_fast), LLM — каждый час, поэтому честное сравнение — 08:00 против 08:05.
+    По часам дня: LLM видит всё больше замеров, сравниваем её с рынком в тот же час (snapshots, ±1 ч) и с утренней v3.
+    Деньги — закрытые ставки ml3 и LLM в тех же городах с первого дня LLM."""
+    if not all(table_exists(conn, t) for t in ("llm_hour_preds", "snapshots_fast", "weather_station_daily")):
+        return None
+    start = conn.execute("SELECT MIN(local_date) FROM llm_hour_preds").fetchone()[0]
+    if not start:
+        return None
+    qc = ",".join("?" * len(LLM_CITIES))
+    act = {(c, d): a for c, d, a in conn.execute(f"SELECT city, local_date, actual_max FROM weather_station_daily WHERE local_date >= ? AND city IN ({qc})",
+                                                 (start, *LLM_CITIES)) if a is not None}
+    ml, first_ts = {}, {}
+    for c, d, ts, lo, hi, p, m in conn.execute(f"""SELECT city, local_date, ts_utc, bucket_lo, bucket_hi, ml3_model_p, market_p FROM snapshots_fast
+                                                   WHERE local_date >= ? AND city IN ({qc}) ORDER BY ts_utc""", (start, *LLM_CITIES)):
+        if first_ts.setdefault((c, d), ts) == ts:   # первый быстрый снимок дня — по нему v3 и ставит
+            ml.setdefault((c, d), []).append((lo, hi, p, m))
+    mkt = {}
+    if table_exists(conn, "snapshots"):
+        for c, d, h, lo, hi, m in conn.execute(f"""SELECT city, local_date, local_hour, bucket_lo, bucket_hi, market_p FROM snapshots
+                                                   WHERE local_date >= ? AND city IN ({qc}) AND market_p IS NOT NULL ORDER BY ts_utc""", (start, *LLM_CITIES)):
+            mkt.setdefault((c, d, h), {})[(lo, hi)] = m   # последний снимок часа
+    llm = {}
+    for w, c, d, h, pj in conn.execute(f"SELECT wallet, city, local_date, local_hour, probs_json FROM llm_hour_preds WHERE probs_json IS NOT NULL AND city IN ({qc})",
+                                       LLM_CITIES):
+        bk = [(*r, p) for lab, p in json.loads(pj).items() if (r := _llm_range(lab))]
+        if bk:
+            llm[(w, c, d, h)] = bk
+    avg = lambda xs: sum(xs) / len(xs) if xs else None
+
+    def pack(scores):
+        return {"chance": avg([s[0] for s in scores]), "hits": sum(s[1] for s in scores), "err": avg([s[2] for s in scores])} if scores else None
+
+    # 1) утро: одни и те же город-дни у всех четырёх
+    keys = sorted(k for k in act if k in ml and all((w, *k, 8) in llm for w in LLM_WALLETS)
+                  and any(p is not None for _l, _h, p, _m in ml[k]))
+    morning = []
+    if keys:
+        rows = {"v3": [], "mkt": [], **{w: [] for w in LLM_WALLETS}}
+        for k in keys:
+            rows["v3"].append(_bucket_score([(lo, hi, p) for lo, hi, p, _m in ml[k] if p is not None], act[k]))
+            rows["mkt"].append(_bucket_score([(lo, hi, m) for lo, hi, _p, m in ml[k] if m is not None], act[k]))
+            for w in LLM_WALLETS:
+                rows[w].append(_bucket_score(llm[(w, *k, 8)], act[k]))
+        names = [("v3", "LightGBM v3 (главная)", "08:00"), *[(w, LLM_MODEL_NAME[w], "08:05") for w in LLM_WALLETS], ("mkt", "Рынок", "08:00")]
+        morning = [{"key": k, "name": n, "when": t, **pack([s for s in rows[k] if s])} for k, n, t in names]
+        best = max(morning, key=lambda r: r["chance"] if r["chance"] is not None else -1)
+        for r in morning:
+            r["best"] = r is best
+    # 2) по часам: LLM в :05 против рынка в этот час (снимок часом раньше или в тот же час) и утренней v3
+    hours = []
+    for H in LLM_VS_HOURS:
+        sc = {"v3": [], "mkt": [], **{w: [] for w in LLM_WALLETS}}
+        for k in act:
+            if k not in ml or not all((w, *k, H) in llm for w in LLM_WALLETS):
+                continue
+            mk = mkt.get((*k, H)) or mkt.get((*k, H - 1))
+            if not mk:
+                continue
+            sc["mkt"].append(_bucket_score([(lo, hi, m) for (lo, hi), m in mk.items()], act[k]))
+            sc["v3"].append(_bucket_score([(lo, hi, p) for lo, hi, p, _m in ml[k] if p is not None], act[k]))
+            for w in LLM_WALLETS:
+                sc[w].append(_bucket_score(llm[(w, *k, H)], act[k]))
+        if sc["mkt"]:
+            hours.append({"h": H, "n": len(sc["mkt"]), **{k: pack([s for s in v if s]) for k, v in sc.items()}})
+    # 3) деньги: закрытые ставки в тех же городах с первого дня LLM
+    money_rows = []
+    if table_exists(conn, "paper_trades"):
+        for w, n in (("ml3", "LightGBM v3 (главная)"), *[(w, LLM_MODEL_NAME[w]) for w in LLM_BET_WALLETS]):
+            rs = conn.execute(f"""SELECT * FROM paper_trades WHERE wallet = ? AND local_date >= ? AND city IN ({qc})
+                                  AND status IN ('won', 'lost', 'void')""", (w, start, *LLM_CITIES)).fetchall()
+            pnl, cost = sum(_pnl(r) for r in rs), sum(r["stake"] + _fee(r) for r in rs)
+            money_rows.append({"name": n, "n": len(rs), "won": sum(r["status"] == "won" for r in rs), "pnl": pnl,
+                               "roi": 100 * pnl / cost if cost else None})
+    return {"start": start, "n_days": len(keys), "morning": morning, "hours": hours, "money": money_rows,
+            "dates": sorted({d for _c, d in keys})}
+
+
 @app.get("/llm", response_class=HTMLResponse)
 def llm_page(request: Request, w: str = "llm_gem", city: str = "chicago", d: str = ""):
     conn = db()
     w = w if w in LLM_WALLETS else LLM_WALLETS[0]
     city = city if city in LLM_CITIES else LLM_CITIES[0]
     data = llm_page_data(conn, w, city, d)
+    data["vs"] = llm_vs_ml(conn)
     conn.close()
     return TEMPLATES.TemplateResponse("llm.html", {"request": request, **data})
 

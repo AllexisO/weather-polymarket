@@ -77,24 +77,35 @@
   .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
   .steps div { background: var(--bk-raise); border-radius: 12px; padding: 12px 14px; font-size: 14px; }
   .steps b { display: block; margin-bottom: 4px; }
+  /* 06.10: итог до и после обучения v2 на карточке LLM */
+  .v2s { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+  .v2s > div { background: var(--bk-raise); border-radius: 10px; padding: 8px 10px; display: flex; flex-direction: column; gap: 2px; }
+  .v2s span { font-size: 12px; color: var(--bk-muted); } .v2s b { font-size: 16px; font-weight: 600; } .v2s i { font-style: normal; font-size: 12px; color: var(--bk-faint); }
 </style>
 <div class="bk">
   <div class="top">
     <h1>LLM <span class="tag">виртуально</span></h1>
-    <p>Две языковые модели каждый час с 05:00 до 19:00 по местному времени (ставки — с 08:00) смотрят всё, что известно о дне в 5 городах США и Лондоне, и называют
+    <p>Две языковые модели каждый час с 08:00 до 19:00 по местному времени (до 06.10 — с 05:00) смотрят всё, что известно о дне в 5 городах США и Лондоне, и называют
       максимум дня и температуру по часам. Если шанс варианта по их мнению выше цены — ставят $2 (одна ставка на город в день).
       Учатся на своих ошибках: в каждом запросе видят свои прошлые прогнозы рядом с настоящей температурой. Решение — 18.10.</p>
+    <p><b>Обучение v2 с {{ v2_from[8:10] }}.{{ v2_from[5:7] }} {{ v2_from[11:16] }} UTC:</b> в письме ещё прогноз LightGBM, её систематические ошибки по всей истории,
+      итоги её ставок в долларах и как часто сбываются её шансы; перед ставкой код поправляет шансы по этой проверке
+      (DeepSeek на «80%» угадывал 36%). На карточках — итог до и после.</p>
   </div>
 
   <!-- деньги и расход -->
   <section class="sec">
     <div class="grid2">
       {% for c in cards %}
-      <a class="pane" href="/llm?w={{ c.key }}&city={{ city }}" style="text-decoration: none; color: inherit;{% if c.key == key %} box-shadow: inset 0 0 0 1px var(--bk-accent);{% endif %}">
+      <a class="pane" href="/llm?w={{ 'llm_gem' if c.key == 'llm_mix' else c.key }}&city={{ city }}" style="text-decoration: none; color: inherit;{% if c.key == key %} box-shadow: inset 0 0 0 1px var(--bk-accent);{% endif %}">
         <h3 style="margin: 0;">{{ c.model }} <span class="muted" style="font-size: 13px; font-weight: 400;">{{ c.key }}</span></h3>
         <span class="big num">${{ '%.2f' | format(c.free) }}</span>
         <div class="muted" style="font-size: 13.5px;">свободно из $100 · в игре ${{ '%.2f' | format(c.in_play) }} ({{ c.open }} ставок)</div>
+        {% if c.key == 'llm_mix' %}<div class="muted" style="font-size: 13px; margin-top: 4px;">поровну шансы Gemini и LightGBM v3, с 06.10; своих запросов нет — $0</div>{% endif %}
         <div style="margin-top: 8px; font-size: 14px;">Закрыто ставок: <b>{{ c.n }}</b>{% if c.n %}, угадано {{ c.won }} · итог <b class="{{ tone(c.pnl) }}">{{ money(c.pnl) }}</b>{% if c.roi is not none %} ({{ '%+.0f' | format(c.roi) }}%){% endif %}{% endif %}</div>
+        {% if c.after %}<div class="v2s">{% for part, name in [('before', 'до обучения v2'), ('after', 'после')] %}{% set x = c[part] %}
+          <div><span>{{ name }}</span><b class="num {{ tone(x.pnl) if x.n }}">{{ money(x.pnl) if x.n else '—' }}</b>
+            <i>{% if x.n %}{{ x.n }} ставок, угадано {{ x.won }}{% if x.roi is not none %} · {{ '%+.0f' | format(x.roi) }}%{% endif %}{% else %}пока нет закрытых{% endif %}{% if x.open %} · ждут {{ x.open }}{% endif %}</i></div>{% endfor %}</div>{% endif %}
       </a>
       {% endfor %}
       <div class="pane">
@@ -103,11 +114,56 @@
         <div class="muted" style="font-size: 13.5px;">в этом месяце из ${{ '%.2f' | format(spend.limit_month) }} (лимит в коде)</div>
         <div class="bar"><i style="width: {{ [100, 100 * spend.month / spend.limit_month] | min }}%;"></i></div>
         <div style="margin-top: 10px; font-size: 13.5px;">
-          {% for c in cards %}{{ c.model }}: ${{ '%.2f' | format(c.spent_month) }} из ${{ '%.2f' | format(c.limit) }} · {{ c.calls }} запросов{% if c.per_call %}, ~${{ '%.4f' | format(c.per_call) }} за запрос{% endif %}<br>{% endfor %}
+          {% for c in cards if c.key != 'llm_mix' %}{{ c.model }}: ${{ '%.2f' | format(c.spent_month) }} из ${{ '%.2f' | format(c.limit) }} · {{ c.calls }} запросов{% if c.per_call %}, ~${{ '%.4f' | format(c.per_call) }} за запрос{% endif %}<br>{% endfor %}
           <span class="muted">Всего за всё время ${{ '%.2f' | format(spend.all) }} из ${{ '%.0f' | format(spend.key_limit) }} на ключе OpenRouter.</span></div>
       </div>
     </div>
   </section>
+
+  <!-- 06.10 (вопрос Alex «LightGBM точнее LLM?»): одни и те же города и дни. Данные — llm_vs_ml() в dashboard.py -->
+  {% if vs %}
+  {% macro pct(v) -%}{{ '%.0f' | format(v * 100) ~ '%' if v is not none else '—' }}{%- endmacro %}
+  <section class="sec">
+    <div class="sec-head"><h2>LLM против LightGBM</h2><span class="aside">одни и те же города и дни, с {{ vs.start[8:10] }}.{{ vs.start[5:7] }}</span></div>
+    <div class="pane tw" style="margin-bottom: 14px;">
+      <h3 style="margin: 0 0 4px;">Утро: кто лучше знает максимум дня</h3>
+      <p class="foot" style="margin: 0 0 8px;">LightGBM решает один раз — в 08:00 по местному, LLM — в 08:05, у всех одни и те же данные утра.
+        Сравнено город-дней: <b>{{ vs.n_days }}</b>{% if vs.dates %} ({% for d in vs.dates %}{{ d[8:10] }}.{{ d[5:7] }}{% if not loop.last %}, {% endif %}{% endfor %}){% endif %}.</p>
+      {% if vs.morning %}
+      <table class="t"><thead><tr><th>Кто</th><th>Когда</th><th>Шанс на верный вариант</th><th>Самый вероятный угадан</th><th>Ошибка максимума</th></tr></thead><tbody>
+        {% for r in vs.morning %}<tr><td>{% if r.best %}<b>{{ r.name }}</b>{% else %}{{ r.name }}{% endif %}</td><td>{{ r.when }}</td>
+          <td class="num"><b class="{{ 'pos' if r.best }}">{{ pct(r.chance) }}</b></td><td class="num">{{ r.hits }} из {{ vs.n_days }}</td>
+          <td class="num">{{ '%.1f°' | format(r.err) if r.err is not none else '—' }}</td></tr>{% endfor %}
+      </tbody></table>
+      <p class="foot" style="margin: 8px 0 0;">«Шанс на верный вариант» — сколько в среднем модель дала тому варианту, который в итоге выиграл: чем выше, тем лучше.
+        Ошибка — середина её распределения против факта (Лондон в °C, США в °F).{% if vs.n_days < 30 %} Пока {{ vs.n_days }} город-дней — один день сильно двигает цифры; разница меньше 5–10 п.п. — ещё не разница.{% endif %}</p>
+      {% else %}<p class="muted" style="margin: 0;">Пока нет дней, где есть утренний прогноз обеих LLM, LightGBM и итог дня.</p>{% endif %}
+    </div>
+    {% if vs.hours %}
+    <div class="pane tw" style="margin-bottom: 14px;">
+      <h3 style="margin: 0 0 4px;">В течение дня: шанс на верный вариант</h3>
+      <p class="foot" style="margin: 0 0 8px;">LLM спрашиваем каждый час — она видит всё больше замеров. Честный соперник днём — рынок в тот же час: он тоже видит замеры.
+        LightGBM после 08:00 не меняется.</p>
+      <table class="t"><thead><tr><th>Час</th><th>Город-дней</th><th>Gemini 3.8 Flash</th><th>DeepSeek V4 Pro</th><th>Рынок в этот час</th><th>LightGBM (с утра)</th></tr></thead><tbody>
+        {% for r in vs.hours %}{% set top = [r.llm_gem.chance if r.llm_gem else 0, r.llm_ds.chance if r.llm_ds else 0, r.mkt.chance if r.mkt else 0, r.v3.chance if r.v3 else 0] | max %}
+        <tr><td>{{ '%02d' | format(r.h) }}:00</td><td class="num">{{ r.n }}</td>
+          {% for k in ['llm_gem', 'llm_ds', 'mkt', 'v3'] %}{% set v = r[k].chance if r[k] else none %}<td class="num">{% if v is not none and v == top %}<b class="pos">{{ pct(v) }}</b>{% else %}{{ pct(v) }}{% endif %}</td>{% endfor %}</tr>{% endfor %}
+      </tbody></table>
+      <p class="foot" style="margin: 8px 0 0;">Зелёным — лучший в этом часу. LLM полезна для ставок, только если её шанс выше рынка в тот же час: рынок — это цена, по которой она покупает.</p>
+    </div>
+    {% endif %}
+    {% if vs.money %}
+    <div class="pane tw">
+      <h3 style="margin: 0 0 4px;">Деньги в тех же городах</h3>
+      <p class="foot" style="margin: 0 0 8px;">Закрытые ставки с {{ vs.start[8:10] }}.{{ vs.start[5:7] }} только в городах LLM. Правила ставок разные (LightGBM — в 08:00 по своим порогам, LLM — одна ставка $2 с 08:05), поэтому сравнивать — доходность.</p>
+      <table class="t"><thead><tr><th>Кошелёк</th><th>Закрыто</th><th>Угадано</th><th>Итог</th><th>Доходность</th></tr></thead><tbody>
+        {% for r in vs.money %}<tr><td>{{ r.name }}</td><td class="num">{{ r.n }}</td><td class="num">{{ r.won }}</td>
+          <td class="num"><b class="{{ tone(r.pnl) }}">{{ money(r.pnl) }}</b></td><td class="num">{{ '%+.0f%%' | format(r.roi) if r.roi is not none else '—' }}</td></tr>{% endfor %}
+      </tbody></table>
+    </div>
+    {% endif %}
+  </section>
+  {% endif %}
 
   <!-- открытые ставки (04.10, просьба Alex «ставит LLM или нет») -->
   <section class="sec">
@@ -124,11 +180,11 @@
   </section>
 
   <!-- выбор LLM и города -->
-  <div class="tabs">{% for c in cards %}<a href="/llm?w={{ c.key }}&city={{ city }}" class="{{ 'on' if c.key == key }}">{{ c.model }}</a>{% endfor %}</div>
+  <div class="tabs">{% for c in cards if c.key != 'llm_mix' %}<a href="/llm?w={{ c.key }}&city={{ city }}" class="{{ 'on' if c.key == key }}">{{ c.model }}</a>{% endfor %}</div>
   <div class="tabs">{% for c, ru, ck in cities %}<a href="/llm?w={{ key }}&city={{ c }}" class="{{ 'on' if c == city }}" title="{{ ck.state }}">{{ ru }}
     <span class="num" style="margin-left: 6px; color: {{ 'var(--bk-pos)' if ck.on else 'var(--bk-faint)' }};">{{ ck.time }}</span></a>{% endfor %}</div>
   {% set ck = (cities | selectattr(0, 'equalto', city) | first)[2] %}
-  <p class="foot" style="margin: -6px 0 14px;">Сейчас в городе {{ ck.time }} ({{ ck.tz }}) — LLM {{ ck.state }}. Работает с 05:05 до 19:05 по местному времени, раз в час (ставки — с 08:05); зелёное время — работает, серое — спит.</p>
+  <p class="foot" style="margin: -6px 0 14px;">Сейчас в городе {{ ck.time }} ({{ ck.tz }}) — LLM {{ ck.state }}. Работает с 08:05 до 19:05 по местному времени, раз в час; зелёное время — работает, серое — спит.</p>
 
   {% if not day %}
   <div class="pane"><p style="margin: 0;">По этому городу у {{ model }} ещё нет прогнозов.</p></div>
