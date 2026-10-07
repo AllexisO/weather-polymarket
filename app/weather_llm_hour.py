@@ -44,7 +44,15 @@ MONTH_LIMIT = {"llm_gem": 8.5, "llm_ds": 1.5}   # $ в месяц на коше�
 # 03.10: DeepSeek рассуждает перед ответом — запрос до $0.007 и 70-110 с (effort low — всё ещё $0.003); предел рассуждения
 # 800 токенов он не соблюдает (первые 18 запросов: в среднем $0.005, до $0.02 и 11 тыс. токенов, ~$9/мес) → без рассуждения
 # Gemini 3.8 Flash тоже рассуждает: без предела $0.005 за запрос (~$9/мес), с пределом $0.002 (~$3.6/мес)
-EXTRA = {"llm_ds": {"reasoning": {"enabled": False}}, "llm_gem": {"reasoning": {"max_tokens": 800}}}
+# 07.10 (Alex: «стали много тратить»): OpenRouter раздавал запросы разным провайдерам — у DeepSeek половина запросов шла к
+# дорогим (медиана $0.0009, среднее $0.0048: провайдеры от $0.21 до $1.91 за 1М входа), у Gemini — несколько цен Google.
+# sort=price — всегда самый дешёвый из доступных (модель та же; при его недоступности — следующий по цене).
+PROVIDER = {"sort": "price"}
+# 07.10 14:30: у DeepSeek sort=price выбирал по цене входа — Relace ($0.21 вход, но $4.20 выход), медиана стала $0.003. Явно первым —
+# StreamLake ($0.21 / $0.42, самый дешёвый целиком); недоступен — другие, но не дороже $3 за 1М выхода (без Relace $4.2, Reka $15).
+PROVIDER_DS = {"order": ["streamlake"], "allow_fallbacks": True, "max_price": {"completion": 3}}
+EXTRA = {"llm_ds": {"reasoning": {"enabled": False}, "provider": PROVIDER_DS},
+         "llm_gem": {"reasoning": {"max_tokens": 800}, "provider": PROVIDER}}
 CITIES = ("chicago", "atlanta", "austin", "miami", "dallas", "london")
 THRESHOLD_CITIES = ("chicago", "atlanta", "austin", "miami", "dallas")   # порог PRD §9 п.16 — по 5 городам США; Лондон (°C) с 04.10 — отдельно
 HOURS = range(8, 20)    # местное время, в которое спрашиваем (04.10: с 05:05; 06.10, решение Alex: с 08:05 — минус 20% расхода)
@@ -327,19 +335,20 @@ def bet_summary(conn, wallet, city):
         if not xs:
             return None
         pnl, cost = sum(_pnl(r) for r in xs), sum(r["stake"] + (r["fee"] or 0) for r in xs)
-        return f"{name}: {len(xs)} bets, won {sum(r['status'] == 'won' for r in xs)}, result {pnl:+.2f}$ ({100 * pnl / cost:+.0f}% of money spent)"
+        return f"{name}: {len(xs)}/{sum(r['status'] == 'won' for r in xs)} {pnl:+.2f}$ {100 * pnl / cost:+.0f}%"
+    # 07.10 (решение Alex «сократить письмо только без потерь»): те же цифры короче — «ставок/угадано итог $ доходность %»
     side = lambda r: r["side"] or "yes"
-    out = [line("ALL your settled bets (all cities)", rs) + f"; {op} still open",
-           line('  buying "yes"', [r for r in rs if side(r) == "yes"]), line('  buying "no"', [r for r in rs if side(r) == "no"]),
-           line("  price below 30c", [r for r in rs if r["price"] < 0.30]), line("  price 30-70c", [r for r in rs if 0.30 <= r["price"] <= 0.70]),
-           line("  price above 70c", [r for r in rs if r["price"] > 0.70]), line(f"  this city", [r for r in rs if r["city"] == city])]
-    out.append("Last settled bets (date, city, what you bought, price, your chance, result):")
-    u = lambda r: "°F" if r["unit"] == "fahrenheit" else "°C"
+    out = ["Format: bets/won, result $, % of money spent.",
+           line("All (all cities)", rs) + f"; {op} open",
+           line(' "yes"', [r for r in rs if side(r) == "yes"]), line(' "no"', [r for r in rs if side(r) == "no"]),
+           line(" price <30c", [r for r in rs if r["price"] < 0.30]), line(" price 30-70c", [r for r in rs if 0.30 <= r["price"] <= 0.70]),
+           line(" price >70c", [r for r in rs if r["price"] > 0.70]), line(" this city", [r for r in rs if r["city"] == city])]
+    out.append("Last settled (date city bought price your-chance → result):")
     for r in rs[-8:]:
-        out.append(f"  {r['local_date']} {r['city']}: \"{side(r)}\" {label(r['bucket_lo'], r['bucket_hi'], r['unit'] or 'fahrenheit')} "
-                   f"at {r['price'] * 100:.0f}c, your chance {(r['model_p'] or 0) * 100:.0f}% -> {r['status']} {_pnl(r):+.2f}$")
+        out.append(f" {r['local_date'][5:]} {r['city']} \"{side(r)}\" {label(r['bucket_lo'], r['bucket_hi'], r['unit'] or 'fahrenheit')} "
+                   f"{r['price'] * 100:.0f}c {(r['model_p'] or 0) * 100:.0f}% → {r['status']} {_pnl(r):+.2f}$")
     if len(rs) < 30:
-        out.append(f"Only {len(rs)} settled bets: luck dominates. Learn patterns, but do not write absolute rules from a few bets.")
+        out.append(f"Only {len(rs)} bets: luck dominates — no absolute rules from a few bets.")
     return "\n".join(x for x in out if x)
 
 
@@ -366,10 +375,10 @@ def calibration(conn, wallet, day):
 def calibration_text(cal):
     if not cal:
         return "Not enough history yet."
-    return ("\n".join(f"when you said {lo * 100:.0f}-{min(hi, 1) * 100:.0f}% (on average {said * 100:.0f}%): it happened {got * 100:.0f}% of the time (n={n})"
-                      for lo, hi, n, said, got in cal)
-            + "\nIf you say 80% and it happens 40%, you are overconfident — spread your chances wider. Before betting, the code also "
-              "corrects your chances by this table.")
+    # 07.10: те же цифры короче — «полоса: в среднем сказала → сбылось (сколько)»
+    return ("Band: you said on average → came true (n)\n"
+            + "\n".join(f"{lo * 100:.0f}-{min(hi, 1) * 100:.0f}%: {said * 100:.0f}% → {got * 100:.0f}% ({n})" for lo, hi, n, said, got in cal)
+            + "\nCame true much less than said = overconfident: spread chances wider. The code also corrects your chances by this table.")
 
 
 def calibrate(probs, cal, mk, mx):

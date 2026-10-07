@@ -27,6 +27,7 @@ import json
 import os
 import sqlite3
 import sys
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -249,14 +250,19 @@ def run(dry=False):
             due.append((city, cfg, lt))
     print(f"городов, где сейчас {'/'.join(str(h) for h in HOURS)}:xx и решения ещё нет: {len(due)}")
     metars = {}
-    if due:
+    # 06.10: первый запуск — aviationweather ответил пустым телом, час пропал; как weather_llm_hour.metars — две повторные попытки
+    for wait in ((10, 30, None) if due else ()):
         try:
             for m in requests.get("https://aviationweather.gov/api/data/metar", timeout=30,
                                   params={"ids": ",".join(cfg["icao"] for _, cfg, _ in due), "hours": 36, "format": "json"}).json():
                 metars.setdefault(m["icaoId"], []).append(m)
+            break
         except (requests.RequestException, ValueError) as e:
-            print(f"METAR недоступны — {e}; без замеров решать нельзя, час пропущен")
-            due = []
+            if wait is None:
+                print(f"METAR недоступны — {e}; без замеров решать нельзя, час пропущен")
+                due = []
+            else:
+                time.sleep(wait)
     from weather_ml_live import _metar_obs
     for city, cfg, lt in due:
         with item_guard(city, conn):

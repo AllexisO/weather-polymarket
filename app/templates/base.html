@@ -77,7 +77,7 @@
   .nav-toggle-input { display: none; }
   .shell { display: flex; min-height: 100vh; align-items: stretch; }
   /* 2026-09-27 (решение Alex): панель «Меню и инструменты» по макету Fundcy — карточка с отступом,
-     логотип-плитка, «свернуть», поиск, группы «Меню» / «Инструменты», белая плашка активного пункта, счётчики */
+     логотип-плитка, «свернуть», группы «Меню» / «Инструменты», белая плашка активного пункта, счётчики */
   .sidebar {
     width: var(--sidebar-w);
     flex-shrink: 0;
@@ -88,7 +88,7 @@
     padding: 10px 0 10px 10px;
     transition: width 0.2s ease;
   }
-  /* 2026-09-27 (просьба Alex): панель из отдельных блоков — шапка с поиском, «Меню», «Инструменты», paper trading */
+  /* 2026-09-27 (просьба Alex): панель из отдельных блоков — шапка, «Меню», «Инструменты», paper trading */
   /* 2026-09-27 (уточнение Alex): вся панель — один большой блок, внутри него отдельные блоки «Меню» и «Инструменты» */
   .side-card {
     height: 100%;
@@ -115,12 +115,7 @@
   .side-collapse { width: 30px; height: 30px; border-radius: 8px; border: 1px solid var(--border); background: transparent; color: var(--muted);
     display: grid; place-items: center; cursor: pointer; flex-shrink: 0; padding: 0; }
   .side-collapse:hover { color: var(--text); border-color: var(--muted); }
-  .side-collapse svg, .side-search svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-  .side-search { display: flex; align-items: center; gap: 8px; background: var(--track); border-radius: 12px; padding: 0 10px; color: var(--muted); }
-  .side-search input { flex: 1; min-width: 0; background: transparent; border: 0; color: var(--text); font: 400 13.5px var(--font-ui); padding: 9px 0; outline: none; }
-  .side-search input::placeholder { color: var(--muted); }
-  .side-search:focus-within { box-shadow: 0 0 0 2px var(--accent-strong); }
-  .side-search kbd { font: 600 11px var(--font-ui); background: var(--panel); border-radius: 6px; padding: 2px 6px; color: var(--muted); }
+  .side-collapse svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
   .side-group-label { font-size: 12px; color: var(--muted); padding: 12px 10px 6px; }
   .side-link {
     display: flex;
@@ -155,13 +150,12 @@
   .paper-badge b { display: block; color: var(--text); font-size: 13.5px; }
   .side-nav { display: flex; flex-direction: column; gap: 10px; }
   .sidebar [hidden] { display: none !important; }
-  .side-empty { font-size: 12.5px; color: var(--muted); }
   /* свёрнутая панель — только иконки (на компьютере; запоминается в браузере) */
   .side-collapsed .sidebar { width: 86px; }
   .side-collapsed .side-top { flex-direction: column; padding-bottom: 0; }
   .side-collapsed .side-block { padding: 8px 4px; }
   .side-collapsed .side-card { padding: 14px 8px; }
-  .side-collapsed .brand-link .brand-name, .side-collapsed .side-search, .side-collapsed .side-group-label,
+  .side-collapsed .brand-link .brand-name, .side-collapsed .side-group-label,
   .side-collapsed .side-link .lbl, .side-collapsed .side-n, .side-collapsed .side-foot { display: none; }
   .side-collapsed .side-link { justify-content: center; padding: 10px 0; }
   .side-collapsed .side-collapse svg { transform: scaleX(-1); }
@@ -213,7 +207,7 @@
       z-index: 50;
     }
     .side-collapse { display: none; }
-    .side-collapsed .brand-link .brand-name, .side-collapsed .side-search, .side-collapsed .side-group-label,
+    .side-collapsed .brand-link .brand-name, .side-collapsed .side-group-label,
     .side-collapsed .side-link .lbl, .side-collapsed .side-n, .side-collapsed .side-foot { display: revert; }
     .side-collapsed .side-link { justify-content: flex-start; padding: 9px 10px; }
     .side-collapsed .side-top { flex-direction: row; }
@@ -337,13 +331,11 @@
       <button type="button" class="side-collapse" id="side-collapse" aria-label="Свернуть панель" aria-pressed="false" title="Свернуть панель">
         <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M10 4v16M16 10l-2 2 2 2"/></svg></button>
     </div>
-    <label class="side-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="m20 20-4.5-4.5"/></svg>
-      <input type="search" id="side-q" placeholder="Поиск…" aria-label="Поиск по разделам" autocomplete="off"><kbd aria-hidden="true">/</kbd></label>
     </div>
     <nav aria-label="Разделы" id="side-nav" class="side-nav">
      <div class="side-block">
-      <div class="side-group-label">Меню</div>
       {{ navlink('/paper', 'кошельки', 'wallet', path == '/paper', nc.wallets) }}
+      {{ navlink('/real', 'реальные деньги', 'target', path == '/real') }}
       {{ navlink('/models', 'модели', 'bar-chart', path.startswith('/models')) }}
       {{ navlink('/mm', 'бот-мейкер', 'results', path == '/mm') }}
       {{ navlink('/llm', 'LLM', 'message', path == '/llm') }}
@@ -360,7 +352,6 @@
       {{ navlink('/notes', 'заметки', 'notes', path == '/notes', nc.notes if nc.notes else none, 'warn' if nc.notes else '') }}
       {{ navlink('/audit', 'проверка', 'target', path == '/audit', ('ok' if nc.audit == 0 else nc.audit) if nc.audit is not none else none, 'good' if nc.audit == 0 else ('bad' if nc.audit else '')) }}
      </div>
-      <div class="side-empty side-block" id="side-empty" hidden>Ничего не найдено</div>
     </nav>
     <div class="side-spacer"></div>
     <div class="side-foot">
@@ -386,7 +377,7 @@
   </div>
 </div>
 <script>
-/* панель: свернуть (запоминается), поиск по разделам, «/» — в поиск, Enter — первый найденный */
+/* панель: свернуть (запоминается). 06.10: поиск по разделам убран (решение Alex — не нужен) */
 (function () {
   var root = document.documentElement, btn = document.getElementById('side-collapse');
   function sync() { var on = root.classList.contains('side-collapsed'); btn.setAttribute('aria-pressed', on ? 'true' : 'false');
@@ -395,23 +386,6 @@
   btn.addEventListener('click', function () {
     root.classList.toggle('side-collapsed'); sync();
     try { localStorage.setItem('side-collapsed', root.classList.contains('side-collapsed') ? '1' : '0'); } catch (e) {}
-  });
-  var q = document.getElementById('side-q'), links = document.querySelectorAll('#side-nav .side-link'), empty = document.getElementById('side-empty');
-  q.addEventListener('input', function () {
-    var t = q.value.trim().toLowerCase(), n = 0;
-    links.forEach(function (a) { var hit = !t || a.dataset.label.indexOf(t) !== -1; a.hidden = !hit; n += hit; });
-    document.querySelectorAll('#side-nav .side-block:not(.side-empty)').forEach(function (b) { b.hidden = !b.querySelector('.side-link:not([hidden])'); });
-    empty.hidden = n > 0;
-  });
-  q.addEventListener('keydown', function (e) {
-    if (e.key === 'Enter') { var first = Array.prototype.find.call(links, function (a) { return !a.hidden; }); if (first) location.href = first.href; }
-    if (e.key === 'Escape') { q.value = ''; q.dispatchEvent(new Event('input')); q.blur(); }
-  });
-  document.addEventListener('keydown', function (e) {
-    var tag = (e.target.tagName || '').toLowerCase();
-    if (e.key === '/' && tag !== 'input' && tag !== 'textarea' && tag !== 'select') {
-      e.preventDefault(); root.classList.remove('side-collapsed'); sync(); q.focus();
-    }
   });
 })();
 </script>

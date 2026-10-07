@@ -204,7 +204,7 @@ def settle_ws(db, main_db):
             else:
                 ns += k; nc += k * pr; sh_n += k
             spent += k * pr
-            reb += 0.0 if w == "mm100" else REBATE * pr * (1 - pr) * k   # mm100: без возврата комиссии (хуже жизни)
+            reb += 0.0 if w in ("mm100", "mm100f") else REBATE * pr * (1 - pr) * k   # mm100: без возврата комиссии (хуже жизни)
             pairs = min(ys, ns)
             if pairs > 0:
                 ay, an = yc / ys, nc / ns
@@ -263,7 +263,7 @@ def main():
     # 02.10 (решение Alex): не погода (mm_pol, mm_own) отключена вместе со старым ботом — около нуля, лишние запросы;
     # итоги, что уже посчитаны, остаются в mm_results
 
-    for w in WALLETS + ("mm_ws_all", "mm_ws_sel", "mm_ws_zone", "mm_ws_z30", "mm_ws_zs", "mm100", "mm_pol", "mm_own"):
+    for w in WALLETS + ("mm_ws_all", "mm_ws_sel", "mm_ws_zone", "mm_ws_z30", "mm_ws_zs", "mm100", "mm100f", "mm_pol", "mm_own"):
         r = db.execute("SELECT COUNT(*), SUM(n_fills), SUM(spent), SUM(pnl), SUM(merge_pnl), SUM(inv_pnl), SUM(rebate) FROM mm_results WHERE wallet = ?", (w,)).fetchone()
         sp = r[2] or 0
         print(f"{w}: маркетов {r[0]}, исполнений {r[1] or 0}, потрачено ${sp:,.0f}, итог ${r[3] or 0:+,.2f} "

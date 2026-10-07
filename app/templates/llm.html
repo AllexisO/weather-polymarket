@@ -77,6 +77,7 @@
   .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
   .steps div { background: var(--bk-raise); border-radius: 12px; padding: 12px 14px; font-size: 14px; }
   .steps b { display: block; margin-bottom: 4px; }
+  .when { font-size: 12px; color: var(--bk-faint); margin-top: 2px; white-space: nowrap; }
   /* 06.10: итог до и после обучения v2 на карточке LLM */
   .v2s { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
   .v2s > div { background: var(--bk-raise); border-radius: 10px; padding: 8px 10px; display: flex; flex-direction: column; gap: 2px; }
@@ -119,6 +120,49 @@
       </div>
     </div>
   </section>
+
+  <!-- выбор LLM и города, ставка здесь сегодня, 24 часа — 06.10 (просьба Alex) сразу под карточками -->
+  {# 06.10 (просьба Alex): вкладки Gemini / DeepSeek убраны — модель выбирается нажатием на её карточку выше #}
+  <div class="tabs">{% for c, ru, ck in cities %}<a href="/llm?w={{ key }}&city={{ c }}" class="{{ 'on' if c == city }}" title="{{ ck.state }}">{{ ru }}
+    <span class="num" style="margin-left: 6px; color: {{ 'var(--bk-pos)' if ck.on else 'var(--bk-faint)' }};">{{ ck.time }}</span></a>{% endfor %}</div>
+  {% set ck = (cities | selectattr(0, 'equalto', city) | first)[2] %}
+  <p class="foot" style="margin: -6px 0 14px;">Сейчас в городе {{ ck.time }} ({{ ck.tz }}) — LLM {{ ck.state }}. Работает с 08:05 до 19:05 по местному времени, раз в час; зелёное время — работает, серое — спит.</p>
+
+  {% if not day %}
+  <div class="pane"><p style="margin: 0;">По этому городу у {{ model }} ещё нет прогнозов.</p></div>
+  {% else %}
+  <div class="pane" style="margin-bottom: 14px; padding-top: 14px; padding-bottom: 14px;">
+    {% if city_bet.bet %}{% set b = city_bet.bet %}<b>Ставка {{ model }} здесь сегодня:</b> «{{ b.side }}» {{ b.bucket }} по {{ '%.0f' | format(b.price * 100) }}¢ (шанс LLM {{ '%.0f' | format(b.chance * 100) }}%), потрачено ${{ '%.2f' | format(b.cost) }} —
+      {% if b.pnl is not none %}<b class="{{ tone(b.pnl) }}">{{ 'выиграла' if b.status == 'won' else ('проиграла' if b.status == 'lost' else 'отменён') }} {{ money(b.pnl) }}</b>{% else %}<span class="muted">ждём итога, если выиграет +${{ '%.2f' | format(b.win - b.cost) }}</span>{% endif %}
+    {% else %}<b>Ставки {{ model }} здесь сегодня нет.</b> {% if city_bet.edge %}В последний час лучший перевес — {{ '%+.0f' | format(city_bet.edge[0] * 100) }} п.п. на «{{ city_bet.edge[1] }}» {{ city_bet.edge[2] }} (по средней цене рынка; ставка — от +5 п.п. по цене продавца).{% else %}LLM ставит с 08:05, если её шанс выше цены на 5 п.п.{% endif %}{% endif %}
+  </div>
+
+  <!-- 24 часа -->
+  <section class="sec">
+    <div class="sec-head"><h2>24 часа · {{ day[8:10] }}.{{ day[5:7] }}</h2>
+      <span class="aside">{% for dd in days[-7:] %}<a href="/llm?w={{ key }}&city={{ city }}&d={{ dd }}" style="margin-left: 8px;{% if dd == day %} color: var(--bk-text); font-weight: 600;{% endif %}">{{ dd[8:10] }}.{{ dd[5:7] }}</a>{% endfor %}</span></div>
+    <div class="pane chart tight">
+      <div class="muted" style="font-size: 13.5px; margin-bottom: 6px;"><span class="key s-real"></span>факт — температура в аэропорту за сегодня
+        <span class="key s-model" style="margin-left: 14px;"></span>LLM — её прогноз на этот час (точка появляется в :05 часом раньше, факт догоняет)</div>
+      {% if day_chart %}{{ lines(day_chart, "Температура по часам: факт и прогноз LLM") }}{% else %}<div class="empty">Мало точек для графика.</div>{% endif %}
+      {% if day_rows %}
+      {# 05.10 (просьба Alex): вместо таблицы — лента из 24 плиток: час, факт крупно, LLM, плашка ошибки #}
+      <div class="hstrip"{% if day_chart %} style="margin-left: {{ day_chart.strip_left }}%;"{% endif %}>{% for r in day_rows %}
+        <div class="hc{{ ' fut' if r.fact is none and r.llm is none }}{{ ' wait' if r.fact is none and r.llm is not none }}{{ ' hit' if r.err is not none }}">
+          <span class="hh">{{ '%02d' | format(r.h) }}</span>
+          <b class="hf num">{{ '%.1f' | format(r.fact) if r.fact is not none else '' }}</b>
+          <span class="hl num">{{ '%.1f' | format(r.llm) if r.llm is not none else '' }}</span>
+          {% if r.err is not none %}<span class="he num {{ 'good' if r.err | abs <= 1 else ('bad' if r.err | abs > 2 else '') }}">{{ '%+.1f' | format(r.err) }}</span>{% else %}<span class="he"></span>{% endif %}
+        </div>{% endfor %}
+      </div>
+      <div class="hkey"><span><b class="sw f"></b>факт</span><span><b class="sw l"></b>прогноз LLM</span><span><b class="sw e"></b>ошибка LLM</span><span><b class="sw w"></b>ждём факт</span></div>
+      <p class="foot" style="margin: 6px 0 0;">Где точки легли друг на друга — LLM почти угадала. Ошибка: зелёным — до 1°, персиковым — больше 2°.</p>{% endif %}
+      <p class="foot" style="margin: 8px 0 0;">Максимум дня: по факту <b>{{ ('%.0f' | format(day_max.fact)) ~ unit if day_max.fact is not none else ('пока ' ~ (('%.0f' | format(day_max.seen)) ~ unit) if day_max.seen is not none else 'ждём') }}</b>{% if day_max.fact is none %} (итог считается ночью){% endif %}.
+        LLM по часам: {% for h, v in day_max.pred %}<span style="white-space: nowrap;">{{ '%02d' | format(h) }}:00 — <b>{{ '%.0f' | format(v) if v is not none else '—' }}°</b></span>{% if not loop.last %} · {% endif %}{% endfor %}.
+       </p>
+    </div>
+  </section>
+  {% endif %}
 
   <!-- 06.10 (вопрос Alex «LightGBM точнее LLM?»): одни и те же города и дни. Данные — llm_vs_ml() в dashboard.py -->
   {% if vs %}
@@ -179,48 +223,7 @@
     </div>
   </section>
 
-  <!-- выбор LLM и города -->
-  <div class="tabs">{% for c in cards if c.key != 'llm_mix' %}<a href="/llm?w={{ c.key }}&city={{ city }}" class="{{ 'on' if c.key == key }}">{{ c.model }}</a>{% endfor %}</div>
-  <div class="tabs">{% for c, ru, ck in cities %}<a href="/llm?w={{ key }}&city={{ c }}" class="{{ 'on' if c == city }}" title="{{ ck.state }}">{{ ru }}
-    <span class="num" style="margin-left: 6px; color: {{ 'var(--bk-pos)' if ck.on else 'var(--bk-faint)' }};">{{ ck.time }}</span></a>{% endfor %}</div>
-  {% set ck = (cities | selectattr(0, 'equalto', city) | first)[2] %}
-  <p class="foot" style="margin: -6px 0 14px;">Сейчас в городе {{ ck.time }} ({{ ck.tz }}) — LLM {{ ck.state }}. Работает с 08:05 до 19:05 по местному времени, раз в час; зелёное время — работает, серое — спит.</p>
-
-  {% if not day %}
-  <div class="pane"><p style="margin: 0;">По этому городу у {{ model }} ещё нет прогнозов.</p></div>
-  {% else %}
-  <div class="pane" style="margin-bottom: 14px; padding-top: 14px; padding-bottom: 14px;">
-    {% if city_bet.bet %}{% set b = city_bet.bet %}<b>Ставка {{ model }} здесь сегодня:</b> «{{ b.side }}» {{ b.bucket }} по {{ '%.0f' | format(b.price * 100) }}¢ (шанс LLM {{ '%.0f' | format(b.chance * 100) }}%), потрачено ${{ '%.2f' | format(b.cost) }} —
-      {% if b.pnl is not none %}<b class="{{ tone(b.pnl) }}">{{ 'выиграла' if b.status == 'won' else ('проиграла' if b.status == 'lost' else 'отменён') }} {{ money(b.pnl) }}</b>{% else %}<span class="muted">ждём итога, если выиграет +${{ '%.2f' | format(b.win - b.cost) }}</span>{% endif %}
-    {% else %}<b>Ставки {{ model }} здесь сегодня нет.</b> {% if city_bet.edge %}В последний час лучший перевес — {{ '%+.0f' | format(city_bet.edge[0] * 100) }} п.п. на «{{ city_bet.edge[1] }}» {{ city_bet.edge[2] }} (по средней цене рынка; ставка — от +5 п.п. по цене продавца).{% else %}LLM ставит с 08:05, если её шанс выше цены на 5 п.п.{% endif %}{% endif %}
-  </div>
-
-  <!-- 24 часа -->
-  <section class="sec">
-    <div class="sec-head"><h2>24 часа · {{ day[8:10] }}.{{ day[5:7] }}</h2>
-      <span class="aside">{% for dd in days[-7:] %}<a href="/llm?w={{ key }}&city={{ city }}&d={{ dd }}" style="margin-left: 8px;{% if dd == day %} color: var(--bk-text); font-weight: 600;{% endif %}">{{ dd[8:10] }}.{{ dd[5:7] }}</a>{% endfor %}</span></div>
-    <div class="pane chart tight">
-      <div class="muted" style="font-size: 13.5px; margin-bottom: 6px;"><span class="key s-real"></span>факт — температура в аэропорту за сегодня
-        <span class="key s-model" style="margin-left: 14px;"></span>LLM — её прогноз на этот час (точка появляется в :05 часом раньше, факт догоняет)</div>
-      {% if day_chart %}{{ lines(day_chart, "Температура по часам: факт и прогноз LLM") }}{% else %}<div class="empty">Мало точек для графика.</div>{% endif %}
-      {% if day_rows %}
-      {# 05.10 (просьба Alex): вместо таблицы — лента из 24 плиток: час, факт крупно, LLM, плашка ошибки #}
-      <div class="hstrip"{% if day_chart %} style="margin-left: {{ day_chart.strip_left }}%;"{% endif %}>{% for r in day_rows %}
-        <div class="hc{{ ' fut' if r.fact is none and r.llm is none }}{{ ' wait' if r.fact is none and r.llm is not none }}{{ ' hit' if r.err is not none }}">
-          <span class="hh">{{ '%02d' | format(r.h) }}</span>
-          <b class="hf num">{{ '%.1f' | format(r.fact) if r.fact is not none else '' }}</b>
-          <span class="hl num">{{ '%.1f' | format(r.llm) if r.llm is not none else '' }}</span>
-          {% if r.err is not none %}<span class="he num {{ 'good' if r.err | abs <= 1 else ('bad' if r.err | abs > 2 else '') }}">{{ '%+.1f' | format(r.err) }}</span>{% else %}<span class="he"></span>{% endif %}
-        </div>{% endfor %}
-      </div>
-      <div class="hkey"><span><b class="sw f"></b>факт</span><span><b class="sw l"></b>прогноз LLM</span><span><b class="sw e"></b>ошибка LLM</span><span><b class="sw w"></b>ждём факт</span></div>
-      <p class="foot" style="margin: 6px 0 0;">Где точки легли друг на друга — LLM почти угадала. Ошибка: зелёным — до 1°, персиковым — больше 2°.</p>{% endif %}
-      <p class="foot" style="margin: 8px 0 0;">Максимум дня: по факту <b>{{ ('%.0f' | format(day_max.fact)) ~ unit if day_max.fact is not none else ('пока ' ~ (('%.0f' | format(day_max.seen)) ~ unit) if day_max.seen is not none else 'ждём') }}</b>{% if day_max.fact is none %} (итог считается ночью){% endif %}.
-        LLM по часам: {% for h, v in day_max.pred %}<span style="white-space: nowrap;">{{ '%02d' | format(h) }}:00 — <b>{{ '%.0f' | format(v) if v is not none else '—' }}°</b></span>{% if not loop.last %} · {% endif %}{% endfor %}.
-       </p>
-    </div>
-  </section>
-
+  {% if day %}
   <!-- месяц -->
   <section class="sec">
     <div class="sec-head"><h2>Месяц: максимум дня</h2><span class="aside">прогноз — первый за день (утро), факт — итог дня</span></div>
@@ -332,10 +335,12 @@
     <div class="sec-head"><h2>Ставки {{ model }}</h2><span class="aside">все города, последние 40</span></div>
     <div class="pane tw">
       {% if bets %}<table class="t"><thead><tr><th>День</th><th>Город</th><th>Ставка</th><th>Цена</th><th>Шанс LLM</th><th>Потрачено</th><th>Итог</th></tr></thead><tbody>
-        {% for b in bets %}<tr title="{{ b.why }}"><td>{{ b.date }}</td><td>{{ b.city }}</td><td>«{{ b.side }}» {{ b.bucket }}</td><td>{{ '%.0f' | format(b.price * 100) }}¢</td>
+        {% for b in bets %}<tr title="{{ b.why }}"><td>{{ b.date }}{% if b.placed %}<div class="when">куплено {{ b.placed }}</div>{% endif %}</td><td>{{ b.city }}</td><td>«{{ b.side }}» {{ b.bucket }}</td><td>{{ '%.0f' | format(b.price * 100) }}¢</td>
           <td>{{ '%.0f' | format(b.chance * 100) if b.chance is not none else '—' }}%</td><td>${{ '%.2f' | format(b.cost) }}</td>
-          <td>{% if b.pnl is not none %}<b class="{{ tone(b.pnl) }}">{{ money(b.pnl) }}</b>{% else %}<span class="muted">ждём</span>{% endif %}</td></tr>{% endfor %}
-      </tbody></table>{% else %}<p class="muted" style="margin: 0;">Ставок пока нет.</p>{% endif %}
+          <td>{% if b.pnl is not none %}<b class="{{ tone(b.pnl) }}">{{ money(b.pnl) }}</b>{% if b.settled %}<div class="when">итог {{ b.settled }}</div>{% endif %}
+            {% else %}<span class="muted">ждём</span>{% if b.closes %}<div class="when">итог ~{{ b.closes }}</div>{% endif %}{% endif %}</td></tr>{% endfor %}
+      </tbody></table>
+      <p class="foot" style="margin: 8px 0 0;">Время — по Кишинёву. «Куплено» — когда LLM поставила; «итог» — когда пришёл результат маркета, у открытых — примерно когда ждать (маркет закрывается через 1-3 ч после полуночи по времени города).</p>{% else %}<p class="muted" style="margin: 0;">Ставок пока нет.</p>{% endif %}
     </div>
   </section>
 </div>

@@ -68,6 +68,14 @@ def index():
 VIEWER_TZ = ZoneInfo("Europe/Chisinau")
 
 
+def _kiev_time(ts):
+    """Время из базы (UTC, ISO) → «06.10 18:05» по Кишинёву; нет — None."""
+    if not ts:
+        return None
+    t = datetime.fromisoformat(ts)
+    return (t if t.tzinfo else t.replace(tzinfo=timezone.utc)).astimezone(VIEWER_TZ).strftime("%d.%m %H:%M")
+
+
 def expected_close(city, local_date):
     """Когда ждать результата открытой ставки: Polymarket закрывает маркет
     примерно через 1-3 часа после полуночи по местному времени города
@@ -1194,7 +1202,10 @@ def llm_page_data(conn, key, city, day):
     out["bets"] = [{"date": f"{b['local_date'][8:10]}.{b['local_date'][5:7]}", "city": CITY_RU.get(b["city"], b["city"]), "side": "да" if (b["side"] or "yes") == "yes" else "нет",
                     "bucket": paper_bucket(b["bucket_lo"], b["bucket_hi"], b["unit"]),
                     "price": b["price"], "chance": b["model_p"], "cost": b["stake"] + (b["fee"] or 0), "status": b["status"],
-                    "pnl": (b["payout"] or 0) - b["stake"] - (b["fee"] or 0) if b["status"] in ("won", "lost", "void") else None, "why": b["reason"]} for b in bets]
+                    "pnl": (b["payout"] or 0) - b["stake"] - (b["fee"] or 0) if b["status"] in ("won", "lost", "void") else None, "why": b["reason"],
+                    # 06.10 (просьба Alex «подставлять дату и время»): когда купили и когда пришёл итог (или когда ждать) — по Кишинёву
+                    "placed": _kiev_time(b["placed_at"]), "settled": _kiev_time(b["settled_at"]),
+                    "closes": expected_close(b["city"], b["local_date"]) if b["status"] == "open" else None} for b in bets]
     return out
 
 
@@ -1865,6 +1876,7 @@ MM_DB = DB_PATH.parent / "mm.sqlite3"
 # 02.10 (решение Alex): сверху — по чему решаем (mm100) и тот же бот «в идеальном мире»; остальные — исследование
 MM_WALLETS = {
     'mm100': ('Счёт $100 — строго как вживую', 'Банк ровно $100, заявки по 5 долей только на дешёвую сторону и только пока хватает свободных денег (заявка замораживает деньги, как на Polymarket). Исполнение — только гарантированное, отменённая заявка ещё 1 с может быть «подобрана», без возврата комиссии. С 02.10'),
+    'mm100f': ('Сосредоточенный $100 — строго как вживую', 'Как «Счёт $100», но только в 5 городах с самой большой торговлей за прошлые 7 дней и без пары не больше 5 долей одной стороны — чтобы складывались пары. С 07.10, порог на 08-21.10 (страница «Реальные деньги»)'),
     'mm_ws_zone': ('Тот же бот в идеальном мире', 'Правила как у «Счёт $100», но без ограничения денег и с допущением «наша заявка всегда первая в очереди» — верхняя граница, вживую столько не будет. Разница со «Счёт $100» показывает, сколько прибыли держится на этом допущении'),
     'mm_ws_zs': ('Живой поток: дешёвая сторона, строго', 'Как «только дешёвая сторона», но исполнение засчитывается, только если оно гарантировано вживую: заявка стояла ≥ 1 с и сделка прошла хуже нашей цены (весь наш уровень съеден). Нижняя оценка — с 02.10'),
     'mm_ws_z30': ('Живой поток: только дешевле 30¢', 'Покупает только сторону дешевле 30¢: лучшая граница на первой половине истории (+17.9%), на проверке +18.4%, в худшем случае очереди +10.8%'),
@@ -2801,6 +2813,155 @@ def services_page(request: Request):
     live = sum(1 for _, items in SERVICES for i in items if i["mode"] == "live")
     return TEMPLATES.TemplateResponse("services.html", {"request": request, "groups": SERVICES, "subs": subs, "monthly": monthly,
                                                         "n": n, "live": live})
+
+
+# 06.10 (просьба Alex: «довести до конца, чтобы приносило прибыль»): одна страница — кандидаты на реальные деньги, где каждый
+# сейчас, порог (записан заранее, docs/PRD.md §4а), сколько осталось до решения. Кандидаты, выбранные ПОСЛЕ того, как увидели их
+# плюс (techno), судим только по свежим ставкам — с 07.10.
+REAL_CANDIDATES = [
+    {"key": "mm", "name": "Бот-мейкер, счёт $100", "wallets": ["mm100"], "decide": "2026-10-14",
+     "what": "Ставит заявки на дешёвую сторону и зарабатывает на склейке «да» + «нет». Строго как вживую: банк $100, 5 долей, только гарантированные исполнения.",
+     "rule": "на счёте больше $101 к 14.10 и плюс в обе недели (02-08.10 и 09-13.10)", "since": "2026-10-02",
+     "then": "живой тест $100 рядом с бумажным mm100"},
+    {"key": "mmf", "name": "Бот-мейкер, сосредоточенный $100", "wallets": ["mm100f"], "decide": "2026-10-21",
+     "what": "Тот же строгий бот с банком $100, но только в 5 самых оживлённых городах (по прошлым дням) и без пары не больше 5 долей одной стороны — чтобы складывались пары, а не лотерея, как у mm100. На прошлых днях выбранный заранее вариант (2 города) не прошёл (−$7), 5 городов были в плюсе — но выбраны задним числом, поэтому проверяем на будущих днях.",
+     "rule": "за 08-21.10: итог > 0 и плюс в обе недели (08-14.10 и 15-21.10)", "since": "2026-10-08",
+     "then": "живой тест $100 рядом с бумажным mm100f"},
+    {"key": "llm", "name": "LLM каждый час", "wallets": ["llm_gem", "llm_ds", "llm_mix"], "decide": "2026-10-18",
+     "what": "Gemini и DeepSeek каждый час видят всё о дне и называют шансы; смесь Gemini + LightGBM — без своих запросов.",
+     "rule": "за 04-17.10: ≥ 30 закрытых ставок и итог ≥ +5%; шанс на верный вариант выше рынка в тот же час на 3+ процентных пункта", "since": "2026-10-04",
+     "until": "2026-10-17", "need_n": 30, "need_roi": 5.0, "acc": True, "then": "больше городов, потом малый живой тест"},
+    {"key": "day", "name": "Дневная модель", "wallets": ["ml_day"], "decide": "2026-10-20",
+     "what": "LightGBM в 10/12/14 ч видит замеры с утра и цену рынка в этот час. На проверке точнее рынка все 8 недель.",
+     "rule": "с 06.10: ≥ 40 закрытых ставок и итог ≥ +2% (на проверке свежий период дал +3%)", "since": "2026-10-06",
+     "need_n": 40, "need_roi": 2.0, "then": "малый живой тест рядом с бумажным ml_day"},
+    {"key": "techno", "name": "Дешёвые «да» среди фаворитов", "wallets": ["techno"], "decide": "2026-10-20",
+     "what": "«Да» за 8-30¢ на одном из 4 самых дорогих вариантов, если смесь модели и рынка не ниже цены. До 06.10: 34 ставки +71% — выбран по результату, поэтому судим только свежие ставки.",
+     "rule": "только ставки с 07.10: ≥ 30 закрытых и итог ≥ +5%", "since": "2026-10-07", "need_n": 30, "need_roi": 5.0,
+     "then": "малый живой тест"},
+    {"key": "z", "name": "Смесь v3, «да» 20-40¢", "wallets": ["ml3_z"], "decide": "2026-10-17",
+     "what": "Смесь главной модели с рынком, только «да» за 20-40¢ — на истории единственная прибыльная зона.",
+     "rule": "к 17.10: ≥ 40 закрытых ставок и итог ≥ +5%", "since": "2026-10-03", "until": "2026-10-17", "need_n": 40, "need_roi": 5.0,
+     "then": "малый живой тест"},
+]
+
+
+def _real_paper(conn, wallet, since, until=None):
+    rs = conn.execute("SELECT * FROM paper_trades WHERE wallet = ? AND local_date >= ? AND local_date <= ? AND status NOT IN ('skip', 'nofill')",
+                      (wallet, since, until or "9999")).fetchall()
+    st = [r for r in rs if r["status"] in ("won", "lost", "void")]
+    pnl, cost = sum(_pnl(r) for r in st), sum(r["stake"] + _fee(r) for r in st)
+    sd = math.sqrt(sum(r["stake"] ** 2 * (1 - r["price"]) / r["price"] for r in st if r["price"] and 0 < r["price"] < 1 and r["stake"]))
+    return {"wallet": wallet, "label": WALLET_INFO.get(wallet, (None, wallet))[1], "n": len(st), "won": sum(r["status"] == "won" for r in st),
+            "pnl": pnl, "roi": 100 * pnl / cost if cost else None, "open": sum(r["status"] == "open" for r in rs), "luck": luck(pnl, sd)}
+
+
+def _llm_accuracy(conn, wallet, since, until):
+    """Средний шанс LLM на выигравший вариант минус цена этого варианта в тот же час (часы 08-19), п.п."""
+    if not table_exists(conn, "llm_hour_preds"):
+        return None
+    diffs = []
+    for city, d, pj, mj in conn.execute("""SELECT p.city, p.local_date, p.probs_json, p.market_json FROM llm_hour_preds p
+            WHERE p.wallet = ? AND p.local_date BETWEEN ? AND ? AND p.local_hour BETWEEN 8 AND 19 AND p.probs_json IS NOT NULL""",
+                                        (wallet, since, until)):
+        a = conn.execute("SELECT actual_max FROM weather_station_daily WHERE city = ? AND local_date = ?", (city, d)).fetchone()
+        if not a or a[0] is None:
+            continue
+        pr, mk = json.loads(pj or "{}"), json.loads(mj or "{}")
+        tot = sum(mk.values()) or 1.0
+        for lab, p in pr.items():
+            rg = _llm_range(lab)
+            if rg and rg[0] <= a[0] < rg[1] and lab in mk:
+                diffs.append(100 * (p - mk[lab] / tot))
+    return (sum(diffs) / len(diffs), len(diffs)) if diffs else None
+
+
+def real_page_data(conn):
+    today = datetime.now(VIEWER_TZ).date()
+    out = []
+    for c in REAL_CANDIDATES:
+        c = dict(c)
+        c["days_left"] = (date.fromisoformat(c["decide"]) - today).days
+        if c["key"] == "mm":
+            res, st, has = None, None, MM_DB.exists()
+            if has:
+                mc = sqlite3.connect(f"file:{MM_DB}?mode=ro", uri=True, timeout=10)
+                try:
+                    tot = mc.execute("SELECT COALESCE(SUM(pnl), 0), COALESCE(SUM(n_fills), 0), COUNT(*) FROM mm_results WHERE wallet = 'mm100'").fetchone()
+                    w1 = mc.execute("SELECT COALESCE(SUM(pnl), 0) FROM mm_results WHERE wallet = 'mm100' AND local_date BETWEEN '2026-10-02' AND '2026-10-08'").fetchone()[0]
+                    w2 = mc.execute("SELECT COALESCE(SUM(pnl), 0), COUNT(*) FROM mm_results WHERE wallet = 'mm100' AND local_date BETWEEN '2026-10-09' AND '2026-10-13'").fetchone()
+                    st = mc.execute("SELECT cash, reserved, quotes FROM mm100_state ORDER BY ts DESC LIMIT 1").fetchone()
+                    zs = mc.execute("SELECT COALESCE(SUM(pnl), 0), COALESCE(SUM(spent), 0), COALESCE(SUM(n_fills), 0) FROM mm_results WHERE wallet = 'mm_ws_zs'").fetchone()
+                finally:
+                    mc.close()
+                bal = 100.0 + tot[0]
+                c["rows"] = [{"label": "Счёт", "value": f"${bal:.2f}", "tone": "pos" if bal > 100.005 else ("neg" if bal < 99.995 else ""),
+                              "note": f"{tot[2]} маркетов, исполнений {tot[1]}"},
+                             {"label": "Неделя 02-08.10", "value": money_str(w1), "tone": "pos" if w1 > 0 else ("neg" if w1 < 0 else "")},
+                             {"label": "Неделя 09-13.10", "value": money_str(w2[0]) if w2[1] else "ещё не началась",
+                              "tone": ("pos" if w2[0] > 0 else "neg") if w2[1] else ""},
+                             # 07.10: для сравнения — тот же бот без ограничения банка, строгая оценка исполнения (порог 02.10 сначала был по нему)
+                             {"label": "Для сравнения: тот же бот без банка $100 (mm_ws_zs)", "value": money_str(zs[0]),
+                              "tone": "pos" if zs[0] > 0 else ("neg" if zs[0] < 0 else ""),
+                              "note": (f"{100 * zs[0] / zs[1]:+.1f}% от потраченного, исполнений {zs[2]}" if zs[1] else None)}]
+                if st is not None:
+                    c["warn"] = (f"Сейчас свободно ${st[0]:.2f}: деньги в открытых позициях, новые заявки — когда маркеты закроются и деньги "
+                                 f"вернутся (так каждый день: бот упирается в банк $100)." if st[0] < 1 else None)
+                ok = bal > 101 and w1 > 0 and (w2[1] and w2[0] > 0)
+                c["status"] = ("pass" if ok else ("bad" if bal < 100 else "wait"))
+                need = ([f"ещё +${101 - bal:.2f} к счёту"] if bal <= 101 else [f"счёт уже ${bal:.2f} (> $101)"]) + \
+                       ([] if w1 > 0 else ["плюс в первой неделе"]) + ([] if (w2[1] and w2[0] > 0) else ["плюс во второй неделе (09-13.10)"])
+                c["status_text"] = "проходит" if ok else "; ".join(need[:1] + [("нужен " if bal > 101 else "и ") + "; ".join(need[1:])] if len(need) > 1 else need)
+        elif c["key"] == "mmf":
+            if MM_DB.exists():
+                mc = sqlite3.connect(f"file:{MM_DB}?mode=ro", uri=True, timeout=10)
+                try:
+                    q = "SELECT COALESCE(SUM(pnl), 0), COUNT(*), COALESCE(SUM(merged), 0) FROM mm_results WHERE wallet = 'mm100f' AND local_date BETWEEN ? AND ?"
+                    tot, w1, w2 = (mc.execute(q, a).fetchone() for a in (("2026-10-08", "2026-10-21"), ("2026-10-08", "2026-10-14"), ("2026-10-15", "2026-10-21")))
+                    st = mc.execute("SELECT cash FROM mm100f_state ORDER BY ts DESC LIMIT 1").fetchone() if \
+                        mc.execute("SELECT 1 FROM sqlite_master WHERE name = 'mm100f_state'").fetchone() else None
+                finally:
+                    mc.close()
+                bal = 100.0 + tot[0]
+                wk = lambda w: (money_str(w[0]) if w[1] else "ещё нет закрытых", ("pos" if w[0] > 0 else "neg") if w[1] else "")
+                c["rows"] = [{"label": "Счёт", "value": f"${bal:.2f}", "tone": "pos" if bal > 100.005 else ("neg" if bal < 99.995 else ""),
+                              "note": f"{tot[1]} закрытых маркетов, склеено пар {tot[2]:.0f}" + (f", свободно ${st[0]:.2f}" if st else "")},
+                             {"label": "Неделя 08-14.10", "value": wk(w1)[0], "tone": wk(w1)[1]},
+                             {"label": "Неделя 15-21.10", "value": wk(w2)[0], "tone": wk(w2)[1]}]
+                ok = bal > 100 and w1[1] and w1[0] > 0 and w2[1] and w2[0] > 0
+                c["status"] = "pass" if ok else ("wait" if not tot[1] or not w2[1] else "bad")
+                c["status_text"] = "проходит" if ok else ("ждём закрытых маркетов" if not tot[1] else
+                                                         f"счёт ${bal:.2f}; нужен итог > 0 и плюс в обе недели")
+        else:
+            rows = [_real_paper(conn, w, c["since"], c.get("until")) for w in c["wallets"]]
+            for r in rows:
+                if c.get("acc") and r["wallet"] in ("llm_gem", "llm_ds"):
+                    r["acc"] = _llm_accuracy(conn, r["wallet"], c["since"], c["until"])
+            c["paper"] = rows
+            best = max(rows, key=lambda r: (r["n"] >= c["need_n"] and (r["roi"] or -999) >= c["need_roi"], r["roi"] or -999))
+            ok_n, ok_roi = best["n"] >= c["need_n"], (best["roi"] is not None and best["roi"] >= c["need_roi"])
+            ok_acc = (not c.get("acc")) or best["wallet"] == "llm_mix" or (best.get("acc") and best["acc"][0] >= 3.0)
+            c["status"] = "pass" if ok_n and ok_roi and ok_acc else ("wait" if not ok_n else "bad")
+            need = []
+            if not ok_n:
+                need.append(f"ещё {c['need_n'] - best['n']} закрытых ставок")
+            if not ok_roi:
+                need.append(f"итог {best['roi']:+.0f}% → нужно ≥ +{c['need_roi']:.0f}%" if best["roi"] is not None else f"итог ≥ +{c['need_roi']:.0f}%")
+            if not ok_acc:
+                need.append("точность выше рынка на 3+ п.п.")
+            c["status_text"] = "проходит" if c["status"] == "pass" else "; ".join(need)
+            c["progress"] = min(100, round(100 * best["n"] / c["need_n"]))
+            c["best"] = best["label"]
+        out.append(c)
+    return {"cands": out, "today": today.strftime("%d.%m")}
+
+
+@app.get("/real", response_class=HTMLResponse)
+def real_page(request: Request):
+    conn = db()
+    data = real_page_data(conn)
+    conn.close()
+    return TEMPLATES.TemplateResponse("real.html", {"request": request, **data})
 
 
 @app.get("/notes", response_class=HTMLResponse)

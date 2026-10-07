@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}Реальные деньги — weather-lab{% endblock %}
+{% block content %}
+{#
+  06.10 (просьба Alex: «довести до конца, чтобы приносило прибыль»): кандидаты на реальные деньги — где каждый сейчас,
+  порог (записан заранее, docs/PRD.md §4а) и сколько осталось до решения. Данные — real_page_data() в dashboard.py.
+#}
+{% macro money(v) -%}{{ '−' if v < -0.005 else ('+' if v > 0.005 else '') }}${{ '%.2f' | format(v | abs) }}{%- endmacro %}
+{% macro tone(v) -%}{{ 'pos' if v > 0.005 else ('neg' if v < -0.005 else '') }}{%- endmacro %}
+{% include "_mm_style.html" %}
+<style>
+  .bk { overflow-wrap: anywhere; } .pane { min-width: 0; }
+  .cands { display: grid; gap: 14px; }
+  .cand { display: grid; grid-template-columns: minmax(0, 1fr) 220px; gap: 18px; }
+  @media (max-width: 760px) { .cand { grid-template-columns: 1fr; } }
+  .cand h3 { margin: 0 0 6px; font-size: 18px; }
+  .cand .what { color: var(--bk-muted); font-size: 14px; margin: 0 0 10px; }
+  .rule { font-size: 14px; margin: 0 0 10px; } .rule b { font-weight: 600; }
+  .st { display: inline-flex; align-items: center; gap: 6px; padding: 4px 11px; border-radius: 999px; font-size: 13px; font-weight: 600; }
+  .st.pass { background: var(--bk-pos-bg); color: var(--bk-pos); }
+  .st.wait { background: rgba(255, 213, 138, .14); color: #FFD58A; }
+  .st.bad { background: rgba(244, 167, 127, .14); color: var(--bk-neg); }
+  .side { background: var(--bk-raise); border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; font-size: 13.5px; }
+  .side .big { font-size: 26px; font-weight: 600; line-height: 1.1; } .side span { color: var(--bk-muted); font-size: 12.5px; }
+  .meter { height: 6px; background: var(--bk-card); border-radius: 3px; overflow: hidden; } .meter i { display: block; height: 100%; background: var(--bk-pos); }
+  table.t { width: 100%; border-collapse: collapse; font-size: 14px; }
+  table.t th { text-align: left; color: var(--bk-muted); font-weight: 500; padding: 6px 8px; border-bottom: 1px solid var(--bk-line); }
+  table.t td { padding: 7px 8px; border-bottom: 1px solid var(--bk-line); vertical-align: top; }
+  .tw { overflow-x: auto; }
+  .warn { color: #FFD58A; font-size: 13.5px; margin-top: 8px; }
+  .muted { color: var(--bk-muted); }
+  ol.steps { margin: 0; padding-left: 20px; line-height: 1.7; }
+</style>
+<div class="bk">
+  <div class="top">
+    <h1>Реальные деньги <span class="tag">сегодня {{ today }}</span></h1>
+    <p>Кандидаты на переход с бумаги на реальные деньги. У каждого порог записан заранее — до того, как видны результаты, — и дата решения.
+      Проходит порог → сначала маленький живой тест ($50-100) рядом с бумажным двойником, чтобы увидеть разницу «бумага / жизнь».
+      Всё решение — за Alex. Пока реальных денег $0.</p>
+  </div>
+
+  <section class="sec">
+    <div class="cands">
+      {% for c in cands %}
+      <div class="pane cand">
+        <div>
+          <h3>{{ c.name }}</h3>
+          <p class="what">{{ c.what }}</p>
+          <p class="rule"><b>Порог:</b> {{ c.rule }}. <b>Решение:</b> {{ c.decide[8:10] }}.{{ c.decide[5:7] }}{% if c.days_left > 0 %} (через {{ c.days_left }} дн.){% elif c.days_left == 0 %} (сегодня){% else %} (прошло){% endif %}.
+            <b>Если прошёл:</b> {{ c.then }}.</p>
+          {% if c.paper %}
+          <div class="tw"><table class="t"><thead><tr><th>Кошелёк</th><th>Закрыто</th><th>Угадано</th><th>Итог</th><th>Доходность</th>{% if c.acc %}<th>Точность против рынка</th>{% endif %}</tr></thead><tbody>
+            {% for r in c.paper %}<tr><td>{{ r.label }}{% if r.open %} <span class="muted">· ждут {{ r.open }}</span>{% endif %}</td>
+              <td class="num">{{ r.n }}</td><td class="num">{{ r.won }}</td>
+              <td class="num"><b class="{{ tone(r.pnl) }}">{{ money(r.pnl) if r.n else '—' }}</b>{% if r.luck and r.n %}<div class="muted" style="font-size: 12px;">{{ r.luck[0] }}</div>{% endif %}</td>
+              <td class="num">{{ '%+.0f%%' | format(r.roi) if r.roi is not none else '—' }}</td>
+              {% if c.acc %}<td class="num">{% if r.acc %}{{ '%+.1f' | format(r.acc[0]) }} п.п. <span class="muted">({{ r.acc[1] }} ч)</span>{% elif r.wallet == 'llm_mix' %}<span class="muted">не нужно</span>{% else %}—{% endif %}</td>{% endif %}</tr>{% endfor %}
+          </tbody></table></div>
+          {% elif c.rows %}
+          <div class="tw"><table class="t"><tbody>
+            {% for r in c.rows %}<tr><td>{{ r.label }}</td><td class="num"><b class="{{ r.tone }}">{{ r.value }}</b>{% if r.note %} <span class="muted">· {{ r.note }}</span>{% endif %}</td></tr>{% endfor %}
+          </tbody></table></div>
+          {% endif %}
+          {% if c.warn %}<div class="warn">{{ c.warn }}</div>{% endif %}
+        </div>
+        <div class="side">
+          <span>сейчас</span>
+          <div><b class="st {{ c.status }}">{{ 'проходит' if c.status == 'pass' else ('копим ставки' if c.status == 'wait' else 'пока не проходит') }}</b></div>
+          <div>{{ c.status_text }}</div>
+          {% if c.progress is defined %}<span>ставок до порога{% if c.best %} ({{ c.best }}){% endif %}</span><div class="meter"><i style="width: {{ c.progress }}%;"></i></div>{% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="sec">
+    <div class="sec-head"><h2>Перед первыми реальными деньгами</h2><span class="aside">docs/PRD.md §4 — общие условия для любого кандидата</span></div>
+    <div class="pane">
+      <ol class="steps">
+        <li>Кандидат прошёл свой порог на бумаге (выше).</li>
+        <li>Прогон настоящих заявок вхолостую (py-clob-client): заявка ставится и отменяется, деньги не тратятся.</li>
+        <li>Проверены пополнение и вывод USDC — маленькой суммой.</li>
+        <li>Проверено, что Polymarket доступен.</li>
+        <li><b>Прямое решение Alex.</b> Только деньги, которые не нужны на жизнь; первый тест — $50-100.</li>
+      </ol>
+    </div>
+  </section>
+</div>
+{% endblock %}

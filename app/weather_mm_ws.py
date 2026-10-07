@@ -16,7 +16,7 @@ import json
 import os
 import sqlite3
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import websocket
@@ -28,7 +28,7 @@ from weather_mm_paper import (EVENING_H, METAR_PAUSE, MM_DB, PMAX, PMIN, SIZE, T
 WS = "wss://ws-subscriptions-clob.polymarket.com/ws/market"
 LISTEN_MIN = float(os.environ.get("LISTEN_MIN", "57"))
 L_MAX = 30.0
-WALLETS = ("mm_ws_all", "mm_ws_sel", "mm_ws_zone", "mm_ws_z30", "mm_ws_zs", "mm100")
+WALLETS = ("mm_ws_all", "mm_ws_sel", "mm_ws_zone", "mm_ws_z30", "mm_ws_zs", "mm100", "mm100f")
 # 02.10 (Alex: «мне нужны гарантии, что боты работают так, как будут работать на Polymarket»): mm_ws_zs — правила mm_ws_zone,
 # но исполнение только когда оно ГАРАНТИРОВАНО вживую: (1) наша заявка простояла без изменений ≥ STRICT_AGE с — успела дойти
 # до биржи, и отмена/перестановка не в пути; (2) сделка прошла СТРОГО хуже нашей цены — значит, весь наш уровень съеден,
@@ -42,6 +42,14 @@ STRICT_AGE = 1.0
 #  • без возврата части комиссии мейкеру (в жизни будет чуть лучше).
 BANK = 100.0
 SIZE100 = 5.0
+# 07.10 (решение Alex, «сосредоточенный $100»): mm100 распыляется — пары сложились в 8 из 437 маркетов, по сути покупка «да» < 10¢.
+# mm100f — правила mm100 (банк $100, 5 долей, строгое исполнение, без возврата комиссии), но только в FOCUS_N городах с самой
+# большой торговлей за прошлые FOCUS_DAYS дней (по исполнениям mm_ws_all, только прошлые дни — решается заранее) и без пары не
+# больше FOCUS_CAP долей одной стороны (дальше — только вторая сторона). Проверка на исполнениях 02-06.10
+# (weather_study_mm_focus.py): заранее выбранный вариант (2 города) −$6.96 — порог не прошёл; 5 городов +$34.94 — выбран задним
+# числом, поэтому только как гипотеза: порог на будущих днях 08-21.10 (docs/PRD.md §4а).
+FOCUS_N, FOCUS_DAYS, FOCUS_CAP = 5, 7, 5.0
+BANK_WALLETS = (("mm100", "m100", "cash100", "res100", L_MAX), ("mm100f", "m100f", "cash100f", "res100f", FOCUS_CAP))
 # 05.10 (Alex: свои стаканы вместо платного Falcon): полный стакан «да» по каждому варианту ведём из событий book / price_change,
 # раз в BOOK_EVERY с пишем 5 лучших уровней заявок и предложений тех вариантов, где стакан изменился, — тот же вид, что снимки
 # Falcon (data/research/falcon/book), для проверок бота на истории. Отдельная база BOOKS_DB (не в data/db — большая и
@@ -74,19 +82,19 @@ def schema(db):
     db.commit()
 
 
-def bank100(db):
-    """Свободные деньги mm100: $100 + итог закрытых маркетов + по открытым (склейки − потрачено); остаток без пары в открытых
+def bank100(db, wallet="mm100", cap=L_MAX):
+    """Свободные деньги mm100 / mm100f: $100 + итог закрытых маркетов + по открытым (склейки − потрачено); остаток без пары в открытых
     маркетах заморожен до их итога. Обрезка по L_MAX — как в weather_mm_settle.settle_ws."""
-    settled = {r[0]: r[1] for r in db.execute("SELECT condition_id, pnl FROM mm_results WHERE wallet = 'mm100'")} \
+    settled = {r[0]: r[1] for r in db.execute("SELECT condition_id, pnl FROM mm_results WHERE wallet = ?", (wallet,))} \
         if db.execute("SELECT 1 FROM sqlite_master WHERE name = 'mm_results'").fetchone() else {}
     cash = BANK + sum(settled.values())
     cur, oy, on = None, 0.0, 0.0
-    for cid, side, pr, k in db.execute("SELECT condition_id, side, price, size FROM mm_ws_fills WHERE wallet = 'mm100' ORDER BY condition_id, ts, rowid"):
+    for cid, side, pr, k in db.execute("SELECT condition_id, side, price, size FROM mm_ws_fills WHERE wallet = ? ORDER BY condition_id, ts, rowid", (wallet,)):
         if cid != cur:
             cur, oy, on = cid, 0.0, 0.0
         if cid in settled:
             continue
-        k = max(0.0, min(k, L_MAX - (oy - on) if side == "yes" else L_MAX - (on - oy)))
+        k = max(0.0, min(k, cap - (oy - on) if side == "yes" else cap - (on - oy)))
         if k <= 1e-9:
             continue
         cash -= k * pr
@@ -99,8 +107,10 @@ def bank100(db):
 
 def save100(db, bot):
     with db:
-        db.execute("CREATE TABLE IF NOT EXISTS mm100_state (ts REAL PRIMARY KEY, cash REAL, reserved REAL, quotes INTEGER)")
-        db.execute("INSERT OR REPLACE INTO mm100_state VALUES (?,?,?,?)", (time.time(), bot.cash100, sum(bot.res100.values()), len(bot.res100)))
+        for w, _f, cash, res, _cap in BANK_WALLETS:
+            db.execute(f"CREATE TABLE IF NOT EXISTS {w}_state (ts REAL PRIMARY KEY, cash REAL, reserved REAL, quotes INTEGER)")
+            db.execute(f"INSERT OR REPLACE INTO {w}_state VALUES (?,?,?,?)", (time.time(), getattr(bot, cash), sum(getattr(bot, res).values()),
+                                                                           len(getattr(bot, res))))
 
 
 class Bot:
@@ -121,6 +131,8 @@ class Bot:
         self.fills = []
         self.cash100 = BANK   # свободные деньги mm100 (без замороженных под заявки); пересчитывается при старте из базы
         self.res100 = {}      # cid -> замороженно под текущую заявку mm100
+        self.cash100f, self.res100f = BANK, {}   # то же для mm100f
+        self.focus = set()    # mm100f: города, где сегодня торгует (main → focus_cities)
         self.l2 = {}          # cid -> ({цена: доли} заявок «да», {цена: доли} предложений «да») — для записи стаканов
         self.l2_dirty = set()
 
@@ -149,6 +161,7 @@ class Bot:
         ts = ev_ts if ev_ts is not None else now.timestamp()
         if q is None:
             self.res100.pop(cid, None)
+            self.res100f.pop(cid, None)
             if old is not None:
                 self.quote.pop(cid, None)
                 self.hist.setdefault(cid, []).append({"ts": ts, "off": True})
@@ -163,6 +176,11 @@ class Bot:
         q["m100"] = need > 0 and self.cash100 - sum(self.res100.values()) >= need
         if q["m100"]:
             self.res100[cid] = need
+        # mm100f: то же, но только в городах фокуса
+        self.res100f.pop(cid, None)
+        q["m100f"] = need > 0 and m["city"] in self.focus and self.cash100f - sum(self.res100f.values()) >= need
+        if q["m100f"]:
+            self.res100f[cid] = need
         self.quote[cid] = q
         h = self.hist.setdefault(cid, [])
         h.append(q)
@@ -182,30 +200,33 @@ class Bot:
         if len(live) >= 2 and ts - cur["ts"] < STRICT_AGE and not live[-2].get("off"):
             cands.append(live[-2])
         side = "yes" if hits_yes else "no"
-        for q in cands:
-            price = q.get(side)
-            if price is None or not q.get("m100") or not in_zone(price, q["zone"]):
-                continue
-            if not ((y < price - 1e-9) if hits_yes else (y > 1 - price + 1e-9)):
-                continue
-            ys, ns = self.inv["mm100"].setdefault(cid, [0.0, 0.0])
-            room = L_MAX - (ys - ns) if hits_yes else L_MAX - (ns - ys)
-            k = min(SIZE100 - self.used.get(("mm100", q["id"], side), 0.0), room, self.cash100 / price)
-            if k <= 1e-9:
-                continue
-            m = self.m[cid]
-            self.used[("mm100", q["id"], side)] = self.used.get(("mm100", q["id"], side), 0.0) + k
-            self.cash100 -= k * price
-            if cid in self.res100:
-                self.res100[cid] = max(0.0, self.res100[cid] - k * price)
-            self.inv["mm100"][cid][0 if hits_yes else 1] += k
-            pair = min(self.inv["mm100"][cid])
-            if pair > 0:
-                self.cash100 += pair   # склейка «да»+«нет» → $1 за пару сразу
-                self.inv["mm100"][cid] = [self.inv["mm100"][cid][0] - pair, self.inv["mm100"][cid][1] - pair]
-            self.fills.append(("mm100", cid, ts, side, price, k, m["city"], m["local_date"], m["lo"], m["hi"], q["zone"], q["sel_" + side]))
-            self.stats["fills"] += 1
-            return
+        for w, flag, cash_a, res_a, cap in BANK_WALLETS:   # 07.10: mm100 и mm100f — одна логика, свои деньги и лимит перекоса
+            for q in cands:
+                price = q.get(side)
+                if price is None or not q.get(flag) or not in_zone(price, q["zone"]):
+                    continue
+                if not ((y < price - 1e-9) if hits_yes else (y > 1 - price + 1e-9)):
+                    continue
+                cash, res = getattr(self, cash_a), getattr(self, res_a)
+                ys, ns = self.inv[w].setdefault(cid, [0.0, 0.0])
+                room = cap - (ys - ns) if hits_yes else cap - (ns - ys)
+                k = min(SIZE100 - self.used.get((w, q["id"], side), 0.0), room, cash / price)
+                if k <= 1e-9:
+                    continue
+                m = self.m[cid]
+                self.used[(w, q["id"], side)] = self.used.get((w, q["id"], side), 0.0) + k
+                cash -= k * price
+                if cid in res:
+                    res[cid] = max(0.0, res[cid] - k * price)
+                self.inv[w][cid][0 if hits_yes else 1] += k
+                pair = min(self.inv[w][cid])
+                if pair > 0:
+                    cash += pair   # склейка «да»+«нет» → $1 за пару сразу
+                    self.inv[w][cid] = [self.inv[w][cid][0] - pair, self.inv[w][cid][1] - pair]
+                setattr(self, cash_a, cash)
+                self.fills.append((w, cid, ts, side, price, k, m["city"], m["local_date"], m["lo"], m["hi"], q["zone"], q["sel_" + side]))
+                self.stats["fills"] += 1
+                break
 
     def on_trade(self, cid, side_token, taker_side, p, size, ts):
         """Живая сделка против заявки, стоявшей в момент сделки (по часам биржи; строго раньше сделки)."""
@@ -225,7 +246,7 @@ class Bot:
             return
         m = self.m[cid]
         for w in WALLETS:
-            if w == "mm100":
+            if w in ("mm100", "mm100f"):
                 continue   # своя логика — on_trade_100
             if w == "mm_ws_sel" and not q["sel_" + side]:
                 continue
@@ -292,6 +313,14 @@ class Bot:
                     self.on_trade(tok[0], tok[1], d.get("side"), float(d["price"]), float(d["size"]), int(d["timestamp"]) / 1000)
 
 
+def focus_cities(db):
+    """mm100f: FOCUS_N городов с самой большой торговлей за прошлые FOCUS_DAYS дней — доли через исполнения mm_ws_all (только прошлые дни)."""
+    today = datetime.now(timezone.utc).date()
+    since = (today - timedelta(days=FOCUS_DAYS)).isoformat()
+    return {r[0] for r in db.execute("""SELECT city FROM mm_ws_fills WHERE wallet = 'mm_ws_all' AND local_date >= ? AND local_date < ?
+                                         GROUP BY city ORDER BY SUM(size) DESC LIMIT ?""", (since, today.isoformat(), FOCUS_N))}
+
+
 def books_db():
     os.makedirs(os.path.dirname(BOOKS_DB), exist_ok=True)
     b = sqlite3.connect(BOOKS_DB, timeout=30)
@@ -336,6 +365,9 @@ def main():
     print(f"перекос из прошлых запусков: {sum(len(v) for v in bot.inv.values())} пар кошелёк-маркет", flush=True)
     bot.cash100 = bank100(db)
     print(f"mm100: свободно ${bot.cash100:.2f} из ${BANK:.0f}", flush=True)
+    bot.focus = focus_cities(db)
+    bot.cash100f = bank100(db, "mm100f", FOCUS_CAP)
+    print(f"mm100f: свободно ${bot.cash100f:.2f} из ${BANK:.0f}; города фокуса: {', '.join(sorted(bot.focus)) or 'нет'}", flush=True)
     toks = [t for m in markets for t in (m["token"], m["token_no"])]
     end = time.time() + LISTEN_MIN * 60
     reconnects, last_flush, last_sweep, last_book = 0, time.time(), time.time(), time.time()
