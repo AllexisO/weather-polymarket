@@ -1554,6 +1554,72 @@ def exam_verdict(exam):
     return v
 
 
+PROGRESS_LINES = (("ml3", "v3 — главная", "#FFD58A"), ("ml5", "v5 — «от рынка»", "#A3E39A"), ("blend", "смесь v3 35/65 с рынком", "#D3DDFB"),
+                  ("day", "дневная модель, смесь (на неё ставит ml_day)", "#F0A6E0"))
+PROGRESS_STEP = 0.01   # сдвиг среднего «отрыва» за 5 ночей меньше 0.01 — «без изменений» (одна ночь гуляет на ±0.015)
+
+
+def training_progress(runs, day_runs=None):
+    """2026-10-08 (просьба Alex: «видно ли, что модель учится»): отрыв от рынка по ночам — логошибка рынка минус
+    логошибка модели на тех же экзаменационных днях (выше нуля — точнее рынка). Отрыв, а не сама логошибка:
+    экзаменационные дни каждую ночь сдвигаются, и сама логошибка гуляет вместе с погодой, а рынок сдаёт те же дни.
+    Итог по линии — среднее последних 5 ночей против 5 ночей до них."""
+    pts = []
+    for r in reversed(runs):
+        e = r.get("exam") or {}
+        if r.get("dry_run") or e.get("ll_market") is None or e.get("ll_model") is None:
+            continue
+        v = {"ml3": e["ll_market"] - e["ll_model"]}
+        if e.get("ll_blend") is not None:
+            v["blend"] = e["ll_market"] - e["ll_blend"]
+        for k, x in ((r.get("exam_all") or {}).get("versions") or {}).items():
+            if k != "ml3":
+                v[k] = r["exam_all"]["ll_market"] - x["ll_model"]
+        pts.append((r["when"][:5], v))
+    # 09.10: дневная модель — свой экзамен (ml_day_exam), ставится на ночь с той же датой; дней без утреннего отчёта не бывает
+    for d in day_runs or []:
+        e = d.get("exam") or {}
+        p = next((v for w, v in pts if w == d["when"][:5]), None)
+        if p is not None and e.get("ll_blend") is not None:
+            p["day"] = e["ll_market"] - e["ll_blend"]
+    if len(pts) < 2:
+        return None
+    vals = [x for _, v in pts for k, _, _ in PROGRESS_LINES for x in [v.get(k)] if x is not None] + [0.0]
+    lo, hi = min(vals), max(vals)
+    pad = (hi - lo) * 0.12 or 0.01
+    lo, hi = lo - pad, hi + pad
+    W, H, L, R, T, B = 760, 240, 52, 16, 14, 30
+    X = lambda i: L + (W - L - R) * i / (len(pts) - 1)
+    Y = lambda x: T + (H - T - B) * (hi - x) / (hi - lo)
+    lines = []
+    for k, name, color in PROGRESS_LINES:
+        ser = [(i, v[k]) for i, (_, v) in enumerate(pts) if v.get(k) is not None]
+        if not ser:
+            continue
+        n = min(5, len(ser) // 2)
+        if n:
+            last = sum(x for _, x in ser[-n:]) / n
+            prev = sum(x for _, x in ser[-2 * n:-n]) / n
+            d = last - prev
+            trend = ("up", f"растёт: +{d:.3f}") if d >= PROGRESS_STEP else ("down", f"падает: −{-d:.3f}") if d <= -PROGRESS_STEP else ("flat", "без изменений")
+        else:
+            last, trend = ser[-1][1], ("flat", "пока одна ночь")
+        lines.append({"name": name, "color": color, "now": ser[-1][1], "last": last, "n": n, "trend": trend,
+                      "path": " ".join(f"{'M' if j == 0 else 'L'}{X(i):.1f},{Y(x):.1f}" for j, (i, x) in enumerate(ser)),
+                      "dots": [{"x": round(X(i), 1), "y": round(Y(x), 1), "t": f"{pts[i][0]}: {name} {x:+.3f}"} for i, x in ser]})
+    step = max(1, len(pts) // 8)
+    xt = [{"x": round(X(i), 1), "t": d} for i, (d, _) in enumerate(pts) if i % step == 0 or i == len(pts) - 1]
+    yt = []
+    span = hi - lo
+    unit = next(u for u in (0.005, 0.01, 0.02, 0.05, 0.1, 0.2) if span / u <= 6)
+    y = math.ceil(lo / unit) * unit
+    while y <= hi:
+        yt.append({"y": round(Y(y), 1), "t": f"{y:+.2f}" if abs(y) > 1e-9 else "рынок"})
+        y += unit
+    return {"lines": lines, "xt": xt, "yt": yt, "zero": round(Y(0), 1), "W": W, "H": H, "L": L, "R": R, "T": T, "B": B, "n": len(pts),
+            "first": pts[0][0], "lastd": pts[-1][0]}
+
+
 @app.get("/training", response_class=HTMLResponse)
 def training(request: Request):
     conn = db()
@@ -1578,6 +1644,7 @@ def training(request: Request):
             i["bar"] = round(100 * i["pct"] / top)
     conn = db()
     alerts = active_alerts(conn)
+    day_runs = _day_exam_runs(conn, "ml_day_exam")
     conn.close()
     ea = next((r.get("exam_all") for r in runs if r.get("exam_all")), None)
     if ea:
@@ -1586,7 +1653,8 @@ def training(request: Request):
             v["gap_b"] = ea["ll_market"] - v["ll_blend"]
             v["verdict"] = _gap_verdict({"ll_model": v["ll_model"], "ll_market": ea["ll_market"]}, "model")
             v["verdict_b"] = _gap_verdict({"ll_blend": v["ll_blend"], "ll_market": ea["ll_market"]}, "blend")
-    return TEMPLATES.TemplateResponse("training.html", {"request": request, "last": last, "runs": runs, "alerts": alerts, "exam_all": ea})
+    return TEMPLATES.TemplateResponse("training.html", {"request": request, "last": last, "runs": runs, "alerts": alerts, "exam_all": ea,
+                                                         "progress": training_progress(runs, day_runs)})
 
 
 # ---- /models: всё о каждой модели (2026-09-29, просьба Alex: «хочу видеть ВСЁ! От и до!») ----
@@ -1769,8 +1837,28 @@ def _money_of(conn, wallets):
             "chart": chart, "luck": luck(pnl, math.sqrt(sum((c.get("sd") or 0) ** 2 for c in cards)))}
 
 
+def _day_exam_runs(conn, table):
+    """09.10: ночные экзамены модели со своей таблицей (дневная — ml_day_exam, пишет weather_ml_day.py) в виде строк _train_runs."""
+    if not table_exists(conn, table):
+        return []
+    runs = []
+    for r in conn.execute(f"SELECT trained_at, ok, details FROM {table} ORDER BY trained_at"):
+        try:
+            d = json.loads(r["details"])
+        except ValueError:
+            continue
+        ex = d.get("exam")
+        runs.append({"when": datetime.fromisoformat(r["trained_at"]).astimezone(VIEWER_TZ).strftime("%d.%m %H:%M"),
+                     "ok": bool(r["ok"]), "dry": False, "dur": d.get("duration_s") or 0, "rows": d.get("rows"),
+                     "features": d.get("features"), "note": None, "data": d.get("data", {}), "exam": ex,
+                     "verdict": exam_verdict(ex) if ex else None, "importance": None, "exam_all": None, "detail": None})
+    return runs
+
+
 def _train_runs(conn, info):
     """Ночные обучения, в которых была эта версия: когда, сколько длилось, данные, экзамен (для v3)."""
+    if info.get("exam_table"):
+        return _day_exam_runs(conn, info["exam_table"])
     if not info.get("train_key") or not table_exists(conn, "ml_train_log"):
         return []
     runs = []
@@ -1833,8 +1921,15 @@ def _model_card(conn, key, info):
             by[r["date"]] = by.get(r["date"], 0.0) + _ll(r["p_market"]) - _ll(r["p_model"])
         head["spark"] = spark(sorted(by.items()), 0.0)
     info = {**info, "exam": info.get("exam") or any(r["exam"] for r in runs)}  # 30.09: экзамен всех версий
-    return {"key": key, **info, "charts": ch, "money": money, "runs": runs, "head": head,
-            "last_train": runs[-1]["when"] if runs else None}
+    last_train = runs[-1]["when"] if runs else None
+    if info.get("meta"):   # 09.10: модель вне ночного отчёта (дневная) — время обучения из её файла
+        try:
+            meta = json.loads((DB_PATH.parent.parent / "ml" / info["meta"]).read_text())
+            last_train = datetime.fromisoformat(meta["trained_at"]).astimezone(VIEWER_TZ).strftime("%d.%m %H:%M")
+            info = {**info, "meta_rows": meta.get("rows"), "meta_features": meta.get("features")}
+        except (OSError, ValueError, KeyError):
+            pass
+    return {"key": key, **info, "charts": ch, "money": money, "runs": runs, "head": head, "last_train": last_train}
 
 
 @app.get("/models", response_class=HTMLResponse)

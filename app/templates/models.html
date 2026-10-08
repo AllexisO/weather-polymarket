@@ -234,7 +234,7 @@
       <div class="row"><span>{{ x.head.who }} против рынка, {{ x.head.src }}{% if x.head.few %} · <span class="few">мало дней</span>{% endif %}</span>{{ pill(x.head.verdict) }}</div>
       {{ sparksvg(x.head.spark) }}
       <div class="row"><span>ближе к правде в {{ '%.0f' | format(x.head.closer) }}% из {{ x.head.n }} город-дней</span><span>накопительно</span></div>
-      {% else %}<div class="row"><span>Сравнения с рынком пока нет — первые дни появятся после ночного пересчёта.</span></div>{% endif %}
+      {% else %}<div class="row"><span>{{ x.no_skill or 'Сравнения с рынком пока нет — первые дни появятся после ночного пересчёта.' }}</span></div>{% endif %}
     </div>
     <div class="mc-stats">
       <div><span>Деньги</span><b class="num {{ tone(x.money.pnl) if x.money else '' }}">{{ money(x.money.pnl) if x.money else '—' }}</b></div>
@@ -271,7 +271,7 @@
   <div class="facts">
     <div><span>Как учится</span><b>{{ 'каждую ночь в 05:20' if m.kind == 'ml' else 'не обучается — формула' }}</b></div>
     <div><span>Последнее обучение</span><b class="num">{{ m.last_train or ('—' if m.kind == 'ml' else 'не нужно') }}</b></div>
-    <div><span>Данных в обучении</span><b class="num">{% if m.runs %}{{ '{:,}'.format(m.runs[-1].rows).replace(',', ' ') }} город-дней · {{ m.runs[-1].features }} признаков{% else %}—{% endif %}</b></div>
+    <div><span>Данных в обучении</span><b class="num">{% if m.runs %}{{ '{:,}'.format(m.runs[-1].rows).replace(',', ' ') }} город-дней · {{ m.runs[-1].features }} признаков{% elif m.meta_rows %}{{ '{:,}'.format(m.meta_rows).replace(',', ' ') }} строк город-день × час · {{ m.meta_features }} признаков{% else %}—{% endif %}</b></div>
     <div><span>Вживую с</span><b class="num">{{ m.since[8:10] }}.{{ m.since[5:7] }} · кошельков {{ m.wallets | length }}</b></div>
   </div>
 </section>
@@ -351,7 +351,7 @@
     </div>
   </div>
   {% else %}
-  <div class="pane empty">Сравнения с рынком пока нет: ряд модели появится после ночного пересчёта (05:50), когда закроются её первые маркеты.</div>
+  <div class="pane empty">{{ m.no_skill or 'Сравнения с рынком пока нет: ряд модели появится после ночного пересчёта (05:50), когда закроются её первые маркеты.' }}</div>
   {% endif %}
 </section>
 
@@ -394,8 +394,9 @@
     </div>{% endif %}
   </div>
   {% else %}
-  <div class="pane"><p style="margin: 0;">Экзамен всех версий идёт с ночи 01.10 — график появится после двух ночей
-    (<a href="/training">сравнение всех версий</a>). Пока точность видна по живым дням выше.</p></div>
+  {% if m.exam_table %}<div class="pane"><p style="margin: 0;">Ночной экзамен идёт с 09.10 — график появится после двух ночей. Последний экзамен — в таблице ниже.</p></div>
+  {% else %}<div class="pane"><p style="margin: 0;">Экзамен всех версий идёт с ночи 01.10 — график появится после двух ночей
+    (<a href="/training">сравнение всех версий</a>). Пока точность видна по живым дням выше.</p></div>{% endif %}
   {% endif %}
   {% if ec.rows %}<div class="pane chart" data-viz>
     <h3 style="margin: 0 0 4px; font-size: 15px;">Сколько данных у модели</h3>
@@ -405,7 +406,7 @@
   {% if m.runs %}
   <div class="pane scroll">
     <table class="cmp runs">
-      <thead><tr><th>Обучение</th><th>Длилось</th><th>Город-дней</th><th>Признаков</th>{% if m.exam %}<th>Экзамен: модель</th><th>Смесь</th>{% endif %}<th>Проверки</th></tr></thead>
+      <thead><tr><th>Обучение</th><th>Длилось</th><th>{{ "Строк (город-день × час)" if m.exam_table else "Город-дней" }}</th><th>Признаков</th>{% if m.exam %}<th>Экзамен: модель</th><th>Смесь</th>{% endif %}<th>Проверки</th></tr></thead>
       <tbody>{% for r in m.runs | reverse %}<tr>
         <td class="num">{{ r.when }}{% if r.dry %} <span class="muted">(пробный)</span>{% endif %}</td>
         <td class="num">{{ '%d' | format(r.dur // 60) }} мин {{ '%02d' | format(r.dur % 60) }} с</td>

@@ -32,7 +32,7 @@ JOBS = [
     ("weather_alerts", "Проверки и тревоги", "weather_alerts.py", "каждые 30 мин", 70, "weather_alerts.log"),
     ("weather_fastobs", "Быстрые замеры (Synoptic, JMA, DWD, FMI) + кошелёк obs_fast", "weather_fastobs.py", "каждую минуту", 5, "weather_fastobs.log"),
     ("weather_ml_day", "Дневная модель — решения в 10/12/14 местного (кошелёк ml_day)", "weather_ml_day.py", "каждый час в :06", 75, "weather_ml_day.log"),
-    ("weather_ml_day_train", "Дневная модель — обучение", "weather_ml_day.py --train", "05:45", 26 * 60, "weather_ml_day_train.log"),
+    ("weather_ml_day_train", "Дневная модель — обучение и экзамен", "weather_ml_day.py --train", "05:45", 26 * 60, "weather_ml_day_train.log"),
     ("weather_llm_hour", "LLM-прогноз каждый час (кошельки llm_gem, llm_ds и смесь llm_mix, OpenRouter, 5 городов США)", "weather_llm_hour.py", "каждый час в :05", 75, "weather_llm_hour.log"),
     ("weather_obs_wethr", "Живые замеры — wethr (кошелёк obs_wethr, платный поток wethr.net, 5 городов США)", "weather_obs_wethr.py", "каждый час с :07, 57 мин", 75, "weather_obs_wethr.log"),
     ("weather_obs_rt", "Живые замеры — быстро (кошелёк obs_rt, постоянный опрос NOAA)", "weather_obs_rt.py", "каждый час с :07, 57 мин", 75, "weather_obs_rt.log"),

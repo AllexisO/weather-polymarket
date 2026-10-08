@@ -20,10 +20,12 @@
 Запуск:
   python weather_ml_day.py --train   — обучение на всей истории (крон ночью, после weather_ml_train), модели в data/ml/day_s*/
   python weather_ml_day.py           — решения в 10/12/14 местного (крон каждый час в :05)
+  python weather_ml_day.py --exam    — только ночной экзамен (рабочие модели не меняются), пишет ml_day_exam
   python weather_ml_day.py --dry     — проверка: посчитать и напечатать, ничего не записывать и не ставить
 """
 
 import json
+import math
 import os
 import sqlite3
 import sys
@@ -54,6 +56,8 @@ STAKE = 2.0
 OBS_DELAY_MIN = 10      # замер доступен через ~10 мин после времени замера (как у утренних моделей)
 DAY_FEATS = ["hour", "day_max_vs_fc", "day_now_vs_fc", "day_dt2h", "day_nobs",
              "h_mkt_mean_vs_fc", "h_mkt_std", "h_mkt_top_p", "day_max_vs_hmkt"]
+EXAM_DAYS = 14          # 09.10: ночной экзамен — как у утренних моделей, последние 14 дней как незнакомые
+EXAM_SQL = "CREATE TABLE IF NOT EXISTS ml_day_exam (trained_at TEXT PRIMARY KEY, ok INTEGER, details TEXT)"
 PREDS_SQL = """CREATE TABLE IF NOT EXISTS ml_day_preds (city TEXT, local_date TEXT, local_hour INTEGER, ts_utc TEXT,
     unit TEXT, day_max_c REAL, model_json TEXT, blend_json TEXT, market_json TEXT, PRIMARY KEY (city, local_date, local_hour))"""
 
@@ -116,11 +120,12 @@ def build_train(conn):
                 known = sorted(o for o in obs.get(d, []) if o[0] + timedelta(minutes=OBS_DELAY_MIN) <= t_dec)
                 f = day_feats(known, r["fc_mean"], h, pr, unit)
                 if f:
-                    out.append({**r, **f})
+                    out.append({**r, **f, "_prices": pr})
     return pd.DataFrame(out), feats_morning + DAY_FEATS
 
 
 def train():
+    t0 = datetime.now(timezone.utc)
     conn = sqlite3.connect(DB_PATH, timeout=60)
     conn.row_factory = sqlite3.Row
     df, feats = build_train(conn)
@@ -138,7 +143,78 @@ def train():
                                                       "first": df["date"].min(), "last": df["date"].max(), "features": len(feats)}))
     print(f"дневная модель: {len(df)} строк (город-день × час), {len(feats)} признаков, {len(SEEDS)} × {len(mq.QUANTILES)} уровней")
     mark(conn, "weather_ml_day_train")
+    try:   # рабочие модели уже сохранены: экзамен на них не влияет, его сбой не трогает ставки
+        save_exam(conn, exam(conn, df, feats), t0, len(df), len(feats))
+    except Exception as e:
+        print(f"экзамен дневной модели не удался: {type(e).__name__}: {e}")
     conn.close()
+
+
+def fit_q(X, y, seed):
+    ex = {"seed": seed, "bagging_seed": seed, "feature_fraction_seed": seed}
+    return {q: lgb.train({**mq.Q_PARAMS, **ex, "alpha": q}, lgb.Dataset(X, y, categorical_feature=["city_id"]), mq.Q_ROUNDS)
+            for q in mq.QUANTILES}
+
+
+def exam(conn, df, feats):
+    """09.10 (просьба Alex — видеть, учится ли дневная модель): ОТДЕЛЬНАЯ копия учится без последних EXAM_DAYS дней и сдаёт
+    их как будущее — логошибка модели, смеси 35/65 и рынка в тот же час на тех же город-днях × часах (как weather_study_intraday).
+    Копия нигде не сохраняется: рабочие модели и ставки не меняются."""
+    last = df["date"].max()
+    start = (datetime.fromisoformat(last) - timedelta(days=EXAM_DAYS - 1)).date().isoformat()
+    tr, te = df[df["date"] < start], df[df["date"] >= start]
+    if te.empty or tr.empty:
+        return None
+    base_tr = tr["fc_mean"] + tr["h_mkt_mean_vs_fc"]
+    base_te = (te["fc_mean"] + te["h_mkt_mean_vs_fc"]).values
+    raws = [np.sort(np.column_stack([m[q].predict(te[feats]) for q in mq.QUANTILES]), axis=1)
+            for m in (fit_q(tr[feats], tr["actual_c"] - base_tr, s) for s in SEEDS)]
+    qs = np.maximum(np.mean(raws, axis=0) + base_te[:, None], te["day_max_c"].values[:, None])
+    actual = {(c, d): a for c, d, a in conn.execute("SELECT city, local_date, actual_max FROM weather_station_daily WHERE local_date >= ?", (start,))}
+    i50 = list(mq.QUANTILES).index(0.5)
+    acc = {}
+    for q, b, r in zip(qs, base_te, te.to_dict("records")):
+        a = actual.get((r["city"], r["date"]))
+        pr = r["_prices"]
+        wb = next(((lo, hi) for lo, hi in pr if a is not None and lo <= a < hi), None)
+        if wb is None:
+            continue
+        tot = sum(pr.values())
+        pm = max(mq.bucket_prob(list(q), r["unit"], *wb), 1e-4)
+        pk = max(pr[wb] / tot, 1e-4)
+        pb = W_MODEL * pm + (1 - W_MODEL) * pk
+        for k in ("all", r["hour"]):
+            x = acc.setdefault(k, {"n": 0, "lm": 0.0, "lk": 0.0, "lb": 0.0, "pm": 0.0, "pk": 0.0, "pb": 0.0, "em": 0.0, "ek": 0.0, "ef": 0.0})
+            x["n"] += 1
+            for f, v in (("lm", -math.log(pm)), ("lk", -math.log(pk)), ("lb", -math.log(pb)), ("pm", pm), ("pk", pk), ("pb", pb),
+                         ("em", abs(q[i50] - r["actual_c"])), ("ek", abs(b - r["actual_c"])), ("ef", abs(r["fc_mean"] - r["actual_c"]))):
+                x[f] += v
+    if not acc.get("all"):
+        return None
+
+    def out(x):
+        n = x["n"]
+        return {"n": n, "ll_model": x["lm"] / n, "ll_market": x["lk"] / n, "ll_blend": x["lb"] / n, "p_model": 100 * x["pm"] / n,
+                "p_market": 100 * x["pk"] / n, "p_blend": 100 * x["pb"] / n, "err_model": x["em"] / n, "err_market": x["ek"] / n,
+                "err_fc": x["ef"] / n}
+    e = {"from": start, "to": last, "n_train": len(tr), **out(acc["all"]), "hours": {str(h): out(acc[h]) for h in HOURS if h in acc}}
+    print(f"экзамен {start}..{last}, {e['n']} город-дней × часов: модель {e['ll_model']:.3f}, смесь {e['ll_blend']:.3f}, "
+          f"рынок {e['ll_market']:.3f} (меньше — точнее); " + ", ".join(
+              f"{h}:00 смесь − рынок {v['ll_blend'] - v['ll_market']:+.3f}" for h, v in e["hours"].items()))
+    return e
+
+
+def save_exam(conn, e, t0, rows, n_feats):
+    if e is None:
+        print("экзамен дневной модели: мало данных")
+        return
+    conn.execute(EXAM_SQL)
+    prev = conn.execute("SELECT details FROM ml_day_exam ORDER BY trained_at DESC LIMIT 1").fetchone()
+    now = datetime.now(timezone.utc)
+    d = {"started": t0.isoformat(), "finished": now.isoformat(), "duration_s": (now - t0).total_seconds(), "rows": rows,
+         "features": n_feats, "data": {"rows": rows, "new_rows": rows - json.loads(prev[0])["rows"] if prev else None}, "exam": e}
+    conn.execute("INSERT OR REPLACE INTO ml_day_exam VALUES (?, 1, ?)", (now.isoformat(), json.dumps(d)))
+    conn.commit()
 
 
 _models = None
@@ -305,4 +381,11 @@ def run(dry=False):
 
 
 if __name__ == "__main__":
-    train() if "--train" in sys.argv else run(dry="--dry" in sys.argv)
+    if "--exam" in sys.argv:   # только экзамен: рабочие модели не трогаются
+        t0 = datetime.now(timezone.utc)
+        c = sqlite3.connect(DB_PATH, timeout=60)
+        c.row_factory = sqlite3.Row
+        df, feats = build_train(c)
+        save_exam(c, exam(c, df, feats), t0, len(df), len(feats))
+    else:
+        train() if "--train" in sys.argv else run(dry="--dry" in sys.argv)
