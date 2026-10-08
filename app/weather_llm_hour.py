@@ -40,7 +40,9 @@ from weather_paper import cash
 DB_PATH = Path(os.environ.get("POLY_LAB_DB", Path(__file__).parent.parent / "data" / "db" / "polymarket_lab.sqlite3"))
 # 03.10: llm_gem — Gemini 3.8 Flash, как у коллеги Alex (первый час 03.10 15:08 UTC — 2.5 Flash; порог считается с 04.10)
 WALLETS = {"llm_gem": "google/gemini-3.8-flash", "llm_ds": "deepseek/deepseek-v4-pro"}
-MONTH_LIMIT = {"llm_gem": 8.5, "llm_ds": 1.5}   # $ в месяц на кошелёк, вместе ≤ $8.2 (04.10: Gemini $6, затем $7 под запуск с 05:05 — решения Alex)
+# 08.10 (решение Alex: октябрь — эксперимент, данные важнее лимита; настройки LLM заморожены до 31.10, PRD §9 п.16): $13.5 / $4
+# хватает на весь месяц (Gemini ~$0.48/день, DeepSeek ~$0.11/день после выбора дешёвого провайдера 07.10)
+MONTH_LIMIT = {"llm_gem": 13.5, "llm_ds": 4.0}   # $ в месяц на кошелёк (04.10: $6 → $7 → $8.5 + $1.5; 08.10: $13.5 + $4)
 # 03.10: DeepSeek рассуждает перед ответом — запрос до $0.007 и 70-110 с (effort low — всё ещё $0.003); предел рассуждения
 # 800 токенов он не соблюдает (первые 18 запросов: в среднем $0.005, до $0.02 и 11 тыс. токенов, ~$9/мес) → без рассуждения
 # Gemini 3.8 Flash тоже рассуждает: без предела $0.005 за запрос (~$9/мес), с пределом $0.002 (~$3.6/мес)
@@ -420,6 +422,21 @@ def mix_probs(conn, city, day, mk, mx, probs):
     return {k: v / t for k, v in out.items()} if t > 0 else None
 
 
+# 08.10 (Alex, разбор LLM): LLM самоуверенны — по своим шансам ждали больше выигрышей, чем было, а ставки с перевесом 5-10 п.п.
+# в минусе (14 ставок −19%), с 10+ п.п. — в плюсе. Кошелёк llm_cal, без своих запросов: шансы Gemini этого часа (после поправки)
+# 35% + цена рынка 65% (как ml3_cal у главной модели), ставка от CAL_EDGE. Существующие LLM-кошельки не меняются (октябрь заморожен).
+CAL_WALLET, CAL_W, CAL_EDGE = "llm_cal", 0.35, 0.10
+
+
+def market_blend(probs, mk, mx):
+    """35% шансов LLM + 65% цены рынка (нормированной к 1); варианты ниже измеренного максимума — 0, сумма — 1."""
+    tot = sum(b["price"] for b in mk) or 1.0
+    out = {b["label"]: 0.0 if mx is not None and b["hi"] < mx else CAL_W * probs.get(b["label"], 0.0) + (1 - CAL_W) * b["price"] / tot
+           for b in mk}
+    t = sum(out.values())
+    return {k: v / t for k, v in out.items()} if t > 0 else None
+
+
 def label_range(lab):
     """Обратно к label(): «66-67°F» → (65.5, 67.5), «69°F or below» → (-999, 69.5), «22°C» → (21.5, 22.5)."""
     m = RE_LABEL.match(lab.strip())
@@ -488,7 +505,85 @@ FIX_NOTE = ("\n\nВАЖНО: прошлый ответ был не разобр�
             "экранируй (\\\") или заменяй на «», без комментариев и запятых в конце.")
 
 
+# 08.10 (Alex: «не бояться за лимиты»): Gemini — напрямую в Google (бесплатный уровень Gemini API, ключ GEMINI_API_KEY в .env) —
+# та же модель, то же письмо, тот же предел рассуждения 800 токенов; меняется только, кто выставляет счёт. Включается
+# GEMINI_DIRECT. Отказ Google (лимит бесплатного уровня, сбой) —
+# этот запрос идёт через OpenRouter, как раньше: данные эксперимента не теряются. Цена запроса через Google — 0.
+GEMINI_DIRECT = True   # 08.10: Alex подтвердил — проект ключа на бесплатном уровне (Free tier в AI Studio)
+GOOGLE_URL = "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent"
+
+
+def _ask_google(model, text):
+    key = os.environ.get("GEMINI_API_KEY")
+    if not key:
+        raise RuntimeError("нет GEMINI_API_KEY")
+    r = requests.post(GOOGLE_URL.format(model.split("/", 1)[1]), timeout=120, headers={"x-goog-api-key": key},
+                      json={"systemInstruction": {"parts": [{"text": SYSTEM}]}, "contents": [{"role": "user", "parts": [{"text": text}]}],
+                            "generationConfig": {"temperature": 0.2, "responseMimeType": "application/json",
+                                                 "thinkingConfig": {"thinkingBudget": 800}}})
+    r.raise_for_status()
+    d = r.json()
+    raw = "".join(p.get("text", "") for p in d["candidates"][0]["content"]["parts"] if not p.get("thought")).strip()
+    return raw.removeprefix("```json").removesuffix("```"), 0.0, int((d.get("usageMetadata") or {}).get("totalTokenCount") or 0)
+
+
+# 08.10 вечер: за первые 27 запросов бесплатными прошли 5 — Google отвечал 503 «перегружен» (бесплатные — в очереди последние),
+# а третий запрос подряд получает 429 (лимит запросов в минуту на бесплатном уровне маленький). Теперь между запросами к Google
+# не меньше GOOGLE_GAP с, а при 503 / 429 / обрыве — ещё две попытки через GOOGLE_RETRY с, потом OpenRouter.
+GOOGLE_GAP = 20
+GOOGLE_RETRY = (30, 60)
+_google_last = [0.0]
+# 08.10 18:10: бесплатный уровень — всего 20 запросов в сутки на проект и модель (GenerateRequestsPerDayPerProjectPerModel-FreeTier),
+# нам нужно ~72. Суточный лимит исчерпан (429 с этим quotaId) → до сброса (retryDelay из ответа) сразу OpenRouter, без ожиданий.
+GOOGLE_QUOTA_FILE = DB_PATH.parent.parent / "logs" / "google_quota_until.txt"
+
+
+def _google_blocked():
+    try:
+        return time.time() < float(GOOGLE_QUOTA_FILE.read_text().strip())
+    except (OSError, ValueError):
+        return False
+
+
+def _note_google_quota(e):
+    """429 из-за суточного лимита — запомнить, до какого момента не пробовать Google."""
+    try:
+        d = e.response.json()
+        for x in d.get("error", {}).get("details", []):
+            if any("PerDay" in (v.get("quotaId") or "") for v in x.get("violations", [])):
+                delay = next((float(str(y["retryDelay"]).rstrip("s")) for y in d["error"]["details"] if "retryDelay" in y), 3600.0)
+                GOOGLE_QUOTA_FILE.write_text(str(time.time() + delay))
+                print(f"Google: суточный бесплатный лимит исчерпан — до сброса ({delay / 3600:.1f} ч) сразу OpenRouter", flush=True)
+                return True
+    except (ValueError, AttributeError, KeyError, OSError):
+        pass
+    return False
+
+
+def _ask_google_paced(model, text):
+    for i, wait in enumerate((0, *GOOGLE_RETRY)):
+        time.sleep(max(wait, GOOGLE_GAP - (time.time() - _google_last[0]), 0))
+        _google_last[0] = time.time()
+        try:
+            return _ask_google(model, text)
+        except requests.RequestException as e:
+            code = getattr(getattr(e, "response", None), "status_code", None)
+            if code == 429 and _note_google_quota(e):
+                raise
+            if code not in (429, 500, 503) and not isinstance(e, (requests.Timeout, requests.ConnectionError)):
+                raise
+            if i == len(GOOGLE_RETRY):
+                raise
+            print(f"{model}: Google {code or type(e).__name__} — повтор через {GOOGLE_RETRY[i]} с", flush=True)
+
+
 def _ask_once(model, text, extra):
+    if GEMINI_DIRECT and model.startswith("google/") and not _google_blocked():
+        try:
+            return _ask_google_paced(model, text)
+        except (requests.RequestException, RuntimeError, KeyError, IndexError, ValueError) as e:
+            code = getattr(getattr(e, "response", None), "status_code", "")
+            print(f"{model}: Google напрямую не ответил ({code} {type(e).__name__}) — этот запрос через OpenRouter", flush=True)
     r = requests.post(OR_URL, timeout=120, headers={"Authorization": f"Bearer {os.environ['OPENROUTER_API_KEY']}"},
                       json={"model": model, "messages": [{"role": "system", "content": SYSTEM}, {"role": "user", "content": text}],
                             "response_format": {"type": "json_object"}, "temperature": 0.2, "usage": {"include": True}, **(extra or {})})
@@ -546,7 +641,7 @@ def month_cost(conn, wallet, now):
                         (wallet, now.strftime("%Y-%m-01"))).fetchone()[0]
 
 
-def bet(conn, wallet, city, day, now, mk, probs):
+def bet(conn, wallet, city, day, now, mk, probs, edge=EDGE):
     """Одна ставка на город в день: лучший перевес «да» или «нет» над ценой продавца."""
     if conn.execute("SELECT 1 FROM paper_trades WHERE wallet = ? AND city = ? AND local_date = ?",
                     (wallet, city, day.isoformat())).fetchone():
@@ -555,13 +650,13 @@ def bet(conn, wallet, city, day, now, mk, probs):
     for b in mk:
         p = probs[b["label"]]
         for side, price, q in (("yes", b["ask"], p), ("no", 1 - b["bid"], 1 - p)):
-            if MIN_PRICE <= price <= MAX_PRICE and q - price >= EDGE and (best is None or q - price > best[0]):
+            if MIN_PRICE <= price <= MAX_PRICE and q - price >= edge and (best is None or q - price > best[0]):
                 best = (q - price, side, price, q, b)
     if best is None or trading_stopped() or cash(conn, wallet) < STAKE * 1.1:
         return None
     edge, side, price, q, b = best
     tok = json.loads(b["m"]["clobTokenIds"])[0 if side == "yes" else 1]
-    f = simulate_buy(b["m"], tok, STAKE, q - EDGE / 2)
+    f = simulate_buy(b["m"], tok, STAKE, q - edge / 2)
     if f["shares"] <= 0:
         return f"не купили {side} {b['label']}: {f['reason']}"
     conn.execute("""INSERT OR IGNORE INTO paper_trades (wallet, city, local_date, snapshot_ts, unit, bucket_lo, bucket_hi,
@@ -645,6 +740,17 @@ def run():
                                 conn.commit()
                                 mres = bet(conn, MIX_WALLET, city, day, now, mk, mp)
                                 print(f"{MIX_WALLET} {city} {lnow:%H:%M}: смесь Gemini + LightGBM{'; ' + mres if mres else ''}", flush=True)
+                        with item_guard(f"{city}/{CAL_WALLET}", conn):
+                            cp = market_blend(probs, mk, mx) if probs else None
+                            if cp:
+                                conn.execute("""INSERT OR REPLACE INTO llm_hour_preds (wallet, city, local_date, local_hour, ts_utc, model,
+                                    probs_json, market_json, max_so_far, reason, cost, tokens) VALUES (?,?,?,?,?,?,?,?,?,?,0,0)""",
+                                             (CAL_WALLET, city, day.isoformat(), lnow.hour, now.isoformat(), f"cal:{model}+market",
+                                              json.dumps(cp), json.dumps({b["label"]: b["price"] for b in mk}), mx,
+                                              f"{CAL_W:.0%} Gemini + {1 - CAL_W:.0%} рынок, перевес от {CAL_EDGE * 100:.0f} п.п."))
+                                conn.commit()
+                                cres = bet(conn, CAL_WALLET, city, day, now, mk, cp, CAL_EDGE)
+                                print(f"{CAL_WALLET} {city} {lnow:%H:%M}: Gemini + рынок{'; ' + cres if cres else ''}", flush=True)
     conn.close()
 
 

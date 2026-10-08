@@ -98,11 +98,12 @@
   <section class="sec">
     <div class="grid2">
       {% for c in cards %}
-      <a class="pane" href="/llm?w={{ 'llm_gem' if c.key == 'llm_mix' else c.key }}&city={{ city }}" style="text-decoration: none; color: inherit;{% if c.key == key %} box-shadow: inset 0 0 0 1px var(--bk-accent);{% endif %}">
+      <a class="pane" href="/llm?w={{ 'llm_gem' if c.key in ('llm_mix', 'llm_cal') else c.key }}&city={{ city }}" style="text-decoration: none; color: inherit;{% if c.key == key %} box-shadow: inset 0 0 0 1px var(--bk-accent);{% endif %}">
         <h3 style="margin: 0;">{{ c.model }} <span class="muted" style="font-size: 13px; font-weight: 400;">{{ c.key }}</span></h3>
         <span class="big num">${{ '%.2f' | format(c.free) }}</span>
         <div class="muted" style="font-size: 13.5px;">свободно из $100 · в игре ${{ '%.2f' | format(c.in_play) }} ({{ c.open }} ставок)</div>
         {% if c.key == 'llm_mix' %}<div class="muted" style="font-size: 13px; margin-top: 4px;">поровну шансы Gemini и LightGBM v3, с 06.10; своих запросов нет — $0</div>{% endif %}
+        {% if c.key == 'llm_cal' %}<div class="muted" style="font-size: 13px; margin-top: 4px;">Gemini 35% + рынок 65%, перевес от 10 п.п., с 08.10; своих запросов нет — $0</div>{% endif %}
         <div style="margin-top: 8px; font-size: 14px;">Закрыто ставок: <b>{{ c.n }}</b>{% if c.n %}, угадано {{ c.won }} · итог <b class="{{ tone(c.pnl) }}">{{ money(c.pnl) }}</b>{% if c.roi is not none %} ({{ '%+.0f' | format(c.roi) }}%){% endif %}{% endif %}</div>
         {% if c.after %}<div class="v2s">{% for part, name in [('before', 'до обучения v2'), ('after', 'после')] %}{% set x = c[part] %}
           <div><span>{{ name }}</span><b class="num {{ tone(x.pnl) if x.n }}">{{ money(x.pnl) if x.n else '—' }}</b>
@@ -115,7 +116,7 @@
         <div class="muted" style="font-size: 13.5px;">в этом месяце из ${{ '%.2f' | format(spend.limit_month) }} (лимит в коде)</div>
         <div class="bar"><i style="width: {{ [100, 100 * spend.month / spend.limit_month] | min }}%;"></i></div>
         <div style="margin-top: 10px; font-size: 13.5px;">
-          {% for c in cards if c.key != 'llm_mix' %}{{ c.model }}: ${{ '%.2f' | format(c.spent_month) }} из ${{ '%.2f' | format(c.limit) }} · {{ c.calls }} запросов{% if c.per_call %}, ~${{ '%.4f' | format(c.per_call) }} за запрос{% endif %}<br>{% endfor %}
+          {% for c in cards if c.key not in ('llm_mix', 'llm_cal') %}{{ c.model }}: ${{ '%.2f' | format(c.spent_month) }} из ${{ '%.2f' | format(c.limit) }} · {{ c.calls }} запросов{% if c.per_call %}, ~${{ '%.4f' | format(c.per_call) }} за запрос{% endif %}<br>{% endfor %}
           <span class="muted">Всего за всё время ${{ '%.2f' | format(spend.all) }} из ${{ '%.0f' | format(spend.key_limit) }} на ключе OpenRouter.</span></div>
       </div>
     </div>

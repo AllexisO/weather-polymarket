@@ -200,6 +200,8 @@ WALLET_INFO = {
                 "цены и свои прошлые ошибки — и называет максимум дня. 5 городов США, одна ставка на город в день"),
     "llm_ds": ("LLM каждый час", "LLM DeepSeek — прогноз каждый час",
                "То же, что LLM Gemini, но DeepSeek V4 Pro — для сравнения двух LLM"),
+    "llm_cal": ("LLM каждый час", "Gemini + рынок",
+                "Шансы Gemini этого часа 35% + цена рынка 65% — лекарство от самоуверенности LLM; ставит при перевесе от 10 п.п. Своих запросов нет — $0"),
     "llm_mix": ("LLM каждый час", "LLM + LightGBM — смесь",
                 "Шансы Gemini этого часа и утренний прогноз LightGBM v3 поровну; ставит по тем же правилам, что LLM. Своих запросов к LLM нет — $0"),
     "obs": ("Живые замеры", "По живым замерам станции", "Ставка против варианта, который станция уже исключила"),
@@ -906,8 +908,8 @@ def spark(rows, start=100.0, w=160, h=44):
 
 
 LLM_WALLETS = ("llm_gem", "llm_ds")   # LLM со своими запросами — вкладки страницы
-LLM_BET_WALLETS = (*LLM_WALLETS, "llm_mix")   # 06.10: и смесь Gemini + LightGBM (weather_llm_hour.MIX_WALLET) — карточки, ставки, деньги
-LLM_LIMIT = {"llm_gem": 8.5, "llm_ds": 1.5, "llm_mix": 0.0}   # как weather_llm_hour.MONTH_LIMIT; у смеси своих запросов нет
+LLM_BET_WALLETS = (*LLM_WALLETS, "llm_mix", "llm_cal")   # 08.10: llm_cal — Gemini 35% + рынок 65%, перевес от 10 п.п.   # 06.10: и смесь Gemini + LightGBM (weather_llm_hour.MIX_WALLET) — карточки, ставки, деньги
+LLM_LIMIT = {"llm_gem": 13.5, "llm_ds": 4.0, "llm_mix": 0.0, "llm_cal": 0.0}   # как weather_llm_hour.MONTH_LIMIT; у смеси своих запросов нет
 
 
 def _smooth(pts):
@@ -1000,9 +1002,9 @@ def _llm_range(lab):
 
 
 LLM_V2_FROM = "2026-10-06T09:45:00+00:00"   # как weather_llm_hour.V2_FROM: с этого запуска — обучение v2 (LightGBM, ошибки, деньги, поправка шансов)
-LLM_KEY_LIMIT = 10.0   # лимит на самом ключе OpenRouter (за всё время)
+LLM_KEY_LIMIT = 19.95  # всего внесено на OpenRouter: 08.10 баланс $16.70 после пополнения на $10 + потрачено $3.25 (было $10)
 LLM_CITIES = ("chicago", "atlanta", "austin", "miami", "dallas", "london")   # как weather_llm_hour.CITIES (Лондон с 04.10)
-LLM_MODEL_NAME = {"llm_gem": "Gemini 3.8 Flash", "llm_ds": "DeepSeek V4 Pro", "llm_mix": "Смесь Gemini + LightGBM"}
+LLM_MODEL_NAME = {"llm_gem": "Gemini 3.8 Flash", "llm_ds": "DeepSeek V4 Pro", "llm_mix": "Смесь Gemini + LightGBM", "llm_cal": "Gemini + рынок"}
 
 
 def _llm_fact_hourly(conn, city, day):
@@ -2827,8 +2829,8 @@ REAL_CANDIDATES = [
      "what": "Тот же строгий бот с банком $100, но только в 5 самых оживлённых городах (по прошлым дням) и без пары не больше 5 долей одной стороны — чтобы складывались пары, а не лотерея, как у mm100. На прошлых днях выбранный заранее вариант (2 города) не прошёл (−$7), 5 городов были в плюсе — но выбраны задним числом, поэтому проверяем на будущих днях.",
      "rule": "за 08-21.10: итог > 0 и плюс в обе недели (08-14.10 и 15-21.10)", "since": "2026-10-08",
      "then": "живой тест $100 рядом с бумажным mm100f"},
-    {"key": "llm", "name": "LLM каждый час", "wallets": ["llm_gem", "llm_ds", "llm_mix"], "decide": "2026-10-18",
-     "what": "Gemini и DeepSeek каждый час видят всё о дне и называют шансы; смесь Gemini + LightGBM — без своих запросов.",
+    {"key": "llm", "name": "LLM каждый час", "wallets": ["llm_gem", "llm_ds", "llm_mix", "llm_cal"], "decide": "2026-10-18",
+     "what": "Gemini и DeepSeek каждый час видят всё о дне и называют шансы; смесь Gemini + LightGBM и Gemini + рынок (с 08.10) — без своих запросов.",
      "rule": "за 04-17.10: ≥ 30 закрытых ставок и итог ≥ +5%; шанс на верный вариант выше рынка в тот же час на 3+ процентных пункта", "since": "2026-10-04",
      "until": "2026-10-17", "need_n": 30, "need_roi": 5.0, "acc": True, "then": "больше городов, потом малый живой тест"},
     {"key": "day", "name": "Дневная модель", "wallets": ["ml_day"], "decide": "2026-10-20",
@@ -2940,7 +2942,7 @@ def real_page_data(conn):
             c["paper"] = rows
             best = max(rows, key=lambda r: (r["n"] >= c["need_n"] and (r["roi"] or -999) >= c["need_roi"], r["roi"] or -999))
             ok_n, ok_roi = best["n"] >= c["need_n"], (best["roi"] is not None and best["roi"] >= c["need_roi"])
-            ok_acc = (not c.get("acc")) or best["wallet"] == "llm_mix" or (best.get("acc") and best["acc"][0] >= 3.0)
+            ok_acc = (not c.get("acc")) or best["wallet"] in ("llm_mix", "llm_cal") or (best.get("acc") and best["acc"][0] >= 3.0)
             c["status"] = "pass" if ok_n and ok_roi and ok_acc else ("wait" if not ok_n else "bad")
             need = []
             if not ok_n:
