@@ -1315,6 +1315,7 @@ def llm_page(request: Request, w: str = "llm_gem", city: str = "chicago", d: str
     city = city if city in LLM_CITIES else LLM_CITIES[0]
     data = llm_page_data(conn, w, city, d)
     data["vs"] = llm_vs_ml(conn)
+    data["progress"] = llm_progress(conn)
     conn.close()
     return TEMPLATES.TemplateResponse("llm.html", {"request": request, **data})
 
@@ -1582,9 +1583,21 @@ def training_progress(runs, day_runs=None):
         p = next((v for w, v in pts if w == d["when"][:5]), None)
         if p is not None and e.get("ll_blend") is not None:
             p["day"] = e["ll_market"] - e["ll_blend"]
+    return progress_chart(pts, PROGRESS_LINES)
+
+
+def _plural(n, words):
+    """1 ночь / 2 ночи / 5 ночей."""
+    return words[0] if n % 10 == 1 and n % 100 != 11 else words[1] if n % 10 in (2, 3, 4) and n % 100 not in (12, 13, 14) else words[2]
+
+
+def progress_chart(pts, line_defs, step=PROGRESS_STEP, words=("ночь", "ночи", "ночей"), vline=None, vline_label=None):
+    """График «отрыв от рынка» (выше нуля — точнее рынка): pts — [(«дд.мм», {ключ линии: отрыв})], line_defs — [(ключ, имя, цвет)].
+    Стрелка по линии — среднее последних n точек против n до них; сдвиг меньше step — «без изменений».
+    vline — «дд.мм», с которой рисуется вертикальная отметка (например, улучшение LLM v2)."""
     if len(pts) < 2:
         return None
-    vals = [x for _, v in pts for k, _, _ in PROGRESS_LINES for x in [v.get(k)] if x is not None] + [0.0]
+    vals = [x for _, v in pts for k, _, _ in line_defs for x in [v.get(k)] if x is not None] + [0.0]
     lo, hi = min(vals), max(vals)
     pad = (hi - lo) * 0.12 or 0.01
     lo, hi = lo - pad, hi + pad
@@ -1592,19 +1605,19 @@ def training_progress(runs, day_runs=None):
     X = lambda i: L + (W - L - R) * i / (len(pts) - 1)
     Y = lambda x: T + (H - T - B) * (hi - x) / (hi - lo)
     lines = []
-    for k, name, color in PROGRESS_LINES:
+    for k, name, color in line_defs:
         ser = [(i, v[k]) for i, (_, v) in enumerate(pts) if v.get(k) is not None]
         if not ser:
             continue
         n = min(5, len(ser) // 2)
-        if n:
+        if n >= 3:
             last = sum(x for _, x in ser[-n:]) / n
             prev = sum(x for _, x in ser[-2 * n:-n]) / n
             d = last - prev
-            trend = ("up", f"растёт: +{d:.3f}") if d >= PROGRESS_STEP else ("down", f"падает: −{-d:.3f}") if d <= -PROGRESS_STEP else ("flat", "без изменений")
+            trend = ("up", f"растёт: +{d:.3f}") if d >= step else ("down", f"падает: −{-d:.3f}") if d <= -step else ("flat", "без изменений")
         else:
-            last, trend = ser[-1][1], ("flat", "пока одна ночь")
-        lines.append({"name": name, "color": color, "now": ser[-1][1], "last": last, "n": n, "trend": trend,
+            n, last, trend = 0, ser[-1][1], ("flat", f"рано судить: {len(ser)} {_plural(len(ser), words)} из 6")
+        lines.append({"name": name, "color": color, "now": ser[-1][1], "last": last, "n": n, "trend": trend, "nw": _plural(n, words),
                       "path": " ".join(f"{'M' if j == 0 else 'L'}{X(i):.1f},{Y(x):.1f}" for j, (i, x) in enumerate(ser)),
                       "dots": [{"x": round(X(i), 1), "y": round(Y(x), 1), "t": f"{pts[i][0]}: {name} {x:+.3f}"} for i, x in ser]})
     step = max(1, len(pts) // 8)
@@ -1616,8 +1629,41 @@ def training_progress(runs, day_runs=None):
     while y <= hi:
         yt.append({"y": round(Y(y), 1), "t": f"{y:+.2f}" if abs(y) > 1e-9 else "рынок"})
         y += unit
+    vi = next((i for i, (d, _) in enumerate(pts) if d == vline), None) if vline else None
     return {"lines": lines, "xt": xt, "yt": yt, "zero": round(Y(0), 1), "W": W, "H": H, "L": L, "R": R, "T": T, "B": B, "n": len(pts),
-            "first": pts[0][0], "lastd": pts[-1][0]}
+            "first": pts[0][0], "lastd": pts[-1][0], "vx": round(X(vi), 1) if vi else None, "vlabel": vline_label}
+
+
+# 09.10 (просьба Alex: «учится ли LLM»): тот же график для LLM — по дням, на её поправленных шансах (на них ставки),
+# часы 08-19 (с 06.10 других нет), все города; день — когда известен настоящий максимум.
+LLM_PROGRESS_LINES = (("llm_gem", "Gemini", "#FFD58A"), ("llm_ds", "DeepSeek", "#D3DDFB"),
+                      ("llm_mix", "Gemini + LightGBM", "#A3E39A"), ("llm_cal", "Gemini + рынок", "#F0A6E0"))
+LLM_PROGRESS_STEP = 0.03   # один день LLM гуляет сильнее экзамена моделей (~±0.1)
+LLM_P_FLOOR = 1e-3         # шанс 0 правильному ответу считаем 0.1% — иначе один час бесконечно портит день
+
+
+def llm_progress(conn):
+    if not table_exists(conn, "llm_hour_preds"):
+        return None
+    act = {(c, d): a for c, d, a in conn.execute("SELECT city, local_date, actual_max FROM weather_station_daily WHERE local_date >= '2026-10-01'")}
+    acc, wait = {}, set()
+    for w, city, d, pj, mj in conn.execute("""SELECT wallet, city, local_date, probs_json, market_json FROM llm_hour_preds
+            WHERE local_hour BETWEEN 8 AND 19 AND probs_json IS NOT NULL AND market_json IS NOT NULL"""):
+        a = act.get((city, d))
+        if a is None:   # день — только целиком: пока хоть у одного города нет итога, день не показываем
+            wait.add(d)
+            continue
+        pr, mk = json.loads(pj or "{}"), json.loads(mj or "{}")
+        tot = sum(mk.values()) or 1.0
+        lab = next((lab for lab in mk if (rg := _llm_range(lab)) and rg[0] <= a < rg[1]), None)
+        if lab is None or lab not in pr:
+            continue
+        x = acc.setdefault(d, {}).setdefault(w, [0, 0.0])
+        x[0] += 1
+        x[1] += math.log(max(pr[lab], LLM_P_FLOOR)) - math.log(max(mk[lab] / tot, LLM_P_FLOOR))
+    pts = [(f"{d[8:10]}.{d[5:7]}", {w: s_ / n for w, (n, s_) in acc[d].items() if n >= 10}) for d in sorted(acc) if d not in wait]
+    return progress_chart(pts, LLM_PROGRESS_LINES, step=LLM_PROGRESS_STEP, words=("день", "дня", "дней"),
+                          vline=f"{LLM_V2_FROM[8:10]}.{LLM_V2_FROM[5:7]}", vline_label="v2")
 
 
 @app.get("/training", response_class=HTMLResponse)

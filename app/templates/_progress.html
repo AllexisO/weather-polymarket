@@ -1,0 +1,42 @@
+{#
+  09.10: график «отрыв от рынка» (выше нуля — точнее рынка) с карточками-стрелками — общий для /training (модели) и /llm (LLM).
+  Данные — progress_chart() в dashboard.py; подключать: {% with P = ... %}{% include "_progress.html" %}{% endwith %}.
+#}
+<style>
+  .trend { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; margin: 0 0 14px; }
+  .tcard { background: var(--bk-raise); border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+  .tname { display: flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--bk-muted); }
+  .tname i { width: 12px; height: 4px; border-radius: 2px; display: block; }
+  .tnow { font-size: 24px; font-weight: 600; line-height: 1.1; }
+  .tnow.pos { color: var(--bk-pos); } .tnow.neg { color: var(--bk-neg); }
+  .tcard small { color: var(--bk-faint); font-size: 12px; }
+  .tbadge { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; padding: 4px 12px; border-radius: 999px; }
+  .tbadge.ok { background: rgba(163, 227, 154, .13); color: #A3E39A; } .tbadge.bad { background: rgba(244, 167, 127, .13); color: #F4A77F; }
+  .tbadge.dry { background: rgba(255, 213, 138, .14); color: #FFD58A; }
+  .pchart { width: 100%; height: auto; display: block; }
+  .pchart text { fill: #A1A1AA; font: 11.5px var(--bk-num); }
+  @media (max-width: 760px) { .trend { grid-template-columns: 1fr; } }
+</style>
+      <div class="trend">
+        {% for l in P.lines %}
+        <div class="tcard">
+          <div class="tname"><i style="background: {{ l.color }}"></i>{{ l.name }}</div>
+          <div class="tnow num {{ 'pos' if l.now > 0.0075 else ('neg' if l.now < -0.0075 else '') }}">{{ '%+.3f' | format(l.now) }}</div>
+          <span class="tbadge {{ {'up': 'ok', 'down': 'bad', 'flat': 'dry'}[l.trend[0]] }}">{{ {'up': '↗', 'down': '↘', 'flat': '→'}[l.trend[0]] }} {{ l.trend[1] }}</span>
+          {% if l.n %}<small>последние {{ l.n }} {{ l.nw }} против {{ l.n }} до них</small>{% endif %}
+        </div>
+        {% endfor %}
+      </div>
+      <svg class="pchart" viewBox="0 0 {{ P.W }} {{ P.H }}" role="img" aria-label="Отрыв от рынка: выше нуля — точнее рынка">
+        {% for t in P.yt %}
+        <line x1="{{ P.L }}" x2="{{ P.W - P.R }}" y1="{{ t.y }}" y2="{{ t.y }}" stroke="{{ '#71717A' if t.t == 'рынок' else '#2E2E31' }}" {% if t.t == 'рынок' %}stroke-dasharray="5 4"{% endif %}/>
+        <text x="{{ P.L - 6 }}" y="{{ t.y + 4 }}" text-anchor="end">{{ t.t }}</text>
+        {% endfor %}
+        {% if P.vx %}<line x1="{{ P.vx }}" x2="{{ P.vx }}" y1="{{ P.T }}" y2="{{ P.H - P.B }}" stroke="#71717A" stroke-dasharray="2 4"/>
+        <text x="{{ P.vx + 5 }}" y="{{ P.T + 10 }}" text-anchor="start">{{ P.vlabel }}</text>{% endif %}
+        {% for t in P.xt %}<text x="{{ t.x }}" y="{{ P.H - 8 }}" text-anchor="middle">{{ t.t }}</text>{% endfor %}
+        {% for l in P.lines %}
+        <path d="{{ l.path }}" fill="none" stroke="{{ l.color }}" stroke-width="2.2" stroke-linejoin="round"/>
+        {% for d in l.dots %}<circle cx="{{ d.x }}" cy="{{ d.y }}" r="3.4" fill="{{ l.color }}"><title>{{ d.t }}</title></circle>{% endfor %}
+        {% endfor %}
+      </svg>

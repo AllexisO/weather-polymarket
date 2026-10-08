@@ -73,16 +73,6 @@
     .imp .hb { grid-template-columns: 1fr 70px 48px; }
     .pane { padding: 18px 16px; }
   }
-  .trend { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; margin: 0 0 14px; }
-  .tcard { background: var(--bk-raise); border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
-  .tname { display: flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--bk-muted); }
-  .tname i { width: 12px; height: 4px; border-radius: 2px; display: block; }
-  .tnow { font-size: 24px; font-weight: 600; line-height: 1.1; }
-  .tnow.pos { color: var(--bk-pos); } .tnow.neg { color: var(--bk-neg); }
-  .tcard small { color: var(--bk-faint); font-size: 12px; }
-  .chart { width: 100%; height: auto; display: block; }
-  .chart text { fill: #A1A1AA; font: 11.5px var(--bk-num); }
-  @media (max-width: 760px) { .trend { grid-template-columns: 1fr; } }
   .alerts { margin: 0 0 22px; padding: 14px 18px; border-radius: 14px; border: 1px solid rgba(244, 167, 127, .5); background: rgba(244, 167, 127, .1); }
   .alerts b { color: #F8C2A4; } .alerts ul { margin: 6px 0 0; padding-left: 18px; font-size: 14px; } .alerts li span { color: var(--bk-muted); }
 </style>
@@ -195,27 +185,7 @@
     <div class="pane">
       <p class="muted" style="margin: 0 0 12px; font-size: 14px;">Насколько модель точнее рынка на экзамене — каждую ночь, {{ progress.first }}–{{ progress.lastd }} ({{ progress.n }} обучений).
         Линия рынка — ноль: <b style="color: var(--bk-text)">выше — модель точнее рынка, ниже — хуже</b>. Если линия со временем поднимается, значит модель учится.</p>
-      <div class="trend">
-        {% for l in progress.lines %}
-        <div class="tcard">
-          <div class="tname"><i style="background: {{ l.color }}"></i>{{ l.name }}</div>
-          <div class="tnow num {{ 'pos' if l.now > 0.0075 else ('neg' if l.now < -0.0075 else '') }}">{{ '%+.3f' | format(l.now) }}</div>
-          <span class="badge {{ {'up': 'ok', 'down': 'bad', 'flat': 'dry'}[l.trend[0]] }}">{{ {'up': '↗', 'down': '↘', 'flat': '→'}[l.trend[0]] }} {{ l.trend[1] }}</span>
-          <small>последние {{ l.n }} {{ 'ночи' if l.n in (2, 3, 4) else 'ночей' }} против {{ l.n }} до них</small>
-        </div>
-        {% endfor %}
-      </div>
-      <svg class="chart" viewBox="0 0 {{ progress.W }} {{ progress.H }}" role="img" aria-label="Отрыв моделей от рынка по ночам">
-        {% for t in progress.yt %}
-        <line x1="{{ progress.L }}" x2="{{ progress.W - progress.R }}" y1="{{ t.y }}" y2="{{ t.y }}" stroke="{{ '#71717A' if t.t == 'рынок' else '#2E2E31' }}" {% if t.t == 'рынок' %}stroke-dasharray="5 4"{% endif %}/>
-        <text x="{{ progress.L - 6 }}" y="{{ t.y + 4 }}" text-anchor="end">{{ t.t }}</text>
-        {% endfor %}
-        {% for t in progress.xt %}<text x="{{ t.x }}" y="{{ progress.H - 8 }}" text-anchor="middle">{{ t.t }}</text>{% endfor %}
-        {% for l in progress.lines %}
-        <path d="{{ l.path }}" fill="none" stroke="{{ l.color }}" stroke-width="2.2" stroke-linejoin="round"/>
-        {% for d in l.dots %}<circle cx="{{ d.x }}" cy="{{ d.y }}" r="3.4" fill="{{ l.color }}"><title>{{ d.t }}</title></circle>{% endfor %}
-        {% endfor %}
-      </svg>
+      {% with P = progress %}{% include "_progress.html" %}{% endwith %}
       <p class="foot">Мерило — логошибка (меньше — лучше): из логошибки рынка вычитаем логошибку модели на тех же днях. Отрыв, а не сама ошибка — потому что
         экзаменационные дни каждую ночь сдвигаются и погода бывает то простой, то трудной; рынок сдаёт те же дни, поэтому сравнение честное.
         Одна ночь гуляет на ±0.015 (соседние ночи делят 13 из 14 дней) — смотреть на тенденцию. «Растёт / падает» — среднее последних ночей
