@@ -8,7 +8,9 @@ LLM-прогноз максимума дня каждый час (03.10, реш�
 
 Кошельки (одна идея — две LLM, чтобы было видно, какая лучше):
   llm_gem — google/gemini-3.8-flash (как у коллеги Alex);
-  llm_ds  — deepseek/deepseek-v4-pro (дешевле, для сравнения).
+  llm_ds  — deepseek/deepseek-v4-pro (дешевле, для сравнения);
+  llm_agy — с 09.10: Gemini 3.8 Flash (Medium) через Antigravity CLI на сервере, только число (AGY_* ниже, agy_runner.py);
+  llm_agy_bet — с 10.10: то же, но ставку (ждать / вариант / сторона / $0-5 / цена) решает сама LLM в рамках риска (AGY_BET_*).
 Города: 5 городов США с самыми большими деньгами (Чикаго, Атланта, Остин, Майами, Даллас), каждый час 08-19 местного
 (04.10-06.10 — с 05:05; с 06.10 — с 08:05, решение Alex: минус 20% расхода, ставки и так с 08:05).
 Ставка: одна на город в день — в первый час, когда шанс LLM выше цены продавца на EDGE (за «да» или за «нет»),
@@ -20,6 +22,7 @@ LLM-прогноз максимума дня каждый час (03.10, реш�
 """
 
 import json
+import math
 import os
 import re
 import sqlite3
@@ -348,7 +351,7 @@ def bet_summary(conn, wallet, city):
     out.append("Last settled (date city bought price your-chance → result):")
     for r in rs[-8:]:
         out.append(f" {r['local_date'][5:]} {r['city']} \"{side(r)}\" {label(r['bucket_lo'], r['bucket_hi'], r['unit'] or 'fahrenheit')} "
-                   f"{r['price'] * 100:.0f}c {(r['model_p'] or 0) * 100:.0f}% → {r['status']} {_pnl(r):+.2f}$")
+                   f"{r['price'] * 100:.0f}c" + (f" {r['model_p'] * 100:.0f}%" if r["model_p"] is not None else "") + f" → {r['status']} {_pnl(r):+.2f}$")
     if len(rs) < 30:
         out.append(f"Only {len(rs)} bets: luck dominates — no absolute rules from a few bets.")
     return "\n".join(x for x in out if x)
@@ -437,6 +440,222 @@ def market_blend(probs, mk, mx):
     return {k: v / t for k, v in out.items()} if t > 0 else None
 
 
+# 09.10 (решение Alex): кошелёк llm_agy — Gemini 3.8 Flash (Medium) через Antigravity CLI (agy), бесплатно по аккаунту Google.
+# Отличие от llm_gem — одно: модель через agy с коротким английским письмом (данные о дне + свои прошлые ошибки, без тетради,
+# разбора часа и ставок) и отвечает только числом {"max_f": ...}. Шансы по вариантам считает код: нормальное распределение вокруг
+# ответа с разбросом прошлых ошибок максимума в том же блоке часов (своих, пока их меньше AGY_MIN_N, — ошибок llm_gem);
+# варианты ниже уже измеренного максимума — 0. Ставка — те же правила, что у LLM (перевес 5 п.п., 10-90¢, $2, одна на город в день).
+# agy стоит на сервере, не в контейнере: письмо — в AGY_DIR/queue, ответ пишет agy_runner.py (крон сервера раз в минуту) в AGY_DIR/done.
+# Проба 09.10 (Атланта 15:05 и 4 города 08.10 10:05): 3-17 с на письмо, ответ всегда чистое число; лимит Google почти не тратит.
+AGY_WALLET, AGY_MODEL = "llm_agy", "gemini-3.8-flash-medium"
+AGY_DIR = Path("/data/agy")
+AGY_WAIT = 300          # секунд ждать ответы после последнего письма (обработчик стартует раз в минуту, письмо 3-20 с)
+AGY_MIN_N = 30          # своих ошибок меньше — разброс по ошибкам llm_gem
+AGY_SIGMA_MIN = {"fahrenheit": 0.3, "celsius": 0.2}
+# 10.10: разброс — по 2 часа после полудня: у llm_gem ошибка максимума 14-15 ч ±0.7°F, 16-17 ч ±0.4°F, 18-19 ч ±0.04°F
+# (в первый день был общий блок 14-19 и нижняя граница ±0.8° — в 17:05 Атланта дала 27% варианту выше уже ясного максимума)
+AGY_BLOCKS = ((5, 9), (10, 13), (14, 15), (16, 17), (18, 19))
+AGY_HEAD = ("You are an expert weather forecaster for one airport weather station. Using the data below, forecast today's MAXIMUM "
+            "temperature at this station (the value the market settles on: the official METAR maximum for the local calendar day, "
+            "whole degrees of the market unit). The final max can never be below the max already observed today.\n"
+            'Do NOT use any tools, commands or files. Reply with one JSON object only, nothing else: {"max_f": <number in the market unit>}\n\n')
+
+
+def agy_name(wallet, city, day, hour):
+    return f"{wallet}_{city}_{day.isoformat()}_{hour:02d}"
+
+
+def agy_submit(name, text):
+    """Письмо в очередь обработчика (через временный файл — обработчик не прочтёт половину)."""
+    q = AGY_DIR / "queue"
+    q.mkdir(parents=True, exist_ok=True)
+    (AGY_DIR / "done" / f"{name}.json").unlink(missing_ok=True)
+    tmp = q / f".{name}.tmp"
+    tmp.write_text(text)
+    tmp.rename(q / f"{name}.txt")
+
+
+def agy_collect(names):
+    """Ждёт ответы до AGY_WAIT с; → {имя: ответ agy}. Не дождались — письмо снимается из очереди."""
+    out, until = {}, time.time() + AGY_WAIT
+    while True:
+        for n in names:
+            f = AGY_DIR / "done" / f"{n}.json"
+            if n not in out and f.exists():
+                try:
+                    out[n] = json.loads(f.read_text())
+                    f.unlink()
+                except (OSError, ValueError):
+                    pass
+        if len(out) == len(names) or time.time() > until:
+            break
+        time.sleep(5)
+    for n in names:
+        if n not in out:
+            (AGY_DIR / "queue" / f"{n}.txt").unlink(missing_ok=True)
+    return out
+
+
+def agy_sigma(conn, city, day, hour):
+    """Разброс ошибки максимума дня (корень из среднего квадрата) в блоке часов AGY_BLOCKS — по городам той же единицы."""
+    unit = OBS_CITIES[city]["unit"]
+    lo, hi = next(((a, b) for a, b in AGY_BLOCKS if a <= hour <= b), (hour, hour))
+    same = [c for c in CITIES if OBS_CITIES[c]["unit"] == unit]
+    for w in (AGY_WALLET, MIX_FROM):
+        es = [r[0] for r in conn.execute(f"""SELECT p.pred_max - d.actual_max FROM llm_hour_preds p
+            JOIN weather_station_daily d ON d.city = p.city AND d.local_date = p.local_date
+            WHERE p.wallet = ? AND p.local_date < ? AND p.local_hour BETWEEN ? AND ? AND p.pred_max IS NOT NULL
+            AND d.actual_max IS NOT NULL AND p.city IN ({",".join("?" * len(same))})""", (w, day.isoformat(), lo, hi, *same))]
+        if len(es) >= AGY_MIN_N:
+            return max(AGY_SIGMA_MIN[unit], math.sqrt(sum(e * e for e in es) / len(es))), w, len(es)
+    return {"fahrenheit": 2.0, "celsius": 1.1}[unit], "по умолчанию", 0
+
+
+def agy_probs(pred, sigma, mk, mx):
+    """Шанс варианта [lo, hi) при максимуме ~ N(pred, sigma); ниже измеренного максимума — 0, сумма — 1."""
+    cdf = lambda x: 0.5 * (1 + math.erf((x - pred) / (sigma * math.sqrt(2))))
+    out = {b["label"]: 0.0 if mx is not None and b["hi"] < mx else max(0.0, cdf(min(b["hi"], 1e6)) - cdf(max(b["lo"], -1e6)))
+           for b in mk}
+    s = sum(out.values())
+    return {k: v / s for k, v in out.items()} if s > 0 else None
+
+
+# 10.10 (идея Alex «дать ей самой делать ставки, но учитывать риск»): кошелёк llm_agy_bet — пара к llm_agy. Та же модель и те же
+# данные, плюс цены покупки, комиссия, деньги кошелька и свои ставки — LLM сама решает: ставить или ждать, вариант, сторона,
+# размер $0-5, предельная цена. Код держит только рамки риска (AGY_BET_*). Порог — PRD §9 п.19 (записан до запуска, 4 условия).
+AGY_BET_WALLET = "llm_agy_bet"
+AGY_BET_MAX = 5.0       # $ на одну ставку
+AGY_BET_DAY = 0.20      # за день — не больше этой доли денег на начало дня
+AGY_BET_HEAD = ("You are an expert weather forecaster for one airport weather station AND you manage a paper betting wallet on the "
+                "Polymarket market for today's maximum temperature (it settles on the official METAR maximum for the local calendar "
+                "day, whole degrees of the market unit). The final max can never be below the max already observed today.\n"
+                "Decide yourself whether to bet now, on which bucket, which side, how much and up to what price. Think about risk: "
+                "a share costs its price and pays $1 if it wins, else $0; a fee is paid on top; you are asked every hour 08-19 local, "
+                "so you may skip now and bet later when more is known (but prices move as the day goes on).\n"
+                "Do NOT use any tools, commands or files. Reply with one JSON object only, nothing else:\n"
+                '{"max_f": <today\'s max in the market unit>, "bet": null or {"bucket": "<bucket label exactly as given>", '
+                '"side": "yes" or "no", "stake": <dollars>, "max_price": <highest price per share you accept, 0-1>, '
+                '"chance": <your probability that this bet wins, 0-1>}, '
+                '"why": "<English, at most 15 words>"}\n\n')
+
+
+def agy_day_spent(conn, wallet, day):
+    return conn.execute("SELECT COALESCE(SUM(stake + COALESCE(fee, 0)), 0) FROM paper_trades WHERE wallet = ? AND local_date = ?",
+                        (wallet, day.isoformat())).fetchone()[0]
+
+
+def agy_bet_block(conn, city, day, mk, mx):
+    """Деньги, рамки, цены покупки «да»/«нет» и свои закрытые ставки — для llm_agy_bet."""
+    left = cash(conn, AGY_BET_WALLET)
+    spent = agy_day_spent(conn, AGY_BET_WALLET, day)
+    allow = max(0.0, AGY_BET_DAY * (left + spent) - spent)
+    u = "°F" if OBS_CITIES[city]["unit"] == "fahrenheit" else "°C"
+    rows = [f"{b['label']}: YES {b['ask'] * 100:.1f}¢, NO {(1 - b['bid']) * 100:.1f}¢" + ("  (already impossible)" if mx is not None and b["hi"] < mx else "")
+            for b in mk]
+    return "\n".join([
+        "YOUR WALLET AND RULES:",
+        f"Cash now ${left:.2f}; spent today (all cities) ${spent:.2f}; you may still spend today ${allow:.2f}.",
+        f"Limits enforced by code: stake at most ${AGY_BET_MAX:.0f} per bet, at most one bet per city per day, price 10-90¢ per share, "
+        "minimum order 5 shares (a small stake is raised to 5 shares). Fee per share ≈ 0.05 × p × (1 − p) dollars.",
+        f"Prices to BUY now (best ask, {u} buckets):", *rows,
+        "YOUR SETTLED BETS:", bet_summary(conn, AGY_BET_WALLET, city)])
+
+
+def agy_bet_place(conn, city, day, now, mk, mx, ans):
+    """Ставка, которую выбрала LLM, — в рамках AGY_BET_*; → строка для лога."""
+    b0 = ans.get("bet")
+    if not isinstance(b0, dict):
+        return "без ставки (решила ждать)"
+    b = next((x for x in mk if x["label"] == str(b0.get("bucket", "")).strip()), None)
+    side = str(b0.get("side", "")).lower()
+    try:
+        stake = min(AGY_BET_MAX, float(b0.get("stake")))
+        maxp = float(b0.get("max_price"))
+    except (TypeError, ValueError):
+        return f"ставка не разобрана: {b0}"
+    try:
+        q = min(1.0, max(0.0, float(b0.get("chance"))))
+    except (TypeError, ValueError):
+        q = None
+    if b is None or side not in ("yes", "no") or stake <= 0:
+        return f"ставка не разобрана: {b0}"
+    if mx is not None and b["hi"] < mx:
+        return f"отказ кода: {b['label']} уже невозможен"
+    if conn.execute("SELECT 1 FROM paper_trades WHERE wallet = ? AND city = ? AND local_date = ?",
+                    (AGY_BET_WALLET, city, day.isoformat())).fetchone():
+        return "отказ кода: ставка в этом городе сегодня уже есть"
+    price = b["ask"] if side == "yes" else 1 - b["bid"]
+    if not MIN_PRICE <= price <= MAX_PRICE:
+        return f"отказ кода: цена {price * 100:.0f}¢ вне 10-90¢"
+    need = max(stake, 5 * price * 1.01 + 5 * 0.05 * price * (1 - price))   # минимум 5 долей — фактическая сумма
+    left = cash(conn, AGY_BET_WALLET)
+    spent = agy_day_spent(conn, AGY_BET_WALLET, day)
+    if spent + need > AGY_BET_DAY * (left + spent) + 1e-9 or left < need * 1.1:
+        return f"отказ кода: дневной предел 20% (потрачено ${spent:.2f}, ставка ${need:.2f})"
+    if trading_stopped():
+        return "отказ кода: торговля остановлена (STOP)"
+    tok = json.loads(b["m"]["clobTokenIds"])[0 if side == "yes" else 1]
+    f = simulate_buy(b["m"], tok, stake, min(maxp, MAX_PRICE))
+    if f["shares"] <= 0:
+        return f"не купили {side} {b['label']}: {f['reason']}"
+    if not MIN_PRICE <= f["avg"] <= MAX_PRICE:
+        return f"не купили {side} {b['label']}: настоящая цена {f['avg'] * 100:.1f}¢ вне 10-90¢ (цена Gamma {price * 100:.0f}¢ устарела)"
+    conn.execute("""INSERT OR IGNORE INTO paper_trades (wallet, city, local_date, snapshot_ts, unit, bucket_lo, bucket_hi,
+        model_p, market_p, price, stake, status, reason, shares, fee, book_json, condition_id, token_id, placed_at, side)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?)""",
+                 (AGY_BET_WALLET, city, day.isoformat(), now.isoformat(), OBS_CITIES[city]["unit"], b["lo"], b["hi"], q, price,
+                  f["avg"], f["cost"], f"LLM сама: {side} {b['label']} ${stake:.2f} до {maxp * 100:.0f}¢ — {str(ans.get('why', ''))[:150]}",
+                  f["shares"], f["fee"], f["book"], b["m"].get("conditionId"), tok, now.isoformat(), side))
+    conn.commit()
+    return f"купила {side} {b['label']} {f['shares']:.1f} долей по {f['avg'] * 100:.1f}¢ (просила ${stake:.2f} до {maxp * 100:.0f}¢)"
+
+
+def agy_finish(conn, now, pending):
+    """Забирает ответы agy, пишет прогноз и шансы, ставит."""
+    got = agy_collect(list(pending))
+    for name, (wallet, city, day, lnow, mk, mx, text) in pending.items():
+        with item_guard(f"{city}/{wallet}", conn):
+            a = got.get(name)
+            # 10.10: сбой agy — ошибкой элемента, а не строкой в логе: на /status запуск виден «с пропусками»
+            # (после перезагрузки сервера, слёта входа в Google, исчерпанного лимита)
+            if a is None:
+                raise RuntimeError(f"agy не ответил за {AGY_WAIT // 60} мин — работает ли крон agy_runner.py на сервере?")
+            raw = (a.get("response") or "").strip()
+            try:
+                ans = _parse(raw)
+                pred = float(ans["max_f"])
+            except (ValueError, KeyError, TypeError):
+                raise RuntimeError(f"agy без ответа ({a.get('status')}: {(a.get('error') or raw)[:200]!r})") from None
+            if mx is not None and pred < mx:
+                pred = float(mx)
+            if wallet == AGY_BET_WALLET:
+                u = a.get("usage") or {}
+                conn.execute("""INSERT OR REPLACE INTO llm_hour_preds (wallet, city, local_date, local_hour, ts_utc, model, pred_max,
+                    market_json, max_so_far, reason, cost, tokens, prompt, answer_json) VALUES (?,?,?,?,?,?,?,?,?,?,0,?,?,?)""",
+                             (wallet, city, day.isoformat(), lnow.hour, now.isoformat(), f"agy:{AGY_MODEL}", pred,
+                              json.dumps({b["label"]: b["price"] for b in mk}), mx, str(ans.get("why", ""))[:300],
+                              u.get("total_tokens"), text, raw[:1000]))
+                conn.commit()
+                res = agy_bet_place(conn, city, day, now, mk, mx, ans) if lnow.hour >= BET_FROM else None
+                print(f"{wallet} {city} {lnow:%H:%M}: максимум {pred:g}° (уже {mx}), {a.get('seconds', '?')} с"
+                      f"{'; ' + res if res else ''}", flush=True)
+                continue
+            sigma, src, n = agy_sigma(conn, city, day, lnow.hour)
+            probs = agy_probs(pred, sigma, mk, mx)
+            u = a.get("usage") or {}
+            conn.execute("""INSERT OR REPLACE INTO llm_hour_preds (wallet, city, local_date, local_hour, ts_utc, model, pred_max,
+                probs_json, market_json, max_so_far, reason, cost, tokens, prompt, answer_json, probs_raw_json)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,0,?,?,?,?)""",
+                         (AGY_WALLET, city, day.isoformat(), lnow.hour, now.isoformat(), f"agy:{AGY_MODEL}", pred, json.dumps(probs),
+                          json.dumps({b["label"]: b["price"] for b in mk}), mx,
+                          f"только число; шансы — код: разброс ±{sigma:.1f}° ({src}, {n} ошибок), {a.get('seconds', '?')} с",
+                          u.get("total_tokens"), text, raw[:500], json.dumps(probs)))
+            conn.commit()
+            res = (bet(conn, AGY_WALLET, city, day, now, mk, probs) if probs else "шансы не посчитать") if lnow.hour >= BET_FROM else None
+            print(f"{AGY_WALLET} {city} {lnow:%H:%M}: максимум {pred:g}° (уже {mx}), разброс ±{sigma:.1f}°, "
+                  f"{a.get('seconds', '?')} с{'; ' + res if res else ''}", flush=True)
+
+
 def label_range(lab):
     """Обратно к label(): «66-67°F» → (65.5, 67.5), «69°F or below» → (-999, 69.5), «22°C» → (21.5, 22.5)."""
     m = RE_LABEL.match(lab.strip())
@@ -453,7 +672,8 @@ def label_range(lab):
 RE_LABEL = re.compile(r"^(-?\d+)(?:-(-?\d+))?°[FC]( or below| or higher)?$")
 
 
-def prompt(conn, wallet, city, day, lnow, obs, hrs, mk, sun=None, now=None, cal=None):
+def prompt(conn, wallet, city, day, lnow, obs, hrs, mk, sun=None, now=None, cal=None, short=False):
+    """short (llm_agy, 09.10) — без тетради, разбора часа, ставок и проверки уверенности: только данные о дне и прошлые ошибки."""
     c = OBS_CITIES[city]
     tz = ZoneInfo(c["tz"])
     o_lines, mx = [], None
@@ -476,13 +696,14 @@ def prompt(conn, wallet, city, day, lnow, obs, hrs, mk, sun=None, now=None, cal=
     afd = conn.execute("SELECT high_f, vs_guidance, rain_today, front_today, clouds_limit, sea_breeze, confidence FROM afd_signals "
                        "WHERE city = ? AND local_date = ?", (city, day.isoformat())).fetchone()
     st = next((m for m in obs if m["icaoId"] == c["icao"]), {})
-    nb = notebook(conn, wallet, city)
+    nb = [] if short else notebook(conn, wallet, city)
     text = [f"City: {city} (airport {c['icao']}, {st.get('name', '')}). Local time now: {lnow:%Y-%m-%d %H:%M}.",
             f"Station: lat {st.get('lat', c['lat'])}, lon {st.get('lon', c['lon'])}, elevation {st.get('elev', '?')} m. "
             f"Sunrise {str((sun or {}).get('sunrise') or '?')[-5:]}, sunset {str((sun or {}).get('sunset') or '?')[-5:]} (local).",
-            "YOUR NOTEBOOK (rules you wrote for yourself about this station):",
-            *([f"- {x}" for x in nb] or ["(empty — start it)"]),
-            "YOUR HOUR-AHEAD FORECASTS vs ACTUAL (review these first):", hour_review(conn, wallet, city, now or datetime.now(timezone.utc), obs),
+            *([] if short else ["YOUR NOTEBOOK (rules you wrote for yourself about this station):",
+                                *([f"- {x}" for x in nb] or ["(empty — start it)"]),
+                                "YOUR HOUR-AHEAD FORECASTS vs ACTUAL (review these first):",
+                                hour_review(conn, wallet, city, now or datetime.now(timezone.utc), obs)]),
             f"Market unit: {u} (buckets and all temperatures below are in {u}).",
             f"Max observed so far today (METAR, rounded {u}): {mx if mx is not None else 'none yet'}",
             "Today's METAR observations:", *(o_lines or ["none yet"]),
@@ -495,8 +716,8 @@ def prompt(conn, wallet, city, day, lnow, obs, hrs, mk, sun=None, now=None, cal=
             *[f"{b['label']}: {b['price'] * 100:.1f}¢" for b in mk],
             "Your past daily-max forecasts for this city and the actual daily max:", memory(conn, wallet, city, day),
             "YOUR SYSTEMATIC ERRORS (computed by code over your whole history):", bias_stats(conn, wallet, city, day),
-            "YOUR BETS AND MONEY (you bet $2 when your chance beats the price by 5+ points):", bet_summary(conn, wallet, city),
-            "HOW OFTEN YOUR CHANCES CAME TRUE (all your forecasts 08-19 local, past days):", calibration_text(cal)]
+            *([] if short else ["YOUR BETS AND MONEY (you bet $2 when your chance beats the price by 5+ points):", bet_summary(conn, wallet, city),
+                                "HOW OFTEN YOUR CHANCES CAME TRUE (all your forecasts 08-19 local, past days):", calibration_text(cal)])]
     return "\n".join(text), mx
 
 
@@ -661,6 +882,8 @@ def bet(conn, wallet, city, day, now, mk, probs, edge=EDGE):
     f = simulate_buy(b["m"], tok, STAKE, q - edge / 2)
     if f["shares"] <= 0:
         return f"не купили {side} {b['label']}: {f['reason']}"
+    if not MIN_PRICE <= f["avg"] <= MAX_PRICE:   # 10.10: Gamma дала устаревшие 28¢, в стакане было 1.9¢ — правило 10-90¢ по настоящей цене
+        return f"не купили {side} {b['label']}: настоящая цена {f['avg'] * 100:.1f}¢ вне 10-90¢ (цена Gamma {price * 100:.0f}¢ устарела)"
     conn.execute("""INSERT OR IGNORE INTO paper_trades (wallet, city, local_date, snapshot_ts, unit, bucket_lo, bucket_hi,
         model_p, market_p, price, stake, status, reason, shares, fee, book_json, condition_id, token_id, placed_at, side)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?)""",
@@ -682,6 +905,7 @@ def run():
     conn = sqlite3.connect(DB_PATH, timeout=60)
     ensure_schema(conn)
     obs = metars(now)
+    agy_pending = {}   # llm_agy: письма уходят в начале, ответы собираются после Gemini и DeepSeek
     for city in act:
         with item_guard(city, conn):
             lnow = local_now(city, now)
@@ -691,6 +915,23 @@ def run():
                 print(f"{city}: маркета на {day} нет")
                 continue
             hrs, sun = hourly(city)
+            for aw in ((AGY_WALLET, AGY_BET_WALLET) if city in THRESHOLD_CITIES else ()):
+                with item_guard(f"{city}/{aw}", conn):
+                    if conn.execute("SELECT 1 FROM llm_hour_preds WHERE wallet = ? AND city = ? AND local_date = ? AND local_hour = ?",
+                                    (aw, city, day.isoformat(), lnow.hour)).fetchone():
+                        continue
+                    # llm_agy_bet: ставка в городе сегодня уже есть — больше нечего решать, лимит Google не тратим
+                    if aw == AGY_BET_WALLET and conn.execute("SELECT 1 FROM paper_trades WHERE wallet = ? AND city = ? AND local_date = ?",
+                                                              (aw, city, day.isoformat())).fetchone():
+                        continue
+                    text, mx = prompt(conn, aw, city, day, lnow, obs, hrs, mk, sun, now, short=True)
+                    if aw == AGY_BET_WALLET:
+                        text = AGY_BET_HEAD + text + "\n" + agy_bet_block(conn, city, day, mk, mx)
+                    else:
+                        text = AGY_HEAD + text
+                    name = agy_name(aw, city, day, lnow.hour)
+                    agy_submit(name, text)
+                    agy_pending[name] = (aw, city, day, lnow, mk, mx, text)
             for wallet, model in WALLETS.items():
                 with item_guard(f"{city}/{wallet}", conn):
                     if conn.execute("SELECT 1 FROM llm_hour_preds WHERE wallet = ? AND city = ? AND local_date = ? AND local_hour = ?",
@@ -753,6 +994,8 @@ def run():
                                 conn.commit()
                                 cres = bet(conn, CAL_WALLET, city, day, now, mk, cp, CAL_EDGE)
                                 print(f"{CAL_WALLET} {city} {lnow:%H:%M}: Gemini + рынок{'; ' + cres if cres else ''}", flush=True)
+    if agy_pending:
+        agy_finish(conn, now, agy_pending)
     conn.close()
 
 

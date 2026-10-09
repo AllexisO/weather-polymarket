@@ -202,6 +202,12 @@ WALLET_INFO = {
                "То же, что LLM Gemini, но DeepSeek V4 Pro — для сравнения двух LLM"),
     "llm_cal": ("LLM каждый час", "Gemini + рынок",
                 "Шансы Gemini этого часа 35% + цена рынка 65% — лекарство от самоуверенности LLM; ставит при перевесе от 10 п.п. Своих запросов нет — $0"),
+    "llm_agy": ("LLM каждый час", "Gemini через Antigravity",
+                "Gemini 3.8 Flash (Medium) через Antigravity CLI на сервере — бесплатно по аккаунту Google. Короткое письмо на английском, "
+                "ответ — только максимум дня; шансы по вариантам считает код по разбросу прошлых ошибок. 5 городов США, одна ставка на город в день"),
+    "llm_agy_bet": ("LLM каждый час", "Gemini ставит сама",
+                    "Пара к «Gemini через Antigravity»: та же модель и данные, но сама решает — ставить или ждать, на что, «да» или «нет», "
+                    "сколько ($0-5) и до какой цены. Код держит рамки риска: до $5, одна ставка на город в день, за день до 20% денег"),
     "llm_mix": ("LLM каждый час", "LLM + LightGBM — смесь",
                 "Шансы Gemini этого часа и утренний прогноз LightGBM v3 поровну; ставит по тем же правилам, что LLM. Своих запросов к LLM нет — $0"),
     "obs": ("Живые замеры", "По живым замерам станции", "Ставка против варианта, который станция уже исключила"),
@@ -908,8 +914,8 @@ def spark(rows, start=100.0, w=160, h=44):
 
 
 LLM_WALLETS = ("llm_gem", "llm_ds")   # LLM со своими запросами — вкладки страницы
-LLM_BET_WALLETS = (*LLM_WALLETS, "llm_mix", "llm_cal")   # 08.10: llm_cal — Gemini 35% + рынок 65%, перевес от 10 п.п.   # 06.10: и смесь Gemini + LightGBM (weather_llm_hour.MIX_WALLET) — карточки, ставки, деньги
-LLM_LIMIT = {"llm_gem": 13.5, "llm_ds": 4.0, "llm_mix": 0.0, "llm_cal": 0.0}   # как weather_llm_hour.MONTH_LIMIT; у смеси своих запросов нет
+LLM_BET_WALLETS = (*LLM_WALLETS, "llm_mix", "llm_cal", "llm_agy", "llm_agy_bet")   # 10.10: llm_agy_bet — ставку решает сама LLM; 09.10: llm_agy — Gemini через Antigravity CLI, только число   # 08.10: llm_cal — Gemini 35% + рынок 65%, перевес от 10 п.п.   # 06.10: и смесь Gemini + LightGBM (weather_llm_hour.MIX_WALLET) — карточки, ставки, деньги
+LLM_LIMIT = {"llm_gem": 13.5, "llm_ds": 4.0, "llm_mix": 0.0, "llm_cal": 0.0, "llm_agy": 0.0, "llm_agy_bet": 0.0}   # как weather_llm_hour.MONTH_LIMIT; у смеси своих запросов нет
 
 
 def _smooth(pts):
@@ -1004,7 +1010,7 @@ def _llm_range(lab):
 LLM_V2_FROM = "2026-10-06T09:45:00+00:00"   # как weather_llm_hour.V2_FROM: с этого запуска — обучение v2 (LightGBM, ошибки, деньги, поправка шансов)
 LLM_KEY_LIMIT = 19.95  # всего внесено на OpenRouter: 08.10 баланс $16.70 после пополнения на $10 + потрачено $3.25 (было $10)
 LLM_CITIES = ("chicago", "atlanta", "austin", "miami", "dallas", "london")   # как weather_llm_hour.CITIES (Лондон с 04.10)
-LLM_MODEL_NAME = {"llm_gem": "Gemini 3.8 Flash", "llm_ds": "DeepSeek V4 Pro", "llm_mix": "Смесь Gemini + LightGBM", "llm_cal": "Gemini + рынок"}
+LLM_MODEL_NAME = {"llm_gem": "Gemini 3.8 Flash", "llm_ds": "DeepSeek V4 Pro", "llm_mix": "Смесь Gemini + LightGBM", "llm_cal": "Gemini + рынок", "llm_agy": "Gemini через Antigravity", "llm_agy_bet": "Gemini ставит сама"}
 
 
 def _llm_fact_hourly(conn, city, day):
@@ -1637,7 +1643,8 @@ def progress_chart(pts, line_defs, step=PROGRESS_STEP, words=("ночь", "но�
 # 09.10 (просьба Alex: «учится ли LLM»): тот же график для LLM — по дням, на её поправленных шансах (на них ставки),
 # часы 08-19 (с 06.10 других нет), все города; день — когда известен настоящий максимум.
 LLM_PROGRESS_LINES = (("llm_gem", "Gemini", "#FFD58A"), ("llm_ds", "DeepSeek", "#D3DDFB"),
-                      ("llm_mix", "Gemini + LightGBM", "#A3E39A"), ("llm_cal", "Gemini + рынок", "#F0A6E0"))
+                      ("llm_mix", "Gemini + LightGBM", "#A3E39A"), ("llm_cal", "Gemini + рынок", "#F0A6E0"),
+                      ("llm_agy", "Gemini через Antigravity", "#F4A77F"))
 LLM_PROGRESS_STEP = 0.03   # один день LLM гуляет сильнее экзамена моделей (~±0.1)
 LLM_P_FLOOR = 1e-3         # шанс 0 правильному ответу считаем 0.1% — иначе один час бесконечно портит день
 
