@@ -80,11 +80,6 @@ SERVICES = [
         {"name": "AEMET (Испания), CWA (Тайвань)", "site": None, "what": "ключи получены для национальных замеров, в коде не используются",
          "apis": ["opendata.aemet.es", "opendata.cwa.gov.tw"], "mode": "idle", "key": "AEMET_API_KEY, CWA_API_KEY", "price": "бесплатно", "scripts": "—"},
     ]),
-    ("Соседний проект polymarket-markets", [
-        {"name": "The Odds API, OddsPapi", "site": "https://the-odds-api.com", "what": "коэффициенты букмекеров (Pinnacle) для спорта и киберспорта — в weather-lab не используются",
-         "apis": ["api.the-odds-api.com/v4", "api.oddspapi.io"], "mode": "idle", "key": "ODDS_API_KEY, ODDSPAPI_API_KEY",
-         "price": "бесплатно: 500 и 250 запросов/мес", "scripts": "polymarket-markets: sports_edge, esports_edge"},
-    ]),
 ]
 
 # status: "active" — действует и списывает деньги; "closed" — отменена; "trial" — пробная; "prepaid" — баланс по расходу.
