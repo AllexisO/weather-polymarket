@@ -1012,7 +1012,7 @@ def _llm_range(lab):
 
 LLM_V2_FROM = "2026-10-06T09:45:00+00:00"   # как weather_llm_hour.V2_FROM: с этого запуска — обучение v2 (LightGBM, ошибки, деньги, поправка шансов)
 LLM_KEY_LIMIT = 19.95  # всего внесено на OpenRouter: 08.10 баланс $16.70 после пополнения на $10 + потрачено $3.25 (было $10)
-LLM_CITIES = ("chicago", "atlanta", "austin", "miami", "dallas", "london")   # как weather_llm_hour.CITIES (Лондон с 04.10)
+LLM_CITIES = ("chicago", "atlanta", "austin", "miami", "dallas", "london", "nyc", "paris", "tokyo")   # как weather_llm_hour.ALL_CITIES (Лондон с 04.10; Нью-Йорк, Париж, Токио — только agy, с 10.10)
 LLM_MODEL_NAME = {"llm_gem": "Gemini 3.8 Flash", "llm_ds": "DeepSeek V4 Pro", "llm_mix": "Смесь Gemini + LightGBM", "llm_cal": "Gemini + рынок", "llm_agy": "Gemini через Antigravity", "llm_agy_bet": "Gemini ставит сама", "llm_agy_nomem": "Gemini без памяти"}
 
 
@@ -1184,7 +1184,6 @@ def llm_page_data(conn, key, city, day):
         out["notebook_hist"] = list(reversed(hist))[:30]
     # что LLM видела в последний час и что ответила
     last = preds[-1]
-    ans = json.loads(last["answer_json"]) if last["answer_json"] else {}
     probs = json.loads(last["probs_json"] or "{}") or {}
     mk = json.loads(last["market_json"] or "{}")
     out["last"] = {"when": f"{last['local_date'][8:10]}.{last['local_date'][5:7]} {last['local_hour']:02d}:05 местного", "prompt": last["prompt"], "reflection": last["reflection"],

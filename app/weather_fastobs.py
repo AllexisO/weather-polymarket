@@ -184,7 +184,10 @@ def knmi(db):
 
 
 def metar_value(temp_c, unit):
-    return round(temp_c * 9 / 5 + 32) if unit == "fahrenheit" else math.floor(temp_c + 0.5)
+    if unit == "fahrenheit":   # 11.10: Synoptic (5-мин ASOS) — целые °C; нижняя граница, как weather_obs_live.safe_value
+        from weather_obs_live import safe_value
+        return safe_value(temp_c, unit)
+    return math.floor(temp_c + 0.5)
 
 
 def patient(name, fn, waits=(5, 10)):

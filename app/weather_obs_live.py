@@ -256,7 +256,7 @@ def observed_max_today(metars, cfg):
         t = datetime.fromtimestamp(m["obsTime"], timezone.utc)
         if t.astimezone(tz).date() != today:
             continue
-        v = round(m["temp"] * 9 / 5 + 32) if cfg["unit"] == "fahrenheit" else round(m["temp"])
+        v = safe_value(m["temp"], cfg["unit"])
         if best is None or v > best[0]:
             best = (v, t)
     return today, best
@@ -368,6 +368,18 @@ def fmi_max_today(fmisid, cfg):
         if best is None or rounded > best[0]:
             best = (rounded, dt)
     return today, best
+
+
+def safe_value(temp_c, unit):
+    """Значение для маркета, которое замер гарантирует (11.10, аудит). Для °F-городов замер в целых °C (тело METAR без группы
+    T, 5-минутные ASOS Synoptic, часть сводок wethr) — это любое значение от −0.5 до +0.5 °C: 32 °C = 88.7…90.3 °F. Раньше
+    32 → 90 °F, и вариант «88-89 °F» считался мёртвым, а сбывался (obs_fast в США 13 из 28 таких ставок проиграл, −$16;
+    obs_wethr Майами 05.10: wethr 32.0, сводка 31.7 = 89 °F). Берём нижнюю границу; в °C-городах итог и так целые °C."""
+    if unit != "fahrenheit":
+        return round(temp_c)
+    if abs(temp_c - round(temp_c)) < 1e-9:
+        temp_c -= 0.5
+    return round(temp_c * 9 / 5 + 32)
 
 
 def bet_dead_buckets(conn, wallet, city, cfg, today, obs_max, obs_time, now, events_cache, why):

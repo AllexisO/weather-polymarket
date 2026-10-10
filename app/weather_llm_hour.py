@@ -61,6 +61,10 @@ EXTRA = {"llm_ds": {"reasoning": {"enabled": False}, "provider": PROVIDER_DS},
          "llm_gem": {"reasoning": {"max_tokens": 800}, "provider": PROVIDER}}
 CITIES = ("chicago", "atlanta", "austin", "miami", "dallas", "london")
 THRESHOLD_CITIES = ("chicago", "atlanta", "austin", "miami", "dallas")   # порог PRD §9 п.16 — по 5 городам США; Лондон (°C) с 04.10 — отдельно
+# 10.10 (решение Alex): ещё 4 города только для llm_agy и llm_agy_nomem (agy, без OpenRouter); пороги п.18 и п.20 — по-прежнему
+# по 5 городам США, эти — отдельно; llm_agy_bet — только 5 городов США (его 4 условия и общий дневной предел записаны на них)
+AGY_EXTRA_CITIES = ("london", "nyc", "paris", "tokyo")
+ALL_CITIES = CITIES + tuple(c for c in AGY_EXTRA_CITIES if c not in CITIES)
 HOURS = range(8, 20)    # местное время, в которое спрашиваем (04.10: с 05:05; 06.10, решение Alex: с 08:05 — минус 20% расхода)
 BET_FROM = 8            # ставки — как раньше, с 08:05 (ранние часы — только прогноз и учёба, правило ставок не меняется)
 EDGE = 0.05             # шанс LLM выше цены продавца минимум на 5 п.п.
@@ -161,7 +165,7 @@ def metars(now):
     """Сводки 5 аэропортов за последние 30 ч (один запрос): сегодняшние — в письмо, вчерашний вечер — для разбора прогнозов.
     05.10: при обрыве сети падал с трассировкой — теперь две повторные попытки, потом понятная ошибка (без сводок
     не знаем уже достигнутый максимум — ставить нельзя, час пропускается)."""
-    ids = ",".join(OBS_CITIES[c]["icao"] for c in CITIES)
+    ids = ",".join(OBS_CITIES[c]["icao"] for c in ALL_CITIES)
     for wait in (10, 30, None):
         try:
             return requests.get(AWC, params={"ids": ids, "hours": HOUR_ERR_HOURS, "format": "json"}, timeout=20).json()
@@ -450,7 +454,8 @@ def market_blend(probs, mk, mx):
 # Проба 09.10 (Атланта 15:05 и 4 города 08.10 10:05): 3-17 с на письмо, ответ всегда чистое число; лимит Google почти не тратит.
 AGY_WALLET, AGY_MODEL = "llm_agy", "gemini-3.8-flash-medium"
 AGY_DIR = Path("/data/agy")
-AGY_WAIT = 300          # секунд ждать ответы после последнего письма (обработчик стартует раз в минуту, письмо 3-20 с)
+AGY_WAIT = 480          # секунд ждать ответы (обработчик стартует раз в минуту, письмо 3-20 с, по одному); 11.10: было 300 —
+                        # с 9 городами в 15-21 ч по Кишинёву ~20 писем ≈ 4-5 мин, впритык; запуску отведено 40 мин (JOB_TIMEOUT)
 AGY_MIN_N = 30          # своих ошибок меньше — разброс по ошибкам llm_gem
 AGY_SIGMA_MIN = {"fahrenheit": 0.3, "celsius": 0.2}
 # 10.10: разброс — по 2 часа после полудня: у llm_gem ошибка максимума 14-15 ч ±0.7°F, 16-17 ч ±0.4°F, 18-19 ч ±0.04°F
@@ -501,7 +506,7 @@ def agy_sigma(conn, city, day, hour):
     """Разброс ошибки максимума дня (корень из среднего квадрата) в блоке часов AGY_BLOCKS — по городам той же единицы."""
     unit = OBS_CITIES[city]["unit"]
     lo, hi = next(((a, b) for a, b in AGY_BLOCKS if a <= hour <= b), (hour, hour))
-    same = [c for c in CITIES if OBS_CITIES[c]["unit"] == unit]
+    same = [c for c in ALL_CITIES if OBS_CITIES[c]["unit"] == unit]
     for w in (AGY_WALLET, MIX_FROM):
         es = [r[0] for r in conn.execute(f"""SELECT p.pred_max - d.actual_max FROM llm_hour_preds p
             JOIN weather_station_daily d ON d.city = p.city AND d.local_date = p.local_date
@@ -577,8 +582,11 @@ def agy_bet_place(conn, city, day, now, mk, mx, ans):
         maxp = float(b0.get("max_price"))
     except (TypeError, ValueError):
         return f"ставка не разобрана: {b0}"
+    if maxp > 1:   # 11.10 (аудит): ответ в центах («38» вместо 0.38) иначе стал бы «до 90¢»
+        maxp /= 100
     try:
-        q = min(1.0, max(0.0, float(b0.get("chance"))))
+        q = float(b0.get("chance"))
+        q = min(1.0, max(0.0, q / 100 if q > 1 else q))   # 11.10: шанс в процентах («44») — тоже в доли
     except (TypeError, ValueError):
         q = None
     if b is None or side not in ("yes", "no") or stake <= 0:
@@ -881,8 +889,10 @@ def bet(conn, wallet, city, day, now, mk, probs, edge=EDGE):
                 best = (q - price, side, price, q, b)
     if best is None or trading_stopped() or cash(conn, wallet) < STAKE * 1.1:
         return None
-    edge, side, price, q, b = best
+    _gap, side, price, q, b = best
     tok = json.loads(b["m"]["clobTokenIds"])[0 if side == "yes" else 1]
+    # 11.10 (аудит, решение Alex «исправить сейчас»): предел цены — шанс − половина ПОРОГА; с 08.10 по 11.10 здесь стояла
+    # половина перевеса этой ставки (имя edge затиралось), то есть середина между ценой и шансом — строже задуманного
     f = simulate_buy(b["m"], tok, STAKE, q - edge / 2)
     if f["shares"] <= 0:
         return f"не купили {side} {b['label']}: {f['reason']}"
@@ -900,7 +910,7 @@ def bet(conn, wallet, city, day, now, mk, probs, edge=EDGE):
 
 def run():
     now = datetime.now(timezone.utc)
-    act = [c for c in CITIES if local_now(c, now).hour in HOURS]
+    act = [c for c in ALL_CITIES if local_now(c, now).hour in HOURS]
     if not act:
         print("llm_hour: ни в одном городе сейчас не 08-19 местного — пропуск")
         return
@@ -919,7 +929,9 @@ def run():
                 print(f"{city}: маркета на {day} нет")
                 continue
             hrs, sun = hourly(city)
-            for aw in ((AGY_WALLET, AGY_BET_WALLET, AGY_NOMEM_WALLET) if city in THRESHOLD_CITIES else ()):
+            agy_ws = (AGY_WALLET, AGY_BET_WALLET, AGY_NOMEM_WALLET) if city in THRESHOLD_CITIES else \
+                ((AGY_WALLET, AGY_NOMEM_WALLET) if city in AGY_EXTRA_CITIES else ())
+            for aw in agy_ws:
                 with item_guard(f"{city}/{aw}", conn):
                     if conn.execute("SELECT 1 FROM llm_hour_preds WHERE wallet = ? AND city = ? AND local_date = ? AND local_hour = ?",
                                     (aw, city, day.isoformat(), lnow.hour)).fetchone():
@@ -936,7 +948,7 @@ def run():
                     name = agy_name(aw, city, day, lnow.hour)
                     agy_submit(name, text)
                     agy_pending[name] = (aw, city, day, lnow, mk, mx, text)
-            for wallet, model in WALLETS.items():
+            for wallet, model in (WALLETS.items() if city in CITIES else ()):   # Gemini/DeepSeek через OpenRouter — только CITIES
                 with item_guard(f"{city}/{wallet}", conn):
                     if conn.execute("SELECT 1 FROM llm_hour_preds WHERE wallet = ? AND city = ? AND local_date = ? AND local_hour = ?",
                                     (wallet, city, day.isoformat(), lnow.hour)).fetchone():

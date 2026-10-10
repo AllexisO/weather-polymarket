@@ -149,7 +149,7 @@ def cities(tok):
     keep += [c for c in prev if c in failed and c not in keep]   # не ответил — оставляем, как было
     # были сбои — пересчитать снова через час, а не через сутки
     CITIES_FILE.write_text(json.dumps({"at": time.time() - (86400 - 3600 if failed else 0), "cities": keep, "counts": cnt, "failed": failed}))
-    print("пересчёт городов: " + ", ".join(f"{c} {cnt[c]}" for c in keep))
+    print("пересчёт городов: " + ", ".join(f"{c} {cnt.get(c, 'нет ответа')}" for c in keep))
     return keep
 
 

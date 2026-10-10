@@ -32,7 +32,7 @@ import requests
 from polyexec import fee_for, fee_params, simulate_buy, trading_stopped
 from weather_cities import OBS_CITIES
 from weather_edge import GAMMA, month_day_year_slug, parse_bucket
-from weather_obs_live import MIN_BID, MIN_FILL, STAKE, cash, ensure_schema, parse_metar_temp
+from weather_obs_live import MIN_BID, MIN_FILL, STAKE, cash, ensure_schema, parse_metar_temp, safe_value
 
 DB_PATH = Path(os.environ.get("POLY_LAB_DB", "/data/db/polymarket_lab.sqlite3"))
 WALLET = "obs_rt"
@@ -51,8 +51,8 @@ RE_HEAD = re.compile(r"^(?:METAR |SPECI )?([A-Z0-9]{4}) (\d{2})(\d{2})(\d{2})Z")
 
 
 def value(temp_c, cfg):
-    """Значение для маркета — как в weather_obs_live.observed_max_today."""
-    return round(temp_c * 9 / 5 + 32) if cfg["unit"] == "fahrenheit" else round(temp_c)
+    """Значение для маркета — как в weather_obs_live.observed_max_today (целые °C в °F-городе — нижняя граница, safe_value)."""
+    return safe_value(temp_c, cfg["unit"])
 
 
 class Feed:

@@ -148,14 +148,29 @@ def check_services():
     ]
     for name, url, params in probes:
         with item_guard(name):
-            t0 = time.time()
-            try:
-                r = requests.get(url, params=params, timeout=20)
-                ok = r.status_code < 500
-                add("Сервисы", ok if ok else False, name, f"ответ {r.status_code} за {time.time() - t0:.1f} с",
-                    "" if ok else "сервис недоступен — ночью скрипты пропустят эти данные и догрузят позже")
-            except requests.RequestException as e:
-                add("Сервисы", False, name, f"не отвечает: {type(e).__name__}", "проверить интернет на сервере; если это их сбой — ждать")
+            # 10.10: короткий сбой (один 503 у Open-Meteo) не «проблема» — до 3 попыток с паузой 15 с; прошло не с первой — «внимание»
+            fails = []
+            for attempt in range(3):
+                if attempt:
+                    time.sleep(15)
+                t0 = time.time()
+                try:
+                    r = requests.get(url, params=params, timeout=20)
+                except requests.RequestException as e:
+                    fails.append(f"не отвечает: {type(e).__name__}")
+                    continue
+                if r.status_code < 500:
+                    break
+                fails.append(f"ответ {r.status_code}")
+            else:
+                add("Сервисы", False, name, f"3 попытки за 30 с: {'; '.join(fails)}",
+                    "сервис недоступен — скрипты пропустят эти данные и догрузят в следующий запуск; если «не отвечает» — проверить интернет на сервере")
+                continue
+            detail = f"ответ {r.status_code} за {time.time() - t0:.1f} с"
+            if fails:
+                add("Сервисы", "warn", name, f"{detail}, но не с первой попытки ({'; '.join(fails)})", "короткий сбой у них — догрузится само")
+            else:
+                add("Сервисы", True, name, detail)
 
 
 def check_models(c, now):

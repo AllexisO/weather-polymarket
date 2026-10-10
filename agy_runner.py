@@ -74,7 +74,10 @@ def main():
             f.unlink()
         except OSError:
             continue
-        paused = float(PAUSE.read_text()) if PAUSE.exists() else 0
+        try:
+            paused = float(PAUSE.read_text()) if PAUSE.exists() else 0
+        except (OSError, ValueError):   # 11.10 (аудит): испорченный файл паузы не должен останавливать все письма
+            paused = 0
         if paused > time.time():
             write_done(name, {"status": "PAUSED", "error": f"лимит Google — пауза до {datetime.fromtimestamp(paused):%H:%M}"})
             log(f"{name}: пауза (лимит Google)")
