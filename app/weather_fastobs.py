@@ -228,11 +228,15 @@ def main():
         cfg = OBS_CITIES.get(c)
         if not cfg:
             continue
-        loc_day = t.astimezone(ZoneInfo(cfg["tz"])).date()
+        # 11.10 (аудит): запись HKO ровно в 00:00 — ещё максимум ПРОШЛОГО дня (05.10 31.2 → «06.10 уже 31.2», ставки против
+        # 28-30°C проиграли); относим её к прошлому дню — минута назад
+        loc_day = (t - timedelta(minutes=1) if s == "hko" else t).astimezone(ZoneInfo(cfg["tz"])).date()
         if loc_day != now.astimezone(ZoneInfo(cfg["tz"])).date():
             continue
         if s == "hko":
-            mv = v  # официальный максимум с полуночи — сам итог маркета, без округления: мёртв вариант с верхней границей ниже
+            # итог маркета — «Absolute Daily Max» HKO с десятыми, вариант «28°C» = 28.0-28.9 (отбрасывание, не округление:
+            # 04.10 30.6 → «30°C», 07.10 28.8 → «28°C»). Варианты у нас — (27.5, 28.5), поэтому целая часть: мёртв, только если ≥ 29.0
+            mv = math.floor(v)
         elif not any(min((t.minute - m) % 60, (m - t.minute) % 60) <= WINDOW_BY_SOURCE.get(s, WINDOW) for m in mins.get(c, [0, 30])):
             continue
         else:
