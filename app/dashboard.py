@@ -208,6 +208,9 @@ WALLET_INFO = {
     "llm_agy_bet": ("LLM каждый час", "Gemini ставит сама",
                     "Пара к «Gemini через Antigravity»: та же модель и данные, но сама решает — ставить или ждать, на что, «да» или «нет», "
                     "сколько ($0-5) и до какой цены. Код держит рамки риска: до $5, одна ставка на город в день, за день до 20% денег"),
+    "llm_agy_nomem": ("LLM каждый час", "Gemini без памяти",
+                      "Близнец «Gemini через Antigravity», но в письме нет её прошлых прогнозов и ошибок. Сравнение двух показывает, "
+                      "учится ли LLM на своих ошибках. Шансы и правила ставок те же"),
     "llm_mix": ("LLM каждый час", "LLM + LightGBM — смесь",
                 "Шансы Gemini этого часа и утренний прогноз LightGBM v3 поровну; ставит по тем же правилам, что LLM. Своих запросов к LLM нет — $0"),
     "obs": ("Живые замеры", "По живым замерам станции", "Ставка против варианта, который станция уже исключила"),
@@ -914,8 +917,8 @@ def spark(rows, start=100.0, w=160, h=44):
 
 
 LLM_WALLETS = ("llm_gem", "llm_ds")   # LLM со своими запросами — вкладки страницы
-LLM_BET_WALLETS = (*LLM_WALLETS, "llm_mix", "llm_cal", "llm_agy", "llm_agy_bet")   # 10.10: llm_agy_bet — ставку решает сама LLM; 09.10: llm_agy — Gemini через Antigravity CLI, только число   # 08.10: llm_cal — Gemini 35% + рынок 65%, перевес от 10 п.п.   # 06.10: и смесь Gemini + LightGBM (weather_llm_hour.MIX_WALLET) — карточки, ставки, деньги
-LLM_LIMIT = {"llm_gem": 13.5, "llm_ds": 4.0, "llm_mix": 0.0, "llm_cal": 0.0, "llm_agy": 0.0, "llm_agy_bet": 0.0}   # как weather_llm_hour.MONTH_LIMIT; у смеси своих запросов нет
+LLM_BET_WALLETS = (*LLM_WALLETS, "llm_mix", "llm_cal", "llm_agy", "llm_agy_bet", "llm_agy_nomem")   # 10.10: llm_agy_nomem — близнец без памяти; llm_agy_bet — ставку решает сама LLM; 09.10: llm_agy — Gemini через Antigravity CLI, только число   # 08.10: llm_cal — Gemini 35% + рынок 65%, перевес от 10 п.п.   # 06.10: и смесь Gemini + LightGBM (weather_llm_hour.MIX_WALLET) — карточки, ставки, деньги
+LLM_LIMIT = {"llm_gem": 13.5, "llm_ds": 4.0, "llm_mix": 0.0, "llm_cal": 0.0, "llm_agy": 0.0, "llm_agy_bet": 0.0, "llm_agy_nomem": 0.0}   # как weather_llm_hour.MONTH_LIMIT; у смеси своих запросов нет
 
 
 def _smooth(pts):
@@ -1010,7 +1013,7 @@ def _llm_range(lab):
 LLM_V2_FROM = "2026-10-06T09:45:00+00:00"   # как weather_llm_hour.V2_FROM: с этого запуска — обучение v2 (LightGBM, ошибки, деньги, поправка шансов)
 LLM_KEY_LIMIT = 19.95  # всего внесено на OpenRouter: 08.10 баланс $16.70 после пополнения на $10 + потрачено $3.25 (было $10)
 LLM_CITIES = ("chicago", "atlanta", "austin", "miami", "dallas", "london")   # как weather_llm_hour.CITIES (Лондон с 04.10)
-LLM_MODEL_NAME = {"llm_gem": "Gemini 3.8 Flash", "llm_ds": "DeepSeek V4 Pro", "llm_mix": "Смесь Gemini + LightGBM", "llm_cal": "Gemini + рынок", "llm_agy": "Gemini через Antigravity", "llm_agy_bet": "Gemini ставит сама"}
+LLM_MODEL_NAME = {"llm_gem": "Gemini 3.8 Flash", "llm_ds": "DeepSeek V4 Pro", "llm_mix": "Смесь Gemini + LightGBM", "llm_cal": "Gemini + рынок", "llm_agy": "Gemini через Antigravity", "llm_agy_bet": "Gemini ставит сама", "llm_agy_nomem": "Gemini без памяти"}
 
 
 def _llm_fact_hourly(conn, city, day):

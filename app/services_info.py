@@ -61,7 +61,7 @@ SERVICES = [
         {"name": "OpenRouter", "site": "https://openrouter.ai", "what": "LLM-прогноз каждый час: Gemini (llm_gem) и DeepSeek (llm_ds)",
          "apis": ["openrouter.ai/api/v1/chat/completions"], "mode": "live", "key": "OPENROUTER_API_KEY", "price": "по расходу — см. подписки",
          "scripts": "weather_llm_hour"},
-        {"name": "Antigravity CLI (agy, Google)", "site": "https://antigravity.google", "what": "с 09.10 кошельки llm_agy (Gemini 3.8 Flash Medium каждый час, ответ — только число) и с 10.10 llm_agy_bet (ставку решает сама); agy стоит на сервере, письма через data/agy",
+        {"name": "Antigravity CLI (agy, Google)", "site": "https://antigravity.google", "what": "с 09.10 кошельки llm_agy (Gemini 3.8 Flash Medium каждый час, ответ — только число) с 10.10 llm_agy_bet (ставку решает сама) и llm_agy_nomem (без памяти); agy стоит на сервере, письма через data/agy",
          "apis": ["agy -p (на сервере, вход по аккаунту Google)"], "mode": "live", "key": None,
          "price": "бесплатно — лимит аккаунта Google (5 часов / неделя), общий с работой Alex в Antigravity", "scripts": "weather_llm_hour + agy_runner.py (крон сервера)"},
         {"name": "Ollama (свой сервер в сети)", "site": None, "what": "локальная Qwen3 для разбора прогнозных обсуждений — исследования",

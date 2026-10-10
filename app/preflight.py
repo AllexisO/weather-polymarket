@@ -71,7 +71,7 @@ def run_checks():
 
     # 2в. у каждого кошелька есть полное описание логики (wallet_docs.py, страница кошелька)
     from wallet_docs import WALLET_DOCS
-    nodoc = sorted((set(wallets) | {"copy", "obs", "obs_fmi", "obs_fast", "obs_rt", "obs_wethr", "llm_gem", "llm_ds", "llm_mix", "llm_cal", "llm_agy", "llm_agy_bet", "ml_day"}) - set(WALLET_DOCS))
+    nodoc = sorted((set(wallets) | {"copy", "obs", "obs_fmi", "obs_fast", "obs_rt", "obs_wethr", "llm_gem", "llm_ds", "llm_mix", "llm_cal", "llm_agy", "llm_agy_bet", "llm_agy_nomem", "ml_day"}) - set(WALLET_DOCS))
     res.append((not nodoc, "у каждого кошелька есть описание логики", ", ".join(nodoc) or f"{len(WALLET_DOCS)} описаний"))
 
     # 2г. 03.10: группа каждого кошелька есть в списке групп /paper — иначе кошелёк молча не виден на странице
