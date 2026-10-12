@@ -144,7 +144,7 @@ def main():
     worst = sorted(week, key=lambda d: score(d)["ll_b"] - score(d)["ll_m"], reverse=True)[:10]
     for d in worst:
         s = score(d)
-        print(f"  {d['date']} {d['city']:14s} итог {d['win']:g}: смесь {s['pb'] * 100:4.1f}%, рынок {s['pm'] * 100:4.1f}%, "
+        print(f"  {d['date']} {d['city']:14s} итог {'нижний вариант' if d['win'] <= -900 else format(d['win'], 'g')}: смесь {s['pb'] * 100:4.1f}%, рынок {s['pm'] * 100:4.1f}%, "
               f"середина v3 {'выше' if s['miss_r'] > 0 else 'ниже' if s['miss_r'] < 0 else 'в точку'}"
               + (f" на {abs(s['miss_r'])} вар." if s["miss_r"] else ""))
     v5_section(wk0.isoformat(), end.isoformat())

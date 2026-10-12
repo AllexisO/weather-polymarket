@@ -2943,6 +2943,118 @@ async def api_stream(request: Request):
 
 
 # ---- заметки с датой (2026-09-28, просьба Alex: «до 12 октября я всё забуду») — notes.py ----
+def _gb(b):
+    return "—" if b is None else (f"{b / 1e9:.2f} ГБ" if b >= 1e9 else f"{b / 1e6:.0f} МБ" if b >= 1e6 else f"{b / 1e3:.0f} КБ")
+
+
+def _bars_svg(points, fmt, color="#A3E39A", line=None, line_color="#D3DDFB", w=640, h=230):
+    """Столбцы по дням (points: [(подпись, значение, подсказка)]) и, если есть, линия line: [значение | None] той же длины."""
+    if not points:
+        return None
+    vals = [v for _, v, _ in points] + [v for v in (line or []) if v is not None]
+    top = max(vals) or 1
+    step = _nice_step(top)
+    y1 = step * (-(-top * 1.08 // step))
+    L, R, T, B = 64, 12, 12, 28
+    pw, ph = w - L - R, h - T - B
+    n = len(points)
+    bw = pw / n
+    Y = lambda v: T + ph * (1 - v / y1)
+    parts = [f'<svg viewBox="0 0 {w} {h}" class="bkchart" role="img">']
+    k = 0.0
+    while k <= y1 + 1e-9:
+        parts.append(f'<line x1="{L}" x2="{w - R}" y1="{Y(k):.1f}" y2="{Y(k):.1f}" class="g"/>'
+                     f'<text x="{L - 8}" y="{Y(k) + 4:.1f}" class="ax" text-anchor="end">{fmt(k)}</text>')
+        k += step
+    for i, (lab, v, tip) in enumerate(points):
+        x = L + i * bw + bw * 0.18
+        parts.append(f'<rect x="{x:.1f}" y="{Y(v):.1f}" width="{bw * 0.64:.1f}" height="{max(0.5, Y(0) - Y(v)):.1f}" rx="3" '
+                     f'fill="{color}"><title>{tip}</title></rect>')
+        if n <= 16 or i % max(1, n // 12) == 0:
+            parts.append(f'<text x="{L + (i + 0.5) * bw:.1f}" y="{h - 8}" class="ax" text-anchor="middle">{lab}</text>')
+    if line and any(v is not None for v in line):
+        pts = [(L + (i + 0.5) * bw, Y(v)) for i, v in enumerate(line) if v is not None]
+        parts.append('<polyline fill="none" stroke="%s" stroke-width="2" points="%s"/>' % (line_color, " ".join(f"{x:.1f},{y:.1f}" for x, y in pts)))
+        parts += [f'<circle cx="{x:.1f}" cy="{y:.1f}" r="3" fill="{line_color}"/>' for x, y in pts]
+    parts.append("</svg>")
+    return "".join(parts)
+
+
+def backup_page_data():
+    """11.10 (просьба Alex): всё о резервных копиях — из data/backup_history.jsonl и data/backup_inventory.json (их пишет
+    backup_report.py на сервере после каждой копии: сайт диска копий не видит) + backup_status.json + размеры баз сейчас."""
+    data = DB_PATH.parent.parent
+    hist = []
+    try:
+        hist = [json.loads(x) for x in (data / "backup_history.jsonl").read_text().splitlines() if x.strip()]
+    except (OSError, ValueError):
+        pass
+    try:
+        inv = json.loads((data / "backup_inventory.json").read_text())
+    except (OSError, ValueError):
+        inv = None
+    try:
+        last = json.loads((data / "backup_status.json").read_text())
+    except (OSError, ValueError):
+        last = None
+    now = datetime.now(VIEWER_TZ)
+    out = {"hist": list(reversed(hist)), "inv": inv, "last": last, "gb": _gb}
+    if last:
+        at = datetime.fromisoformat(last["at"]).astimezone(VIEWER_TZ)
+        nxt = now.replace(hour=3, minute=10, second=0, microsecond=0)
+        if nxt <= now:
+            nxt += timedelta(days=1)
+        age_h = (now - at).total_seconds() / 3600
+        out["state"] = {"at": at, "age_h": age_h, "ok": last["status"] == "ok" and age_h < 26, "next": nxt,
+                        "next_in_h": (nxt - now).total_seconds() / 3600}
+    lab = lambda r: f"{r['dir'][8:10]}.{r['dir'][5:7]}"
+    if hist:
+        src = [sum(f["src_bytes"] for f in r["files"]) if r["files"] and all(f.get("src_bytes") for f in r["files"]) else None for r in hist]
+        out["chart_size"] = _bars_svg([(lab(r), r["bytes"] / 1e6, f"{lab(r)}: копия {_gb(r['bytes'])}") for r in hist],
+                                      lambda v: f"{v:.0f} МБ", line=[s / 1e6 if s else None for s in src])
+        out["chart_time"] = _bars_svg([(lab(r), r["took_s"], f"{lab(r)}: {r['took_s']} с") for r in hist], lambda v: f"{v:.0f} с",
+                                      color="#FFD58A")
+        out["has_src_line"] = any(src)
+        grow = [(b["bytes"] - a["bytes"]) for a, b in zip(hist, hist[1:]) if a["status"] == "ok" and b["status"] == "ok"]
+        out["growth_day"] = sum(grow[-7:]) / len(grow[-7:]) if grow else None
+        out["n_ok"] = sum(r["status"] == "ok" for r in hist)
+        out["first"] = hist[0]["dir"]
+        lastf = next((r for r in reversed(hist) if r["files"]), None)
+        if lastf:
+            mx = max(max(f.get("src_bytes") or 0, f["zst_bytes"]) for f in lastf["files"]) or 1
+            out["files"] = [dict(f, src_pct=100 * (f.get("src_bytes") or 0) / mx, zst_pct=100 * f["zst_bytes"] / mx,
+                                 ratio=(f["src_bytes"] / f["zst_bytes"]) if f.get("src_bytes") and f["zst_bytes"] else None)
+                            for f in sorted(lastf["files"], key=lambda f: -(f.get("src_bytes") or f["zst_bytes"]))]
+            out["files_dir"] = lastf["dir"]
+    if inv:
+        today = now.date()
+        for c in inv["copies"]:
+            d = date.fromisoformat(c["date"])
+            age = (today - d).days
+            sunday = c["weekday"] == 7
+            c["kind"] = "воскресная (4 недели)" if sunday and age >= 6 else "ежедневная (7 дней)"
+            c["until"] = d + timedelta(days=inv["keep"]["weeks"] * 7 if sunday else inv["keep"]["days"])
+            c["age"] = age
+            c["has_env"] = any(f["name"] == "env.backup" for f in c["files"])
+        inv["copies"].sort(key=lambda c: c["date"], reverse=True)
+        dk = inv["disk"]
+        dk["pct"] = 100 * dk["used"] / dk["total"] if dk["total"] else 0
+        kept = sum(c["bytes"] for c in inv["copies"])
+        out["kept_bytes"] = kept
+        if out.get("growth_day") is not None and hist:
+            # при хранении 7 дней + 4 воскресенья на диске ~11 копий; сколько дней до заполнения при нынешнем росте
+            per = hist[-1]["bytes"]
+            g = max(out["growth_day"], 1)
+            out["days_left"] = int(dk["free"] / (11 * g)) if g > 0 else None
+            out["copies_fit"] = int(dk["free"] / per) if per else None
+    return out
+
+
+@app.get("/backup", response_class=HTMLResponse)
+def backup_page(request: Request):
+    return TEMPLATES.TemplateResponse("backup.html", {"request": request, **backup_page_data()})
+
+
 @app.get("/services", response_class=HTMLResponse)
 def services_page(request: Request):
     """05.10 (просьба Alex): все внешние сервисы и подписки — список в services_info.py; расход OpenRouter — живой из базы."""

@@ -1,0 +1,212 @@
+{% extends "base.html" %}
+{% block title %}Бэкап — weather-lab{% endblock %}
+{% block content %}
+{#
+  2026-10-11 (просьба Alex): всё о резервных копиях — последняя копия, графики размера и времени, диск копий, что хранится,
+  что в копию не входит, история запусков, как восстановить. Данные — backup_page_data() (dashboard.py): data/backup_history.jsonl
+  и data/backup_inventory.json пишет backup_report.py на сервере после каждой копии (backup_db.sh, 03:10).
+  Разметка простая — оформление можно доводить по GEMINI.md.
+#}
+<style>
+  body:has(.bk) .main-col { background: #0A0A0B; }
+  body:has(.bk) main { max-width: 1040px; }
+  .bk {
+    --bk-card: #1C1C1E; --bk-raise: #262628; --bk-line: #2E2E31; --bk-text: #F4F4F5; --bk-muted: #A1A1AA; --bk-faint: #71717A;
+    --bk-accent: #FFD58A; --bk-accent-bg: rgba(255, 213, 138, .14); --bk-pos: #A3E39A; --bk-pos-bg: rgba(163, 227, 154, .13);
+    --bk-neg: #F4A77F; --bk-neg-bg: rgba(244, 167, 127, .13); --bk-lav: #D3DDFB; --bk-lav-bg: rgba(211, 221, 251, .12);
+    --bk-font: "Onest", -apple-system, "Segoe UI", Roboto, sans-serif;
+    color: var(--bk-text); font-family: var(--bk-font); font-size: 15px; line-height: 1.55;
+  }
+  .bk code { font: 12.5px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--bk-muted); background: var(--bk-raise); border-radius: 6px; padding: 1px 6px; word-break: break-all; }
+  .top { margin-bottom: 22px; }
+  .top h1 { margin: 0; font-size: 26px; font-weight: 700; letter-spacing: -.02em; }
+  .top p { margin: 4px 0 0; color: var(--bk-muted); font-size: 14px; max-width: 760px; }
+  .sec { margin: 0 0 28px; }
+  .sec h2 { margin: 0 0 12px; font-size: 18px; font-weight: 600; }
+  .sec .hint { margin: -6px 0 12px; color: var(--bk-muted); font-size: 13.5px; }
+  .card { background: var(--bk-card); border: 1px solid var(--bk-line); border-radius: 16px; padding: 16px 18px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr)); gap: 10px; }
+  .kpi .lb { font-size: 12.5px; color: var(--bk-muted); }
+  .kpi .v { font-size: 24px; font-weight: 700; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+  .kpi .s { font-size: 13px; color: var(--bk-muted); }
+  .state { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; margin-bottom: 10px; }
+  .state.ok { border-color: rgba(163, 227, 154, .45); }
+  .state.bad { border-color: rgba(244, 167, 127, .6); }
+  .pill { display: inline-block; font-size: 12px; font-weight: 600; padding: 2px 10px; border-radius: 999px; white-space: nowrap; }
+  .pill.ok { color: var(--bk-pos); background: var(--bk-pos-bg); }
+  .pill.bad { color: var(--bk-neg); background: var(--bk-neg-bg); }
+  .pill.lav { color: var(--bk-lav); background: var(--bk-lav-bg); }
+  .pill.acc { color: var(--bk-accent); background: var(--bk-accent-bg); }
+  .bar { height: 8px; border-radius: 99px; background: var(--bk-raise); overflow: hidden; margin: 8px 0 4px; }
+  .bar span { display: block; height: 100%; background: var(--bk-pos); border-radius: 99px; }
+  .charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr)); gap: 10px; }
+  .bkchart { width: 100%; height: auto; display: block; }
+  .bkchart .g { stroke: var(--bk-line); stroke-width: 1; }
+  .bkchart .ax { fill: var(--bk-faint); font-size: 11px; font-family: var(--bk-font); }
+  .legend { display: flex; gap: 14px; font-size: 12.5px; color: var(--bk-muted); margin-top: 6px; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+  table.t { width: 100%; border-collapse: collapse; font-size: 14px; }
+  table.t th { text-align: left; font-size: 12px; font-weight: 600; color: var(--bk-faint); text-transform: uppercase; letter-spacing: .04em; padding: 8px 10px; border-bottom: 1px solid var(--bk-line); }
+  table.t td { padding: 9px 10px; border-bottom: 1px solid var(--bk-line); vertical-align: top; }
+  table.t tr:last-child td { border-bottom: 0; }
+  table.t td.n { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .tw { overflow-x: auto; }
+  .fb { display: grid; grid-template-columns: minmax(130px, 200px) 1fr minmax(150px, 210px); gap: 4px 14px; align-items: center; padding: 7px 0; font-size: 14px; }
+  .fb + .fb { border-top: 1px solid var(--bk-line); }
+  .fb .bars span { display: block; height: 7px; border-radius: 99px; margin: 3px 0; }
+  .fb .bars .src { background: var(--bk-lav); opacity: .55; }
+  .fb .bars .zst { background: var(--bk-pos); }
+  .fb .nums { font-size: 12.5px; color: var(--bk-muted); font-variant-numeric: tabular-nums; }
+  .warnrow td { background: rgba(244, 167, 127, .06); }
+  .steps { margin: 0; padding-left: 20px; font-size: 14px; }
+  .steps li { margin: 6px 0; }
+  .muted { color: var(--bk-muted); }
+  @media (max-width: 700px) { .fb { grid-template-columns: 1fr; } }
+</style>
+{% set inv = inv %}
+<div class="bk">
+  <div class="top">
+    <h1>Бэкап</h1>
+    <p>Резервная копия всех баз проекта каждую ночь в 03:10 на другой физический диск (HDD, пул personal_data): целостная копия
+      на один момент, проверка копии, сжатие. Здесь — последняя копия, как меняются размер и время, место на диске, что
+      хранится и что в копию не входит.</p>
+  </div>
+
+  <section class="sec">
+    {% if state %}
+    <div class="card state {{ 'ok' if state.ok else 'bad' }}">
+      <span class="pill {{ 'ok' if state.ok else 'bad' }}">{{ 'копия в порядке' if state.ok else ('копия с ошибкой' if last.status != 'ok' else 'копия устарела') }}</span>
+      <span>последняя: <b>{{ state.at.strftime('%d.%m %H:%M') }}</b> <span class="muted">({{ '%.0f' | format(state.age_h) }} ч назад)</span></span>
+      <span>размер <b>{{ gb(last.size_bytes) }}</b></span>
+      <span>заняла <b>{{ last.took_s }} с</b></span>
+      <span class="muted">следующая — {{ state.next.strftime('%d.%m %H:%M') }} (через {{ '%.0f' | format(state.next_in_h) }} ч)</span>
+      {% if last.msg %}<div style="flex-basis:100%;color:var(--bk-neg)">{{ last.msg }}</div>{% endif %}
+    </div>
+    {% else %}
+    <div class="card state bad"><span class="pill bad">копий ещё не было</span> <span class="muted">backup_db.sh не запускался</span></div>
+    {% endif %}
+    <div class="grid">
+      <div class="card kpi"><div class="lb">Копий хранится</div><div class="v">{{ inv.copies | length if inv else '—' }}</div>
+        <div class="s">{{ gb(kept_bytes) if kept_bytes is defined else '' }} на диске · 7 дней + воскресенья за 4 недели</div></div>
+      <div class="card kpi"><div class="lb">Запусков в истории</div><div class="v">{{ hist | length }}</div>
+        <div class="s">{{ n_ok if n_ok is defined else 0 }} без ошибок{% if first is defined %} · с {{ first[8:10] }}.{{ first[5:7] }}{% endif %}</div></div>
+      <div class="card kpi"><div class="lb">Копия растёт в день</div><div class="v">{{ ('+' ~ gb(growth_day)) if growth_day is defined and growth_day is not none else '—' }}</div>
+        <div class="s">среднее за последние 7 копий</div></div>
+      {% if inv %}{% set dk = inv.disk %}
+      <div class="card kpi"><div class="lb">Диск копий</div><div class="v">{{ gb(dk.free) }} <span style="font-size:14px;font-weight:500;color:var(--bk-muted)">свободно</span></div>
+        <div class="bar"><span style="width:{{ '%.1f' | format(dk.pct) }}%"></span></div>
+        <div class="s">занято {{ '%.0f' | format(dk.pct) }}% из {{ gb(dk.total) }}{% if days_left is defined and days_left %} · при нынешнем росте хватит ≈ {{ days_left }} дн.{% endif %}</div></div>
+      {% endif %}
+    </div>
+  </section>
+
+  {% if chart_size %}
+  <section class="sec">
+    <h2>По дням</h2>
+    <div class="charts">
+      <div class="card">
+        <div class="kpi"><div class="lb">Размер копии (сжато)</div></div>
+        {{ chart_size | safe }}
+        <div class="legend"><span><i style="background:#A3E39A"></i>копия на диске</span>{% if has_src_line %}<span><i style="background:#D3DDFB"></i>базы до сжатия</span>{% endif %}</div>
+      </div>
+      <div class="card">
+        <div class="kpi"><div class="lb">Сколько длилась копия</div></div>
+        {{ chart_time | safe }}
+        <div class="legend"><span><i style="background:#FFD58A"></i>секунд на всю копию (копия, проверка, сжатие)</span></div>
+      </div>
+    </div>
+  </section>
+  {% endif %}
+
+  {% if files %}
+  <section class="sec">
+    <h2>Что внутри последней копии</h2>
+    <p class="hint">Копия {{ files_dir[8:10] }}.{{ files_dir[5:7] }}: каждая база отдельно — размер до и после сжатия и проверка целостности копии (PRAGMA quick_check).</p>
+    <div class="card">
+      {% for f in files %}
+      <div class="fb">
+        <div><b>{{ f.name }}</b> {% if f.check == 'ok' %}<span class="pill ok">проверена</span>{% elif f.check %}<span class="pill bad">{{ f.check }}</span>{% endif %}</div>
+        <div class="bars">{% if f.src_bytes %}<span class="src" style="width:{{ '%.1f' | format(f.src_pct) }}%"></span>{% endif %}<span class="zst" style="width:{{ '%.1f' | format([f.zst_pct, 0.5] | max) }}%"></span></div>
+        <div class="nums">{% if f.src_bytes %}{{ gb(f.src_bytes) }} → {% endif %}<b style="color:var(--bk-text)">{{ gb(f.zst_bytes) }}</b>{% if f.ratio %} · сжато в {{ '%.1f' | format(f.ratio) }} раза{% endif %}</div>
+      </div>
+      {% endfor %}
+      <div class="legend"><span><i style="background:#D3DDFB;opacity:.55"></i>база</span><span><i style="background:#A3E39A"></i>в копии</span></div>
+    </div>
+  </section>
+  {% endif %}
+
+  {% if inv %}
+  <section class="sec">
+    <h2>Хранимые копии</h2>
+    <p class="hint">Папка на сервере: <code>{{ inv.dest }}</code>. В каждой — все базы (.zst), служебные файлы и ключи API (<code>env.backup</code>, читать может только владелец).</p>
+    <div class="card tw">
+      <table class="t">
+        <tr><th>Дата</th><th>Вид</th><th>Размер</th><th>Файлов</th><th>Ключи</th><th>Удалится</th></tr>
+        {% for c in inv.copies %}
+        <tr>
+          <td class="n"><b>{{ c.date[8:10] }}.{{ c.date[5:7] }}</b> <span class="muted">{{ ['', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'][c.weekday] }}</span></td>
+          <td><span class="pill {{ 'lav' if 'воскрес' in c.kind else 'ok' }}">{{ c.kind }}</span></td>
+          <td class="n">{{ gb(c.bytes) }}</td>
+          <td class="n">{{ c.files | length }}</td>
+          <td>{{ 'есть' if c.has_env else '—' }}</td>
+          <td class="n">{{ c.until.strftime('%d.%m') }}</td>
+        </tr>
+        {% endfor %}
+      </table>
+    </div>
+  </section>
+
+  <section class="sec">
+    <h2>Что в копию не входит</h2>
+    <p class="hint">Всё, что восстанавливается из другого места. Решение, что ещё копировать, — за Alex.</p>
+    <div class="card tw">
+      <table class="t">
+        <tr><th>Папка</th><th>Размер</th><th>Почему не копируем</th></tr>
+        {% for x in inv.not_in %}
+        <tr class="{{ 'warnrow' if 'неоткуда' in x.why else '' }}">
+          <td><code>{{ x.path }}</code></td><td class="n">{{ gb(x.bytes) }}</td>
+          <td>{{ x.why }}{% if 'неоткуда' in x.why %} <span class="pill bad">не восстановить</span>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </table>
+    </div>
+  </section>
+  {% endif %}
+
+  {% if hist %}
+  <section class="sec">
+    <h2>История запусков</h2>
+    <div class="card tw">
+      <table class="t">
+        <tr><th>Когда</th><th>Итог</th><th>Длилась</th><th>Размер</th><th>Баз</th><th>Сообщение</th></tr>
+        {% for r in hist %}
+        <tr>
+          <td class="n">{{ r.at[8:10] }}.{{ r.at[5:7] }} {{ r.at[11:16] }}</td>
+          <td><span class="pill {{ 'ok' if r.status == 'ok' else 'bad' }}">{{ 'в порядке' if r.status == 'ok' else 'ошибка' }}</span></td>
+          <td class="n">{{ r.took_s }} с</td>
+          <td class="n">{{ gb(r.bytes) }}</td>
+          <td class="n">{{ r.files | length if r.files else '—' }}</td>
+          <td class="muted">{{ r.msg or ('восстановлено из журнала' if r.restored_from_log else '') }}</td>
+        </tr>
+        {% endfor %}
+      </table>
+    </div>
+  </section>
+  {% endif %}
+
+  <section class="sec">
+    <h2>Как восстановить</h2>
+    <div class="card">
+      <ol class="steps">
+        <li>Остановить крон проекта (закомментировать строки weather-lab в <code>crontab -e</code>) и сайт: <code>sudo docker compose stop</code>.</li>
+        <li>Выбрать папку копии (таблица выше) и распаковать нужную базу:
+          <code>zstd -d "&lt;папка&gt;/polymarket_lab.sqlite3.zst" -o data/db/polymarket_lab.sqlite3</code> (так же остальные .zst; стаканы — <code>books.sqlite3.zst</code> → <code>data/books/books.sqlite3</code>).</li>
+        <li>Исследования (скрипты и итоги): <code>zstd -dc "&lt;папка&gt;/research.tar.zst" | tar -C data -xf -</code>.</li>
+        <li>Ключи API, если пропал <code>.env</code>: <code>cp "&lt;папка&gt;/env.backup" .env</code>.</li>
+        <li>Проверить базу: <code>sqlite3 data/db/polymarket_lab.sqlite3 "PRAGMA quick_check"</code> → <code>ok</code>; запустить <code>./check.sh</code>.</li>
+        <li>Вернуть крон и сайт: <code>sudo docker compose up -d</code>. Код — из GitHub, модели переобучатся ночью.</li>
+      </ol>
+    </div>
+  </section>
+</div>
+{% endblock %}

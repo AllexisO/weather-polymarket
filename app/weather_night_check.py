@@ -437,6 +437,28 @@ def check_backup(now):
         "" if ok else "посмотреть data/logs/backup_db.log; запустить ./backup_db.sh вручную")
 
 
+def check_logic(c, now):
+    """11.10 (просьба Alex: «проверки 2 раза в неделю, чтобы заранее выявить несоответствие»): итог weather_logic_check.py
+    (пн и чт 09:00) — его проблемы и «внимание» здесь, в группе «Логика»; не запускалась больше 5 дней — тоже проблема."""
+    try:
+        r = c.execute("SELECT run_at, details FROM logic_check ORDER BY run_at DESC LIMIT 1").fetchone()
+    except sqlite3.Error:
+        r = None
+    if r is None:
+        add("Логика", "warn", "Проверка логики (пн и чт) ещё не запускалась", "", "weather_logic_check.py")
+        return
+    age = (now - datetime.fromisoformat(r[0])).total_seconds() / 86400
+    if age > 5:
+        add("Логика", False, "Проверка логики давно не запускалась", f"последняя {age:.0f} дн. назад", "проверить крон weather_logic_check.py")
+    checks = json.loads(r[1])["checks"]
+    rest = [x for x in checks if x["level"] != "ok"]
+    for x in rest:
+        add("Логика", x["level"] == "warn" and "warn", x["title"], x["detail"], x["fix"])
+    if not rest:
+        add("Логика", True, "Проверка логики (пн и чт): всё сходится",
+            f"{len(checks)} проверок, {datetime.fromisoformat(r[0]).astimezone(ZoneInfo("Europe/Chisinau")):%d.%m %H:%M}")
+
+
 def check_notes(mode):
     """2026-09-28 (просьба Alex): заметки с датой (notes.py, страница /notes) — утром и днём напомнить, что сегодня
     по заметкам есть дело; вечером — что будет завтра."""
@@ -469,7 +491,7 @@ def main():
     c = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=30)
     extra = {"morning": [(check_night_done, (c, now))], "midday": [(check_decisions, (c, now))]}.get(mode, [])
     for fn, args in extra + [(check_cron, (c, now)), (check_db, (c,)), (check_models, (c, now)), (check_misc, (c, now)),
-                             (check_bots, (c, now)), (check_stuck_bets, (c, now)), (check_fastobs, (now,)), (check_netatmo, (now,)), (check_backup, (now,))]:
+                             (check_bots, (c, now)), (check_stuck_bets, (c, now)), (check_logic, (c, now)), (check_fastobs, (now,)), (check_netatmo, (now,)), (check_backup, (now,))]:
         with item_guard(fn.__name__):
             fn(*args)
     c.close()

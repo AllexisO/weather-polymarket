@@ -243,7 +243,7 @@ $100 на кошелёк (`ml`, `mm_mk` и `mm` (с 01.10) — $300, `copy` — 
 | `db_watchdog.sh` | крон */2 | база занята >6 мин → останавливает зависшие скрипты, при необходимости перезапускает copier/dashboard, пишет `data/ALERT_DB_LOCKED` |
 | `preflight.py` / `./check.sh` | каждые 30 мин / после изменений | сборка скриптов, колонки, прогон всех кошельков в памяти, страницы |
 | `weather_alerts.py` | крон */30 | сбои крона, упавшие проверки, потеря >$50/сутки |
-| `backup_db.sh` | 03:10 (с 02.10, решение Alex) | все базы data/db → `/mnt/personal_data/Backups/Projects/Weather Polymarket/ГГГГ-ММ-ДД/` (HDD): VACUUM INTO (без блокировки записи), quick_check, zstd (7.2 ГБ → ~1 ГБ, ~2 мин); 7 дней + воскресенья 4 недели; итог — `data/backup_status.json`, проверяет night_check |
+| `backup_db.sh` | 03:10 (с 02.10, решение Alex) | все базы data/db, с 11.10 и стаканы `data/books` + архив `research.tar.zst` (скрипты и итоги исследований, без research.sqlite3) → `/mnt/personal_data/Backups/Projects/Weather Polymarket/ГГГГ-ММ-ДД/` (HDD): VACUUM INTO (без блокировки записи), quick_check, zstd (7.2 ГБ → ~1 ГБ, ~2 мин); 7 дней + воскресенья 4 недели; итог — `data/backup_status.json`, проверяет night_check; с 11.10 `backup_report.py` (Python сервера) пишет `data/backup_history.jsonl` (каждый запуск, по каждой базе размер до/после сжатия и quick_check) и `data/backup_inventory.json` (папки копий, диск, что не входит) — страница `/backup` |
 
 Исследования — только на копии `data/research/research.sqlite3`, иначе крон ловит «database is locked».
 
@@ -279,6 +279,8 @@ weather-lab/
 ├── check.sh               обязательная проверка после изменений
 ├── db_watchdog.sh         сторож базы
 └── backup_db.sh           резервная копия (крон 03:10)
+├── backup_report.py       история и опись копий для /backup (вызывает backup_db.sh)
+├── app/weather_logic_check.py  проверка логики против итогов Polymarket (пн и чт 09:00, итог — группа «Логика» на /audit)
 ```
 
 Скрипты `weather_study_*.py`, `*_backtest.py`, `weather_ml_variants.py`, `weather_ml_realfill.py` и т. п. —

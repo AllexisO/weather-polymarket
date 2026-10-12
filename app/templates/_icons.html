@@ -70,6 +70,10 @@
 <path d="M9 3v4M15 3v4"/><path d="M6.5 7h11v4a5.5 5.5 0 0 1-11 0z"/><path d="M12 16.5V21"/>
 {%- endmacro %}
 
+{% macro database() -%}
+<ellipse cx="12" cy="5.5" rx="7" ry="2.5"/><path d="M5 5.5v13c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5v-13"/><path d="M5 12c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5"/>
+{%- endmacro %}
+
 {% macro notes_icon() -%}
 <rect x="5" y="4" width="14" height="17" rx="2"/><line x1="9" y1="2.5" x2="9" y2="5.5"/><line x1="15" y1="2.5" x2="15" y2="5.5"/><line x1="8.5" y1="11" x2="15.5" y2="11"/><line x1="8.5" y1="15" x2="13" y2="15"/>
 {%- endmacro %}
@@ -102,6 +106,7 @@
 {%- elif name == 'close' %}{{ x_icon() }}
 {%- elif name == 'notes' %}{{ notes_icon() }}
 {%- elif name == 'plug' %}{{ plug() }}
+{%- elif name == 'database' %}{{ database() }}
 {%- endif %}
 </svg>
 {%- endmacro %}

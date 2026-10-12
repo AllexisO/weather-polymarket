@@ -16,10 +16,12 @@ KEEP_WEEKS=4
 DAY=$(date +%F)
 OUT="$DEST/$DAY"
 mkdir -p "$OUT"
+rm -f "$OUT/.files.tsv"
 t0=$(date +%s)
 status=ok
 msg=""
-for f in data/db/*.sqlite3; do
+# 11.10 (решение Alex): + стаканы бота-мейкера data/books — восстановить больше неоткуда
+for f in data/db/*.sqlite3 data/books/*.sqlite3; do
   n=$(basename "$f")
   tmp="$OUT/$n"
   rm -f "$tmp" "$tmp.zst"
@@ -28,9 +30,16 @@ for f in data/db/*.sqlite3; do
   fi
   qc=$(sqlite3 "$tmp" "PRAGMA quick_check" 2>&1 | head -1)
   if [ "$qc" != "ok" ]; then status=fail; msg+="$n: проверка копии — $qc; "; fi
+  src_b=$(stat -c %s "$f")
   if ! zstd -q -T0 -10 --rm "$tmp" -o "$tmp.zst"; then status=fail; msg+="$n: сжатие не удалось; "; fi
+  # 11.10: по каждой базе — для страницы /backup (backup_report.py)
+  printf '%s\t%s\t%s\t%s\n' "$n" "$src_b" "$(stat -c %s "$tmp.zst" 2>/dev/null || echo 0)" "$qc" >> "$OUT/.files.tsv"
 done
 cp data/db/*.json "$OUT/" 2>/dev/null
+# 11.10 (решение Alex): скрипты и итоги исследований (не в GitHub); без копии базы для исследований и тестовой duckdb
+if tar -C data -cf - --exclude='research/research.sqlite3*' --exclude='research/bench/c.duckdb' research | zstd -q -T0 -10 -o "$OUT/research.tar.zst" -f; then
+  printf '%s\t%s\t%s\t%s\n' "research.tar" "$(du -sb --exclude='research.sqlite3*' --exclude='c.duckdb' data/research | cut -f1)" "$(stat -c %s "$OUT/research.tar.zst")" "ok" >> "$OUT/.files.tsv"
+else status=fail; msg+="research: архив не создан; "; fi
 # 02.10 (Alex: «если SSD умрёт, все ключи пропадут»): ключи API — тоже в копию, читать может только владелец
 install -m 600 .env "$OUT/env.backup" || { status=fail; msg+=".env: не скопирован; "; }
 chmod 700 "$OUT" "$DEST"
@@ -47,5 +56,7 @@ size=$(du -sb "$OUT" | cut -f1)
 took=$(( $(date +%s) - t0 ))
 printf '{"at": "%s", "status": "%s", "msg": "%s", "dir": "%s", "size_bytes": %s, "took_s": %s}\n' \
   "$(date -Iseconds)" "$status" "$msg" "$OUT" "$size" "$took" > data/backup_status.json
+# 11.10: история и опись копий для страницы /backup (сайт диска копий не видит)
+python3 "$(pwd)/backup_report.py" "$OUT" "$status" "$took" "$msg" || echo "отчёт для /backup не записан"
 echo "$(date '+%F %T') копия $status за ${took} с, $(du -sh "$OUT" | cut -f1) — $OUT ${msg}"
 [ "$status" = ok ]

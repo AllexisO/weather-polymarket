@@ -30,6 +30,7 @@ JOBS = [
     ("weather_night_check", "Проверки утро / день / вечер", "weather_night_check.py", "07:00, 13:00, 23:30", 11 * 60, "weather_night_check.log"),
     ("weather_pws_live", "Народные станции США (CWOP, сбор)", "weather_pws_live.py", "каждый час 11:00-19:00", 26 * 60, "weather_pws_live.log"),
     ("weather_alerts", "Проверки и тревоги", "weather_alerts.py", "каждые 30 мин", 70, "weather_alerts.log"),
+    ("weather_logic_check", "Проверка логики — правила против итогов Polymarket (пн и чт)", "weather_logic_check.py", "пн и чт 09:00", 6000, "weather_logic_check.log"),
     ("weather_fastobs", "Быстрые замеры (Synoptic, JMA, DWD, FMI) + кошелёк obs_fast", "weather_fastobs.py", "каждую минуту", 5, "weather_fastobs.log"),
     ("weather_ml_day", "Дневная модель — решения в 10/12/14 местного (кошелёк ml_day)", "weather_ml_day.py", "каждый час в :06", 75, "weather_ml_day.log"),
     ("weather_ml_day_train", "Дневная модель — обучение и экзамен", "weather_ml_day.py --train", "05:45", 26 * 60, "weather_ml_day_train.log"),
