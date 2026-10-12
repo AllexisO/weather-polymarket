@@ -40,7 +40,7 @@ SERVICES = [
          "apis": ["wethr.net REST + поток событий (SSE)"], "mode": "live", "key": "WETHR_API_KEY", "price": "$24.99/мес — см. подписки",
          "scripts": "weather_obs_wethr"},
         {"name": "Synoptic Data", "site": "https://synopticdata.com", "what": "5-минутные замеры аэропортов США — кошелёк obs_fast",
-         "apis": ["api.synopticdata.com/v2/stations/latest"], "mode": "live", "key": "SYNOPTIC_TOKEN, SYNOPTIC_KEY", "price": "пробный доступ — см. подписки",
+         "apis": ["api.synopticdata.com/v2/stations/latest"], "mode": "live", "key": "SYNOPTIC_TOKEN, SYNOPTIC_KEY", "price": "выключен 12.10 (решение Alex)",
          "scripts": "weather_fastobs"},
         {"name": "Национальные службы", "site": None, "what": "быстрые замеры вне США: Финляндия (FMI), Япония (JMA), Германия (DWD), Нидерланды (KNMI), Гонконг (HKO)",
          "apis": ["opendata.fmi.fi", "jma.go.jp", "opendata.dwd.de", "api.dataplatform.knmi.nl", "data.weather.gov.hk"],
@@ -106,6 +106,8 @@ SUBSCRIPTIONS = [
      "checked": "2026-10-10"},
     {"name": "Synoptic Data", "plan": "пробный доступ", "price": "$0", "per": "", "monthly": 0.0, "status": "trial",
      "since": "2026-09-30", "ends": None, "ends_label": "дата окончания неизвестна",
-     "note": "Работает (05.10). Когда закончится — obs_fast останется без замеров США; платный тариф — решение Alex.",
-     "checked": "2026-10-05"},
+     "note": "Не продлеваем (решение Alex 12.10): народные станции модели не помогли (PRD §10), obs_fast в США в минусе. "
+             "Выключен 12.10, не дожидаясь конца пробного доступа: obs_fast в США больше не ставит "
+             "(США — obs_rt / obs_wethr по сводкам).",
+     "checked": "2026-10-12"},
 ]

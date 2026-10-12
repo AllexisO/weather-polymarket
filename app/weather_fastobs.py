@@ -8,7 +8,7 @@ Polymarket считает максимум дня по сводкам METAR, а 
 (°C — до целого; °F — из °C), и если такой максимум уже выше варианта — ставим против варианта, как кошелёк obs
 (weather_obs_live.bet_dead_buckets: только если рынок ещё платит за него ≥ 5¢, по живому стакану, $2).
 Источники (бесплатно или пробный доступ):
-  synoptic — аэропорты США, замер каждые 5 мин, задержка ~6 мин (пробный токен SYNOPTIC_TOKEN в .env, до ~13.10);
+  synoptic — аэропорты США, замер каждые 5 мин, задержка ~6 мин (пробный токен SYNOPTIC_TOKEN в .env; выключен 12.10, решение Alex);
   jma      — Токио, Ханэда (AMeDAS 44166), каждые 10 мин;
   dwd      — Мюнхен, аэропорт (станция 01262, 10-минутные данные open data);
   fmi      — Хельсинки-Вантаа (как obs_fmi).
@@ -154,6 +154,10 @@ WINDOW_BY_SOURCE = {"knmi": 5}
 # JMA 0 из 10 — даёт то же, что сводка). Пример: KNMI 19.5 в 22:30Z → «уже 20», а METAR 22:25/22:55 — 19.
 # Градус считаем достигнутым, только если замер выше границы на ROUND_MARGIN (20 — от 19.7).
 ROUND_MARGIN = {"knmi": 0.2, "fmi": 0.2, "dwd": 0.2}
+# 12.10 (решение Alex): KNMI только пишем, ставок по нему нет. 10-мин среднее KNMI против METAR EHAM в те же минуты —
+# разброс ±0.4°: запас 0.2 — ложное «уже достигнуто» 1 день из 13 (10.10: KNMI 15.2, METAR 14 весь день, −$3.85),
+# запас 0.7 — ложных нет, но KNMI ни разу не раньше METAR. Амстердам: 3 выигрыша +$1.61, 1 проигрыш −$3.85.
+NO_BET_SOURCES = {"knmi"}
 
 
 def knmi(db):
@@ -215,7 +219,9 @@ def main():
         mins = {}
     readings = []
     main_conn = sqlite3.connect(MAIN_DB, timeout=60)
-    for name, fn in (("synoptic", synoptic), ("jma", jma), ("dwd", dwd), ("fmi", fmi), ("hko", hko), ("metar", metar_extra),
+    # 12.10 (решение Alex): Synoptic выключен — пробный доступ не продлеваем; obs_fast в США больше не ставит
+    # (США — кошельки obs_rt / obs_wethr по сводкам). Функция synoptic() оставлена для истории.
+    for name, fn in (("jma", jma), ("dwd", dwd), ("fmi", fmi), ("hko", hko), ("metar", metar_extra),
                      ("knmi", lambda: knmi(db))):
         with item_guard(f"источник {name}", main_conn):
             readings += patient(name, fn)
@@ -226,7 +232,7 @@ def main():
     best = {}
     for s, c, t, v in readings:
         cfg = OBS_CITIES.get(c)
-        if not cfg:
+        if not cfg or s in NO_BET_SOURCES or cfg["unit"] == "fahrenheit":   # 12.10 (решение Alex): США в obs_fast не ставим
             continue
         # 11.10 (аудит): запись HKO ровно в 00:00 — ещё максимум ПРОШЛОГО дня (05.10 31.2 → «06.10 уже 31.2», ставки против
         # 28-30°C проиграли); относим её к прошлому дню — минута назад

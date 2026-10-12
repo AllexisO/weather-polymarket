@@ -92,7 +92,7 @@ def check_sources(c, since, out):
         f = sqlite3.connect(f"file:{FAST_DB}?mode=ro", uri=True, timeout=30)
         for s, city, t, v in f.execute("SELECT source, city, obs_utc, temp_c FROM fast_obs WHERE obs_utc >= ?", (since,)):
             cfg = OBS_CITIES.get(city)
-            if not cfg or s == "wethr_hf":   # 5-мин wethr ставок не дают (только отчёт о форе)
+            if not cfg or s == "wethr_hf" or s in fo.NO_BET_SOURCES:   # 5-мин wethr и KNMI (с 12.10) ставок не дают
                 continue
             t = datetime.fromisoformat(t)
             if s == "hko":

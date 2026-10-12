@@ -389,14 +389,14 @@ def check_fastobs(now):
     if fo is None:
         add("Быстрые замеры", "warn", "База быстрых замеров не найдена", "data/db/fastobs.sqlite3")
         return
-    for src, hours, label in (("synoptic", 2, "Synoptic (США)"), ("jma", 2, "JMA (Токио)"), ("knmi", 2, "KNMI (Амстердам)"),
+    for src, hours, label in (("jma", 2, "JMA (Токио)"), ("knmi", 2, "KNMI (Амстердам)"),
                               ("fmi", 2, "FMI (Хельсинки)"), ("hko", 2, "HKO (Гонконг)"), ("metar", 3, "METAR Тайбэя"), ("dwd", 3, "DWD (Мюнхен)"),
                               ("wethr_hf", 2, "wethr 5-мин замеры (США, кошелёк obs_wethr)")):
         last = fo.execute("SELECT MAX(first_seen_utc) FROM fast_obs WHERE source = ?", (src,)).fetchone()[0]
         ok = last is not None and datetime.fromisoformat(last) > now - timedelta(hours=hours)
         add("Быстрые замеры", True if ok else "warn", f"{label} присылает замеры",
             f"последний новый — {datetime.fromisoformat(last).astimezone(timezone.utc):%d.%m %H:%M} UTC" if last else "замеров нет",
-            "" if ok else f"источник молчит больше {hours} ч — посмотреть data/logs/weather_fastobs.log (пробный Synoptic до ~13.10)")
+            "" if ok else f"источник молчит больше {hours} ч — посмотреть data/logs/weather_fastobs.log")
     fo.close()
 
 
