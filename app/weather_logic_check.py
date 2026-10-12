@@ -63,15 +63,18 @@ def outcomes(c, since):
 
 
 def check_obs_losses(c, since):
-    """Только ставки, сделанные после прошлой проверки (старые уже разобраны) — иначе исправленное висело бы проблемой."""
+    """Только проигрыши, ставшие известны после прошлой проверки (старые уже разобраны) — иначе исправленное висело бы
+    проблемой; ставки — после исправления правил (FIXED_FROM). 12.10: отбирали по времени ставки — ставка 10:04, итог
+    23:08, а проверка шла в 23:02: проигрыш obs_fast Амстердам 10.10 не попал ни в один запуск. Теперь — по времени итога."""
     try:
         prev = c.execute("SELECT MAX(run_at) FROM logic_check").fetchone()[0]
     except sqlite3.Error:
         prev = None
     frm = max(prev or "", FIXED_FROM)
     rows = c.execute("""SELECT wallet, city, local_date, bucket_hi, obs_max FROM paper_obs_trades
-                        WHERE status = 'lost' AND local_date >= ? AND placed_at >= ? ORDER BY local_date""", (since, frm)).fetchall()
-    add("Логика", True if not rows else False, f"Ставки «наверняка» не проигрывают (кошельки замеров, ставки с {frm[8:10]}.{frm[5:7]})",
+                        WHERE status = 'lost' AND local_date >= ? AND placed_at >= ? AND settled_at >= ?
+                        ORDER BY local_date""", (since, FIXED_FROM, prev or "")).fetchall()
+    add("Логика", True if not rows else False, f"Ставки «наверняка» не проигрывают (кошельки замеров, итоги с {frm[8:10]}.{frm[5:7]})",
         short(f"{w} {ci} {d[8:]}.{d[5:7]}: замер {mx}, вариант до {hi}" for w, ci, d, hi, mx in rows) if rows else "проигрышей нет",
         "" if not rows else "правила замеров расходятся с итогом Polymarket — разобрать город и источник (округление, станция, полночь)")
 
