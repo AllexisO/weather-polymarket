@@ -210,7 +210,7 @@ if __name__ == "__main__":
                 won = (b == x["win"]) if side == "yes" else (b != x["win"])
                 per = "август" if d < "2026-09-01" else "сентябрь-октябрь"
                 a = res.setdefault(per, {"n": 0, "won": 0, "pnl": 0.0, "st": 0.0, "h": {}})
-                a["n"] += 1; a["won"] += won; a["pnl"] += base.pnl(fp - 0.01, won, base.STAKE); a["st"] += base.STAKE
+                a["n"] += 1; a["won"] += won; a["pnl"] += base.pnl(fp, won, base.STAKE); a["st"] += base.STAKE   # 12.10: было fp − 0.01 — pnl сам прибавляет 1¢, проскальзывания не было (оптимистично на 1¢)
                 a["h"][x["hour"]] = a["h"].get(x["hour"], 0) + 1
             break   # одна попытка на город в день — в первый час с перевесом
     print("\nДЕНЬГИ по настоящим сделкам (смесь, перевес ≥ 3 п.п., $2, одна ставка на город в день):", flush=True)
