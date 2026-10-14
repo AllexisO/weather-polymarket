@@ -1040,15 +1040,22 @@ def _city_tz(city):
 
 
 def _llm_clock(city):
-    """04.10 (просьба Alex): местное время города и работает ли LLM (запросы в :05 с 08 до 19 местного, weather_llm_hour.HOURS; до 06.10 — с 05)."""
+    """04.10 (просьба Alex): местное время города и работает ли LLM. 14.10 (заметка #49): запросы в :56 часом раньше
+    (сразу после сводки METAR), первый час дня — в 08:05 (после утреннего прогноза v3), последний — в 18:56 (weather_llm_hour.slot)."""
     from weather_cities import OBS_CITIES
     now = datetime.now(ZoneInfo(OBS_CITIES[city]["tz"]))
-    on = 8 <= now.hour < 20
-    if on:
-        nxt = now.replace(minute=5, second=0) + (timedelta(hours=1) if now.minute >= 5 else timedelta(0))
-        state = f"работает, следующий прогноз в {nxt:%H:%M}" if nxt.hour < 20 else "последний прогноз дня был в 19:05"
-    else:
+    first = now.replace(hour=8, minute=5, second=0, microsecond=0)
+    last = now.replace(hour=18, minute=56, second=0, microsecond=0)
+    on = first <= now <= last
+    if now < first:
         state = "спит, первый прогноз в 08:05"
+    elif now >= last:
+        state = "последний прогноз дня был в 18:56"
+    else:
+        nxt = now.replace(minute=56, second=0, microsecond=0)
+        if nxt <= now:
+            nxt += timedelta(hours=1)
+        state = f"работает, следующий прогноз в {nxt:%H:%M}"
     return {"time": f"{now:%H:%M}", "on": on, "state": state, "tz": now.strftime("%Z")}
 
 
@@ -1095,7 +1102,7 @@ def llm_page_data(conn, key, city, day):
     out["unit"] = u
     today = [p for p in preds if p["local_date"] == day]
     # 05.10 (решение Alex): за день — только две линии. Факт — все часы; LLM — в каждом часу её прогноз на этот час, сделанный
-    # в :05 предыдущего часа (точка появляется заранее, факт догоняет). Только часы, когда LLM работала.
+    # в предыдущий час запроса (с 14.10 — в :56 за 4 мин до часа, раньше в :05; точка появляется заранее, факт догоняет). Только часы, когда LLM работала.
     by_hour = {p["local_hour"]: p for p in today}
     llm_h = {}
     for h in range(24):
@@ -1186,7 +1193,8 @@ def llm_page_data(conn, key, city, day):
     last = preds[-1]
     probs = json.loads(last["probs_json"] or "{}") or {}
     mk = json.loads(last["market_json"] or "{}")
-    out["last"] = {"when": f"{last['local_date'][8:10]}.{last['local_date'][5:7]} {last['local_hour']:02d}:05 местного", "prompt": last["prompt"], "reflection": last["reflection"],
+    lt = datetime.fromisoformat(last["ts_utc"]).astimezone(ZoneInfo(_city_tz(city)))   # 14.10: настоящее время запроса (:56 или :05)
+    out["last"] = {"when": f"{lt:%d.%m %H:%M} местного", "prompt": last["prompt"], "reflection": last["reflection"],
                    "pred": last["pred_max"], "seen": last["max_so_far"], "reason": last["reason"], "lesson": last["lesson"], "cost": last["cost"],
                    "hourly": sorted((json.loads(last["hourly_json"]) if last["hourly_json"] else {}).items()),
                    "probs": [(lab, p, mk.get(lab)) for lab, p in probs.items() if p >= 0.01 or (mk.get(lab) or 0) >= 0.01]}

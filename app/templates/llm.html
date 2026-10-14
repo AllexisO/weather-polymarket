@@ -127,7 +127,7 @@
   <div class="tabs">{% for c, ru, ck in cities %}<a href="/llm?w={{ key }}&city={{ c }}" class="{{ 'on' if c == city }}" title="{{ ck.state }}">{{ ru }}
     <span class="num" style="margin-left: 6px; color: {{ 'var(--bk-pos)' if ck.on else 'var(--bk-faint)' }};">{{ ck.time }}</span></a>{% endfor %}</div>
   {% set ck = (cities | selectattr(0, 'equalto', city) | first)[2] %}
-  <p class="foot" style="margin: -6px 0 14px;">Сейчас в городе {{ ck.time }} ({{ ck.tz }}) — LLM {{ ck.state }}. Работает с 08:05 до 19:05 по местному времени, раз в час; зелёное время — работает, серое — спит.</p>
+  <p class="foot" style="margin: -6px 0 14px;">Сейчас в городе {{ ck.time }} ({{ ck.tz }}) — LLM {{ ck.state }}. Работает с 08:05 до 18:56 по местному времени, раз в час (с 14.10 — в :56, сразу после сводки аэропорта); зелёное время — работает, серое — спит.</p>
 
   {% if not day %}
   <div class="pane"><p style="margin: 0;">По этому городу у {{ model }} ещё нет прогнозов.</p></div>
@@ -144,7 +144,7 @@
       <span class="aside">{% for dd in days[-7:] %}<a href="/llm?w={{ key }}&city={{ city }}&d={{ dd }}" style="margin-left: 8px;{% if dd == day %} color: var(--bk-text); font-weight: 600;{% endif %}">{{ dd[8:10] }}.{{ dd[5:7] }}</a>{% endfor %}</span></div>
     <div class="pane chart tight">
       <div class="muted" style="font-size: 13.5px; margin-bottom: 6px;"><span class="key s-real"></span>факт — температура в аэропорту за сегодня
-        <span class="key s-model" style="margin-left: 14px;"></span>LLM — её прогноз на этот час (точка появляется в :05 часом раньше, факт догоняет)</div>
+        <span class="key s-model" style="margin-left: 14px;"></span>LLM — её прогноз на этот час (точка появляется часом раньше, факт догоняет)</div>
       {% if day_chart %}{{ lines(day_chart, "Температура по часам: факт и прогноз LLM") }}{% else %}<div class="empty">Мало точек для графика.</div>{% endif %}
       {% if day_rows %}
       {# 05.10 (просьба Alex): вместо таблицы — лента из 24 плиток: час, факт крупно, LLM, плашка ошибки #}
@@ -256,7 +256,7 @@
   <section class="sec">
     <div class="sec-head"><h2>Как учится: что мы ей дали и что она поняла</h2></div>
     <div class="steps" style="margin-bottom: 14px;">
-      <div><b>1. Разбор прошлого часа</b>Каждый час в :05 она видит, что предсказала на прошлый час и что было по факту, и пишет, где ошиблась и почему.</div>
+      <div><b>1. Разбор прошлого часа (выключен 13.10)</b>Каждый час она видела, что предсказала на прошлый час и что было по факту, и пишет, где ошиблась и почему.</div>
       <div><b>2. Тетрадь</b>Свои выводы она записывает правилами про эту станцию (до 12). Тетрадь переходит из часа в час и из дня в день — это её память.</div>
       <div><b>3. Прогноз</b>С тетрадью, замерами, положением солнца, облаками, ветром и прогнозами моделей — температура на каждый оставшийся час и максимум дня.</div>
       <div><b>4. Ставка</b>Если шанс варианта по её прогнозу выше цены на 5 п.п. — $2. Учится — значит ошибка «на час вперёд» от дня к дню падает.</div>
