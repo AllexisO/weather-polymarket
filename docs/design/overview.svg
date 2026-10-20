@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="340" viewBox="0 0 960 340" font-family="Inter, Segoe UI, Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#111827"/></marker>
+    <marker id="g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#6b7280"/></marker>
+    <filter id="s" x="-10%" y="-10%" width="120%" height="130%"><feDropShadow dx="0" dy="1" stdDeviation="1.5" flood-opacity="0.08"/></filter>
+  </defs>
+  <rect x="0.5" y="0.5" width="959" height="339" rx="10" fill="#ffffff" stroke="#e5e7eb"/>
+
+  <g filter="url(#s)"><rect x="28" y="128" width="160" height="84" rx="10" fill="#fdf2f8" stroke="#fbcfe8"/></g>
+  <text x="44" y="162" font-size="22">👤</text>
+  <text x="76" y="162" font-size="13" font-weight="600" fill="#111827">Браузер</text>
+  <text x="44" y="192" font-size="10.5" fill="#6b7280">компьютер / телефон</text>
+  <text x="44" y="205" font-size="10.5" fill="#6b7280">тёмная тема, одна</text>
+
+  <line x1="190" y1="170" x2="238" y2="170" stroke="#111827" stroke-width="1.5" marker-end="url(#a)"/>
+
+  <g filter="url(#s)"><rect x="240" y="128" width="160" height="84" rx="10" fill="#eff6ff" stroke="#bfdbfe"/></g>
+  <text x="256" y="162" font-size="22">🖥️</text>
+  <text x="290" y="162" font-size="13" font-weight="600" fill="#111827">base.html</text>
+  <text x="256" y="192" font-size="10.5" fill="#6b7280">каркас, меню, иконки</text>
+  <text x="256" y="205" font-size="10.5" fill="#6b7280">шрифт Onest</text>
+
+  <path d="M330,126 C360,60 470,60 500,126" fill="none" stroke="#6b7280" stroke-width="1.3" stroke-dasharray="4 4" marker-end="url(#g)"/>
+  <text x="415" y="44" text-anchor="middle" font-size="11" fill="#374151">запрос страницы</text>
+  <text x="415" y="58" text-anchor="middle" font-size="10" fill="#9ca3af">FastAPI · Jinja2</text>
+  <path d="M500,214 C470,280 360,280 330,214" fill="none" stroke="#6b7280" stroke-width="1.3" stroke-dasharray="4 4" marker-end="url(#g)"/>
+  <text x="415" y="292" text-anchor="middle" font-size="11" fill="#374151">живое обновление /api/stream</text>
+  <text x="415" y="306" text-anchor="middle" font-size="10" fill="#9ca3af">точечно меняет &lt;main&gt; (morph)</text>
+
+  <line x1="402" y1="170" x2="448" y2="170" stroke="#111827" stroke-width="1.5" marker-end="url(#a)"/>
+
+  <g filter="url(#s)"><rect x="450" y="128" width="180" height="84" rx="10" fill="#ecfdf5" stroke="#a7f3d0"/></g>
+  <text x="466" y="162" font-size="22">🗂️</text>
+  <text x="500" y="162" font-size="13" font-weight="600" fill="#111827">Страница .bk</text>
+  <text x="466" y="192" font-size="10.5" fill="#6b7280">app/templates/&lt;имя&gt;.html</text>
+  <text x="466" y="205" font-size="10.5" fill="#6b7280">данные — dashboard.py</text>
+
+  <line x1="632" y1="170" x2="668" y2="170" stroke="#111827" stroke-width="1.5"/>
+  <line x1="668" y1="52" x2="668" y2="290" stroke="#111827" stroke-width="1.5"/>
+  <line x1="668" y1="52" x2="708" y2="52" stroke="#111827" stroke-width="1.5" marker-end="url(#a)"/>
+  <line x1="668" y1="131" x2="708" y2="131" stroke="#111827" stroke-width="1.5" marker-end="url(#a)"/>
+  <line x1="668" y1="210" x2="708" y2="210" stroke="#111827" stroke-width="1.5" marker-end="url(#a)"/>
+  <line x1="668" y1="290" x2="708" y2="290" stroke="#111827" stroke-width="1.5" marker-end="url(#a)"/>
+
+  <g filter="url(#s)">
+    <rect x="710" y="26" width="222" height="52" rx="10" fill="#ffffff" stroke="#e5e7eb"/>
+    <rect x="710" y="105" width="222" height="52" rx="10" fill="#ffffff" stroke="#e5e7eb"/>
+    <rect x="710" y="184" width="222" height="52" rx="10" fill="#ffffff" stroke="#e5e7eb"/>
+    <rect x="710" y="264" width="222" height="52" rx="10" fill="#ffffff" stroke="#e5e7eb"/>
+  </g>
+  <rect x="722" y="38" width="28" height="28" rx="7" fill="#fefce8"/><text x="726" y="58" font-size="16">🎨</text>
+  <text x="760" y="49" font-size="12" font-weight="600" fill="#111827">Цвета</text>
+  <text x="760" y="65" font-size="10.5" fill="#6b7280">только из переменных</text>
+  <rect x="722" y="117" width="28" height="28" rx="7" fill="#eef2ff"/><text x="726" y="137" font-size="16">🧩</text>
+  <text x="760" y="128" font-size="12" font-weight="600" fill="#111827">Компоненты</text>
+  <text x="760" y="144" font-size="10.5" fill="#6b7280">.pane, .tiles, .chip, .segbar…</text>
+  <rect x="722" y="196" width="28" height="28" rx="7" fill="#fff7ed"/><text x="726" y="216" font-size="16">📈</text>
+  <text x="760" y="207" font-size="12" font-weight="600" fill="#111827">Графики</text>
+  <text x="760" y="223" font-size="10.5" fill="#6b7280">SVG с сервера, без JS</text>
+  <rect x="722" y="276" width="28" height="28" rx="7" fill="#ecfdf5"/><text x="726" y="296" font-size="16">✨</text>
+  <text x="760" y="287" font-size="12" font-weight="600" fill="#111827">Иконки и логотип</text>
+  <text x="760" y="303" font-size="10.5" fill="#6b7280">_icons.html · app/static/</text>
+</svg>

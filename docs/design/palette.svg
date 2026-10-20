@@ -1,0 +1,107 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="496" viewBox="0 0 960 496" font-family="Inter, Segoe UI, Helvetica, Arial, sans-serif">
+<rect x="0.5" y="0.5" width="959" height="495" rx="10" fill="#0A0A0B" stroke="#2E2E31"/>
+<text x="24" y="34" font-size="12" font-weight="600" fill="#A1A1AA">ФОНЫ</text>
+<rect x="24" y="44" width="176" height="84" rx="10" fill="#1C1C1E" stroke="#2E2E31"/>
+<rect x="34" y="54" width="36" height="36" rx="8" fill="#0A0A0B" stroke="#3A3A3E"/>
+<text x="80" y="69" font-size="12" font-weight="600" fill="#F4F4F5">--bg</text>
+<text x="80" y="85" font-size="11" fill="#FFD58A" font-family="ui-monospace, Menlo, Consolas, monospace">#0A0A0B</text>
+<text x="34" y="114" font-size="11" fill="#A1A1AA">страница</text>
+<rect x="212" y="44" width="176" height="84" rx="10" fill="#1C1C1E" stroke="#2E2E31"/>
+<rect x="222" y="54" width="36" height="36" rx="8" fill="#111113" stroke="#3A3A3E"/>
+<text x="268" y="69" font-size="12" font-weight="600" fill="#F4F4F5">--bg-raised</text>
+<text x="268" y="85" font-size="11" fill="#FFD58A" font-family="ui-monospace, Menlo, Consolas, monospace">#111113</text>
+<text x="222" y="114" font-size="11" fill="#A1A1AA">меню, шапка</text>
+<rect x="400" y="44" width="176" height="84" rx="10" fill="#1C1C1E" stroke="#2E2E31"/>
+<rect x="410" y="54" width="36" height="36" rx="8" fill="#1C1C1E" stroke="#3A3A3E"/>
+<text x="456" y="69" font-size="12" font-weight="600" fill="#F4F4F5">--panel</text>
+<text x="456" y="85" font-size="11" fill="#FFD58A" font-family="ui-monospace, Menlo, Consolas, monospace">#1C1C1E</text>
+<text x="410" y="114" font-size="11" fill="#A1A1AA">карточки</text>
+<rect x="588" y="44" width="176" height="84" rx="10" fill="#1C1C1E" stroke="#2E2E31"/>
+<rect x="598" y="54" width="36" height="36" rx="8" fill="#262628" stroke="#3A3A3E"/>
+<text x="644" y="69" font-size="12" font-weight="600" fill="#F4F4F5">--track</text>
+<text x="644" y="85" font-size="11" fill="#FFD58A" font-family="ui-monospace, Menlo, Consolas, monospace">#262628</text>
+<text x="598" y="114" font-size="11" fill="#A1A1AA">дорожки, code</text>
+<rect x="776" y="44" width="176" height="84" rx="10" fill="#1C1C1E" stroke="#2E2E31"/>
+<rect x="786" y="54" width="36" height="36" rx="8" fill="#0B0C0E" stroke="#3A3A3E"/>
+<text x="832" y="69" font-size="12" font-weight="600" fill="#F4F4F5">терминал</text>
+<text x="832" y="85" font-size="11" fill="#FFD58A" font-family="ui-monospace, Menlo, Consolas, monospace">#0B0C0E</text>
+<text x="786" y="114" font-size="11" fill="#A1A1AA">/skill</text>
+<text x="24" y="152" font-size="12" font-weight="600" fill="#A1A1AA">ЛИНИИ И ТЕКСТ</text>
+<rect x="24" y="162" width="176" height="84" rx="10" fill="#1C1C1E" stroke="#2E2E31"/>
+<rect x="34" y="172" width="36" height="36" rx="8" fill="#2E2E31" stroke="#3A3A3E"/>
+<text x="80" y="187" font-size="12" font-weight="600" fill="#F4F4F5">--border</text>
+<text x="80" y="203" font-size="11" fill="#FFD58A" font-family="ui-monospace, Menlo, Consolas, monospace">#2E2E31</text>
+<text x="34" y="232" font-size="11" fill="#A1A1AA">рамки</text>
+<rect x="212" y="162" width="176" height="84" rx="10" fill="#1C1C1E" stroke="#2E2E31"/>
+<rect x="222" y="172" width="36" height="36" rx="8" fill="#242427" stroke="#3A3A3E"/>
+<text x="268" y="187" font-size="12" font-weight="600" fill="#F4F4F5">--border-soft</text>
+<text x="268" y="203" font-size="11" fill="#FFD58A" font-family="ui-monospace, Menlo, Consolas, monospace">#242427</text>
+<text x="222" y="232" font-size="11" fill="#A1A1AA">линии таблиц</text>
+<rect x="400" y="162" width="176" height="84" rx="10" fill="#1C1C1E" stroke="#2E2E31"/>
+<rect x="410" y="172" width="36" height="36" rx="8" fill="#F4F4F5" stroke="#3A3A3E"/>
+<text x="456" y="187" font-size="12" font-weight="600" fill="#F4F4F5">--text</text>
+<text x="456" y="203" font-size="11" fill="#FFD58A" font-family="ui-monospace, Menlo, Consolas, monospace">#F4F4F5</text>
+<text x="410" y="232" font-size="11" fill="#A1A1AA">текст</text>
+<rect x="588" y="162" width="176" height="84" rx="10" fill="#1C1C1E" stroke="#2E2E31"/>
+<rect x="598" y="172" width="36" height="36" rx="8" fill="#A1A1AA" stroke="#3A3A3E"/>
+<text x="644" y="187" font-size="12" font-weight="600" fill="#F4F4F5">--muted</text>
+<text x="644" y="203" font-size="11" fill="#FFD58A" font-family="ui-monospace, Menlo, Consolas, monospace">#A1A1AA</text>
+<text x="598" y="232" font-size="11" fill="#A1A1AA">подписи</text>
+<rect x="776" y="162" width="176" height="84" rx="10" fill="#1C1C1E" stroke="#2E2E31"/>
+<rect x="786" y="172" width="36" height="36" rx="8" fill="#71717A" stroke="#3A3A3E"/>
+<text x="832" y="187" font-size="12" font-weight="600" fill="#F4F4F5">--bk-faint</text>
+<text x="832" y="203" font-size="11" fill="#FFD58A" font-family="ui-monospace, Menlo, Consolas, monospace">#71717A</text>
+<text x="786" y="232" font-size="11" fill="#A1A1AA">второстепенное</text>
+<text x="24" y="270" font-size="12" font-weight="600" fill="#A1A1AA">СМЫСЛ</text>
+<rect x="24" y="280" width="176" height="84" rx="10" fill="#1C1C1E" stroke="#2E2E31"/>
+<rect x="34" y="290" width="36" height="36" rx="8" fill="#FFD58A" stroke="#3A3A3E"/>
+<text x="80" y="305" font-size="12" font-weight="600" fill="#F4F4F5">--accent</text>
+<text x="80" y="321" font-size="11" fill="#FFD58A" font-family="ui-monospace, Menlo, Consolas, monospace">#FFD58A</text>
+<text x="34" y="350" font-size="11" fill="#A1A1AA">акцент, модель</text>
+<rect x="212" y="280" width="176" height="84" rx="10" fill="#1C1C1E" stroke="#2E2E31"/>
+<rect x="222" y="290" width="36" height="36" rx="8" fill="#FFE3AE" stroke="#3A3A3E"/>
+<text x="268" y="305" font-size="12" font-weight="600" fill="#F4F4F5">--accent-strong</text>
+<text x="268" y="321" font-size="11" fill="#FFD58A" font-family="ui-monospace, Menlo, Consolas, monospace">#FFE3AE</text>
+<text x="222" y="350" font-size="11" fill="#A1A1AA">ссылки при наведении</text>
+<rect x="400" y="280" width="176" height="84" rx="10" fill="#1C1C1E" stroke="#2E2E31"/>
+<rect x="410" y="290" width="36" height="36" rx="8" fill="#A3E39A" stroke="#3A3A3E"/>
+<text x="456" y="305" font-size="12" font-weight="600" fill="#F4F4F5">--pos</text>
+<text x="456" y="321" font-size="11" fill="#FFD58A" font-family="ui-monospace, Menlo, Consolas, monospace">#A3E39A</text>
+<text x="410" y="350" font-size="11" fill="#A1A1AA">плюс, факт</text>
+<rect x="588" y="280" width="176" height="84" rx="10" fill="#1C1C1E" stroke="#2E2E31"/>
+<rect x="598" y="290" width="36" height="36" rx="8" fill="#F4A77F" stroke="#3A3A3E"/>
+<text x="644" y="305" font-size="12" font-weight="600" fill="#F4F4F5">--neg</text>
+<text x="644" y="321" font-size="11" fill="#FFD58A" font-family="ui-monospace, Menlo, Consolas, monospace">#F4A77F</text>
+<text x="598" y="350" font-size="11" fill="#A1A1AA">минус, сбой</text>
+<rect x="776" y="280" width="176" height="84" rx="10" fill="#1C1C1E" stroke="#2E2E31"/>
+<rect x="786" y="290" width="36" height="36" rx="8" fill="#D3DDFB" stroke="#3A3A3E"/>
+<text x="832" y="305" font-size="12" font-weight="600" fill="#F4F4F5">рынок</text>
+<text x="832" y="321" font-size="11" fill="#FFD58A" font-family="ui-monospace, Menlo, Consolas, monospace">#D3DDFB</text>
+<text x="786" y="350" font-size="11" fill="#A1A1AA">лавандовый</text>
+<text x="24" y="388" font-size="12" font-weight="600" fill="#A1A1AA">ПЛИТКИ И КНОПКА</text>
+<rect x="24" y="398" width="176" height="84" rx="10" fill="#1C1C1E" stroke="#2E2E31"/>
+<rect x="34" y="408" width="36" height="36" rx="8" fill="#C7F4E2" stroke="#3A3A3E"/>
+<text x="80" y="423" font-size="12" font-weight="600" fill="#F4F4F5">мята</text>
+<text x="80" y="439" font-size="11" fill="#FFD58A" font-family="ui-monospace, Menlo, Consolas, monospace">#C7F4E2</text>
+<text x="34" y="468" font-size="11" fill="#A1A1AA">плитка t3</text>
+<rect x="212" y="398" width="176" height="84" rx="10" fill="#1C1C1E" stroke="#2E2E31"/>
+<rect x="222" y="408" width="36" height="36" rx="8" fill="#1F7A3A" stroke="#3A3A3E"/>
+<text x="268" y="423" font-size="12" font-weight="600" fill="#F4F4F5">плюс на плитке</text>
+<text x="268" y="439" font-size="11" fill="#FFD58A" font-family="ui-monospace, Menlo, Consolas, monospace">#1F7A3A</text>
+<text x="222" y="468" font-size="11" fill="#A1A1AA">тёмный текст</text>
+<rect x="400" y="398" width="176" height="84" rx="10" fill="#1C1C1E" stroke="#2E2E31"/>
+<rect x="410" y="408" width="36" height="36" rx="8" fill="#A8331A" stroke="#3A3A3E"/>
+<text x="456" y="423" font-size="12" font-weight="600" fill="#F4F4F5">минус на плитке</text>
+<text x="456" y="439" font-size="11" fill="#FFD58A" font-family="ui-monospace, Menlo, Consolas, monospace">#A8331A</text>
+<text x="410" y="468" font-size="11" fill="#A1A1AA">тёмный текст</text>
+<rect x="588" y="398" width="176" height="84" rx="10" fill="#1C1C1E" stroke="#2E2E31"/>
+<rect x="598" y="408" width="36" height="36" rx="8" fill="#FFFFFF" stroke="#3A3A3E"/>
+<text x="644" y="423" font-size="12" font-weight="600" fill="#F4F4F5">.open-btn</text>
+<text x="644" y="439" font-size="11" fill="#FFD58A" font-family="ui-monospace, Menlo, Consolas, monospace">#FFFFFF</text>
+<text x="598" y="468" font-size="11" fill="#A1A1AA">главная кнопка</text>
+<rect x="776" y="398" width="176" height="84" rx="10" fill="#1C1C1E" stroke="#2E2E31"/>
+<rect x="786" y="408" width="36" height="36" rx="8" fill="#1E3E62" stroke="#3A3A3E"/>
+<text x="832" y="423" font-size="12" font-weight="600" fill="#F4F4F5">градиент feat</text>
+<text x="832" y="439" font-size="11" fill="#FFD58A" font-family="ui-monospace, Menlo, Consolas, monospace">#1E3E62</text>
+<text x="786" y="468" font-size="11" fill="#A1A1AA">→ #0B192C</text>
+</svg>
