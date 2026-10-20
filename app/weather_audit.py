@@ -33,8 +33,11 @@ from weather_cities import OBS_CITIES
 
 DB_PATH = Path(os.environ.get("POLY_LAB_DB", Path(__file__).parent.parent / "data" / "db" / "polymarket_lab.sqlite3"))
 MODEL_COLS = [("model_p", "Основная формула (GFS+ICON)"), ("emos_model_p", "EMOS"), ("mm_model_p", "Микс 16 моделей"),
-              ("ml_model_p", "v1"), ("ml2_model_p", "v2"), ("ml3_model_p", "v3 — главная"), ("ml3c_model_p", "v3 + рынок"),
+              ("ml_model_p", "v1"), ("ml2_model_p", "v2"), ("ml3_model_p", "v3"), ("ml3c_model_p", "v3 + рынок"),
               ("ml4_model_p", "v4"), ("ml4c_model_p", "v4 + рынок"), ("ml4e_model_p", "v4e"), ("ml4ec_model_p", "v4e + рынок")]
+
+
+ZERO_FEE_FROM = datetime(2026, 10, 20, 16, 57, tzinfo=timezone.utc)   # 20.10: погода без комиссии (см. проверку комиссии)
 
 
 def _dt(s):
@@ -98,6 +101,10 @@ def check_wallets(c, out, now):
                     v.append(f"{tag}: куплено не накануне дня маркета")
             if r["status"] != "resting" and w not in maker and r["shares"] and r["price"]:
                 exp = r["shares"] * 0.05 * r["price"] * (1 - r["price"])
+                # 20.10: Polymarket снял комиссию со всех погодных маркетов (feeType zero_fees, rate 0) между 16:56 и 18:11 UTC;
+                # polyexec берёт ставку из маркета — после этого комиссия 0 верна
+                if not r["fee"] and _dt(r["placed_at"] or r["snapshot_ts"]) >= ZERO_FEE_FROM:
+                    exp = 0.0
                 if abs((r["fee"] or 0) - exp) > 0.02 + 0.05 * exp:
                     v.append(f"{tag}: комиссия ${r['fee'] or 0:.3f} вместо ${exp:.3f}")
             if r["status"] in ("open", "won", "lost", "void") and r["shares"] and r["price"] \
@@ -107,7 +114,8 @@ def check_wallets(c, out, now):
                 cfg = OBS_CITIES.get(r["city"])
                 tz = ZoneInfo(cfg["tz"]) if cfg else timezone.utc
                 day0 = datetime.combine(date.fromisoformat(r["local_date"]), datetime.min.time(), tz)
-                if r["status"] == "open" and now - (day0 + timedelta(days=1)) > timedelta(hours=12):
+                if r["status"] == "open" and now - (day0 + timedelta(days=1)) > timedelta(hours=12) \
+                        and not disputed(r["city"], r["local_date"]):
                     v.append(f"{tag}: ставка открыта {(now - day0 - timedelta(days=1)).total_seconds() / 3600:.0f} ч после конца дня")
                 if r["status"] == "resting" and now - (day0 + timedelta(hours=wp.MAKER_CUTOFF_HOUR)) > timedelta(hours=3):
                     v.append(f"{tag}: заявка висит после полудня")
@@ -256,6 +264,32 @@ def check_cron(c, now):
     return {"runs": n, "fails": f, "since": first, "failed": failed, "alerts": alerts}
 
 
+_DISPUTED = {}
+
+
+PM_PENDING = set()
+
+
+def disputed(city, d):
+    """19.10 (Alex: «почему висит сообщение о проблемах»): Кейптаун 18.10 не закрыт, потому что итог оспорен на самом Polymarket
+    (umaResolutionStatus = disputed) — это не наша ошибка, ставка рассчитается после спора. Нет связи — считаем «не оспорен»."""
+    if (city, d) not in _DISPUTED:
+        try:
+            import requests
+            from weather_edge import CITIES, GAMMA, month_day_year_slug
+            slug = f"highest-temperature-in-{CITIES[city]['poly_slug']}-on-{month_day_year_slug(date.fromisoformat(d))}"
+            ev = requests.get(f"{GAMMA}/events", params={"slug": slug}, timeout=20).json()
+            # 20.10 (Alex: «30 тревог — старые?»): маркет ещё не закрыт на самом Polymarket — тоже не наша ошибка
+            # (19.10 Polymarket закрывал маркеты > 20 ч вместо обычных 1.5-5); такие дни — во «внимание», не в нарушения
+            _DISPUTED[(city, d)] = bool(ev) and any(m.get("umaResolutionStatus") == "disputed" or not m.get("closed")
+                                                    for m in ev[0]["markets"])
+            if _DISPUTED[(city, d)]:
+                PM_PENDING.add((city, d))
+        except Exception:  # noqa: BLE001
+            _DISPUTED[(city, d)] = False
+    return _DISPUTED[(city, d)]
+
+
 def run(deep=False):
     t0 = time.time()
     now = datetime.now(timezone.utc)
@@ -280,12 +314,17 @@ def run(deep=False):
     # внимание (не ошибки кода, но требуют решения)
     attention = []
     for w in wallets:
+        if w["key"] in wp.RETIRED:   # 15.10: выключенные 14.10 кошельки не ставят — их пустой счёт не требует решения
+            continue
         if w["key"] not in ("obs", "obs_fmi", "obs_fast", "obs_rt", "obs_wethr") and w["cash"] < wp.STAKE and w["in_play"] < 1e-6:
             attention.append(f"{w['key']}: денег ${w['cash']:.2f} и нет открытых ставок — кошелёк остановился")
         elif w["key"] not in ("obs", "obs_fmi", "obs_fast", "obs_rt", "obs_wethr") and w["cash"] < wp.STAKE:
             attention.append(f"{w['key']}: свободно ${w['cash']:.2f} — меньше ставки, новых ставок не делает")
     if data["gaps"]:
         attention.append("пропуски снимков: " + "; ".join(data["gaps"]))
+    if PM_PENDING:
+        attention.append("Polymarket ещё не закрыл (или итог оспорен) — ставки рассчитаются сами: "
+                         + ", ".join(f"{ci} {d[8:]}.{d[5:7]}" for ci, d in sorted(PM_PENDING)))
     # 2026-09-28: только не исправленные ошибки и по-человечески (fixes.py)
     try:
         from fixes import failures

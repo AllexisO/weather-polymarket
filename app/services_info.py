@@ -45,7 +45,7 @@ SERVICES = [
         {"name": "Национальные службы", "site": None, "what": "быстрые замеры вне США: Финляндия (FMI), Япония (JMA), Германия (DWD), Нидерланды (KNMI), Гонконг (HKO)",
          "apis": ["opendata.fmi.fi", "jma.go.jp", "opendata.dwd.de", "api.dataplatform.knmi.nl", "data.weather.gov.hk"],
          "mode": "live", "key": "KNMI_API_KEY (только KNMI)", "price": "бесплатно", "scripts": "weather_fastobs, weather_obs_live"},
-        {"name": "Канада, Турция, Польша", "site": None, "what": "свои быстрые ленты замеров: Environment Canada (SWOB), MGM, IMGW (Варшава)",
+        {"name": "Канада, Турция, Польша", "site": None, "what": "свои быстрые ленты замеров: Environment Canada (SWOB), MGM, IMGW (Варшава) — с 15.10 не опрашиваются (obs_rt выключен)",
          "apis": ["dd.weather.gc.ca", "servis.mgm.gov.tr", "awiacja.imgw.pl"], "mode": "live", "key": None, "price": "бесплатно",
          "scripts": "weather_obs_rt"},
         {"name": "Netatmo", "site": "https://dev.netatmo.com", "what": "частные станции у аэропортов — только сбор для проверки",
@@ -88,10 +88,10 @@ SERVICES = [
 # status: "active" — действует и списывает деньги; "closed" — отменена; "trial" — пробная; "prepaid" — баланс по расходу.
 # ends — дата окончания / следующего списания (ГГГГ-ММ-ДД) или None, если не знаем; checked — когда сведения сверены.
 SUBSCRIPTIONS = [
-    {"name": "wethr.net", "plan": "Professional", "price": "$24.99", "per": "в месяц", "monthly": 24.99, "status": "active",
-     "since": "2026-10-01", "ends": "2026-11-01", "ends_label": "следующее списание",
-     "note": "Решение 15.10 по порогу из PRD: на 05.10 опережение 48 с (нужно ≥ 1 мин), лишних денег ~$2.45 (нужно ≥ $25 за 14 дней). Отменить до 01.11, если не пройдёт.",
-     "checked": "2026-10-05"},
+    {"name": "wethr.net", "plan": "Professional", "price": "$24.99", "per": "в месяц", "monthly": 0.0, "status": "closed",
+     "since": "2026-10-01", "ends": "2026-11-01", "ends_label": "отменена 15.10, работает до 01.11",
+     "note": "Alex отменил 15.10 — порог PRD §9 п.8 не прошёл: опережение 0.89 мин (нужно ≥ 1), лишних денег $2.62 (нужно ≥ $25). После 01.11 списаний нет; obs_wethr выключить 31.10 (заметка #59).",
+     "checked": "2026-10-15"},
     {"name": "Falcon (polymarketanalytics.com)", "plan": "20 000 кредитов", "price": "$10", "per": "разово", "monthly": 0.0, "status": "closed",
      "since": "2026-09-30", "ends": None, "ends_label": "закрыта 05.10",
      "note": "Осталось 1 220 кредитов (05.10). Стаканы теперь пишем сами (data/books); скачанное — data/research/falcon.",

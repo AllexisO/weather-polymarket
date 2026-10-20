@@ -118,7 +118,10 @@ PAPER_WALLETS = {
     "ml3_conf": "Смесь — не спорить с уверенным рынком",
     "ml5_cal": "v5 «от рынка» + рынок (смесь)",
     "ml5": "v5 «от рынка» — сама модель",
+    "ml5_cal30": "v5 смесь — не дешевле 30¢",
+    "no_cheap5": "Против лотерейных билетов (v5)", "no_mid5": "Против средних вариантов (v5)", "no_big5": "Против сильно переоценённых (v5)",
     "ml_day": "Дневная модель (10/12/14 ч)",
+    "ml_day_fav": "Фавориты днём (дневная модель)",
     "fav": "Недооценённые фавориты",
     "ml3_city": "Смесь — лучшие города",
     "copy": "Повтор за сильными трейдерами",
@@ -128,46 +131,46 @@ PAPER_WALLETS = {
 }
 PAPER_START_BALANCE = 100.0
 # свой старт у кошелька (как weather_paper.START_BY_WALLET; совпадение проверяет preflight.py)
-WALLET_START = {"copy": 1000.0, "ml": 300.0, "mm_mk": 300.0, "mm": 300.0}  # как weather_paper.START_BY_WALLET (preflight сверяет)
+WALLET_START = {"copy": 1000.0, "ml": 300.0, "mm_mk": 300.0, "mm": 300.0, "ml3": 200.0, "ml3_mk": 200.0, "ml3_cal": 200.0}  # как weather_paper.START_BY_WALLET (preflight сверяет)
 PAPER_STAKE = 2.0  # ставка кошельков (weather_paper.STAKE): меньше на счёте — новых ставок нет
 # 2026-09-25 (просьба Alex — "много кошельков, не понять что к чему"):
 # одна главная модель наверху, остальные — компактно, по группам, с
 # пояснением в одну строку. Таблицы ставок по умолчанию — только главная.
-MAIN_WALLET = "ml3"
+MAIN_WALLET = "ml5"   # 20.10 решение Alex: главная — v5 (заметка #51: ml5 +10.4% против ml3 −16.1%, экзамен v5 лучше v3)
 WALLET_INFO = {
-    "ml3": ("Главная модель", "Главная модель — обучаемая v3",
+    "ml3": ("v3 — варианты главной модели", "Обучаемая v3 (главная до 20.10)",
             "Учится на 16 месяцах погоды: прогнозы 16 погодных моделей, утренние замеры, облачность, влажность, "
-            "вчерашние ошибки и мнение рынка. Лучшая на истории — кандидат на реальные деньги."),
-    "ml4": ("Другие версии обучаемой модели", "Обучаемая v4 (v3, 31 лист)",
+            "вчерашние ошибки и мнение рынка. Была главной до 20.10 — теперь пара к v5 по тем же правилам."),
+    "ml4": ("v4", "Обучаемая v4 (v3, 31 лист)",
             "Та же v3, но деревья крупнее: на проверке точнее v3 в августе и сентябре. Ставит как главная"),
-    "ml4_cal": ("Другие версии обучаемой модели", "v4 + рынок (смесь)",
+    "ml4_cal": ("v4", "v4 + рынок (смесь)",
                 "35% v4 + 65% рынка, ставит при перевесе от 3 п.п. — как «смесь», но на v4"),
-    "ml4e": ("Другие версии обучаемой модели", "v4 — среднее 3 обучений",
+    "ml4e": ("v4", "v4 — среднее 3 обучений",
              "Та же v4, но прогноз — среднее трёх обучений: на проверке точнее одного обучения везде. Ставит как главная"),
-    "ml4e_cal": ("Другие версии обучаемой модели", "v4 среднее 3 + рынок (смесь)",
+    "ml4e_cal": ("v4", "v4 среднее 3 + рынок (смесь)",
                  "35% v4 (среднее 3 обучений) + 65% рынка, ставит при перевесе от 3 п.п."),
-    "ml3_cal_k": ("Другие версии обучаемой модели", "Смесь — ставка по перевесу",
+    "ml3_cal_k": ("v3 — варианты главной модели", "Смесь — ставка по перевесу",
                   "Как «смесь», но ставка от $0.5 до $10: чем больше перевес, тем больше ставка (Келли ×0.25)"),
-    "ml3_no": ("Другие версии обучаемой модели", "Главная v3 — ставки «против»",
+    "ml3_no": ("v3 — варианты главной модели", "Главная v3 — ставки «против»",
                "Покупает «нет» на вариант, который модель считает переоценённым (перевес от 10 п.п.)"),
-    "ml3_z": ("Другие версии обучаемой модели", "Смесь — «да» только 20-40¢",
+    "ml3_z": ("v3 — варианты главной модели", "Смесь — «да» только 20-40¢",
               "Как «смесь», но «да» только за 20-40¢: единственная зона в плюсе и на честной истории (покупка по цене продавца), и на первой живой неделе"),
-    "ml3_cal30": ("Другие версии обучаемой модели", "Смесь — не дешевле 30¢",
+    "ml3_cal30": ("v3 — варианты главной модели", "Смесь — не дешевле 30¢",
                   "Как «смесь», но выбирает только среди вариантов за 30¢ и дороже: дешёвые сбываются реже своей цены (разбор 27-29.09)"),
-    "ml3_cal15": ("Другие версии обучаемой модели", "Смесь — не дешевле 15¢",
+    "ml3_cal15": ("v3 — варианты главной модели", "Смесь — не дешевле 15¢",
                   "Как «смесь», но не ставит на варианты дешевле 15¢: на всём рынке они сбываются реже своей цены"),
-    "ml3_city": ("Другие версии обучаемой модели", "Смесь — лучшие города",
+    "ml3_city": ("v3 — варианты главной модели", "Смесь — лучшие города",
                  "Как «смесь», но только в половине городов, где она последние 45 дней была лучше рынка сильнее всего (пересчёт по понедельникам)"),
-    "ml3_cal": ("Другие версии обучаемой модели", "Главная v3 + рынок (смесь)",
+    "ml3_cal": ("v3 — варианты главной модели", "Главная v3 + рынок (смесь)",
                 "35% главной модели + 65% рынка: без самоуверенности, ставит при перевесе от 3 п.п."),
-    "ml2": ("Другие версии обучаемой модели", "Обучаемая v2", "То же без мнения рынка"),
+    "ml2": ("v2", "Обучаемая v2", "То же без мнения рынка"),
     "ml": ("Другие версии обучаемой модели", "Обучаемая v1", "Первая версия: одно число и одинаковый разброс"),
     "ml_shift": ("Другие версии обучаемой модели", "Обучаемая v1 — только при расхождении",
                  "Та же v1, но ставит, только если ждёт другую температуру, чем рынок (≥0.5°C)"),
     "mm": ("Прогноз по формулам (раньше)", "Микс 16 погодных моделей", "Веса моделей по городу, без обучения"),
     "emos": ("Прогноз по формулам (раньше)", "EMOS", "Поправка ошибки GFS+ICON по истории"),
     "main": ("Прогноз по формулам (раньше)", "Основная модель", "GFS+ICON с поправкой на смещение — самый первый вариант"),
-    "ml3_mk": ("Тот же сигнал, но покупка своей заявкой", "Главная v3 — своя заявка",
+    "ml3_mk": ("v3 — варианты главной модели", "Главная v3 — своя заявка",
                "Сигнал главной модели, но своей заявкой: без комиссии, по нижней цене, снимается в 12:00"),
     "mm_mk": ("Тот же сигнал, но покупка своей заявкой", "Микс — своя заявка", "Без комиссии, по нижней цене, но не всегда исполняется"),
     "emos_mk": ("Тот же сигнал, но покупка своей заявкой", "EMOS — своя заявка", "То же для EMOS"),
@@ -175,23 +178,34 @@ WALLET_INFO = {
     "ens": ("Ансамбли погодных моделей", "6 ансамблей + рынок (смесь)",
             "212 вариантов прогноза от 6 ансамблей (ECMWF, нейросеть ECMWF, GFS, ICON, UKMO, GEM) + 65% рынка, "
             "перевес от 3 п.п. Проверка по заметкам: 12.10 и 28.10"),
-    "no_cheap": ("Перекосы рынка", "Против лотерейных билетов",
+    "no_cheap": ("Правила без модели (перекосы рынка)", "Против лотерейных билетов",
                  "Покупает «нет» на вариант за 5-15¢, который смесь модели и рынка считает переоценённым: люди переплачивают за дешёвые варианты"),
-    "no_mid": ("Перекосы рынка", "Против средних вариантов",
+    "no_mid": ("Правила без модели (перекосы рынка)", "Против средних вариантов",
                "Покупает «нет» на вариант за 30-55¢, если смесь модели и рынка считает его переоценённым на 3+ п.п."),
-    "ml_day": ("Другие версии обучаемой модели", "Дневная модель (10/12/14 ч)",
+    "ml_day": ("Дневная модель", "Дневная модель (10/12/14 ч)",
                "LightGBM в 10, 12 и 14 часов видит замеры с утра и цену рынка в этот час; смесь 35/65 с рынком, перевес от 3 п.п., одна ставка на город в день"),
-    "ml5": ("Другие версии обучаемой модели", "v5 «от рынка» — сама модель",
-            "Чистая v5 без смеси с рынком, перевес от 10 п.п. — пара к главной v3 (ml3): какая модель сама по себе зарабатывает больше"),
-    "ml5_cal": ("Другие версии обучаемой модели", "v5 «от рынка» + рынок (смесь)",
+    "ml_day_fav": ("Дневная модель", "Фавориты днём (дневная модель)",
+                   "Правило fav днём: «да» на вариант за 50-95¢, который смесь дневной модели с рынком в 10/12/14 ч считает недооценённым; одна ставка на город в день"),
+    "ml5": ("Главная модель", "Главная модель — обучаемая v5 «от рынка»",
+            "Берёт за отправную точку ожидаемый максимум по ценам рынка и учит поправку — где и насколько рынок ошибается; "
+            "перевес от 10 п.п. Главная с 20.10 (решение Alex): вживую +10.4% против −16.1% у v3, на экзамене точнее v3."),
+    "ml5_cal": ("v5 «от рынка»", "v5 «от рынка» + рынок (смесь)",
                 "Модель учит не температуру, а поправку к рынку — где и насколько рынок ошибается; смесь 35/65 с рынком, перевес от 3 п.п."),
-    "ml3_conf": ("Другие версии обучаемой модели", "Смесь — не спорить с уверенным рынком",
+    "ml5_cal30": ("v5 «от рынка»", "v5 смесь — не дешевле 30¢",
+                  "Двойник ml3_cal30 (с 20.10): то же правило «да» от 30¢, перевес от 3 п.п., но на смеси v5 с рынком"),
+    "no_cheap5": ("Правила без модели (перекосы рынка)", "Против лотерейных билетов (v5)",
+                  "Двойник no_cheap (с 20.10): «нет» на вариант за 5-15¢, но переоценку считает смесь v5 с рынком"),
+    "no_mid5": ("Правила без модели (перекосы рынка)", "Против средних вариантов (v5)",
+                "Двойник no_mid (с 20.10): «нет» на вариант за 30-55¢ при переоценке 3+ п.п. по смеси v5 с рынком"),
+    "no_big5": ("Правила без модели (перекосы рынка)", "Против сильно переоценённых (v5)",
+                "Двойник no_big (с 20.10): «нет» на вариант за 25-80¢ при переоценке 8+ п.п. по смеси v5 с рынком"),
+    "ml3_conf": ("v3 — варианты главной модели", "Смесь — не спорить с уверенным рынком",
                  "Как смесь v3 + рынок, но без ставок в маркетах, где фаворит стоит 60¢ и дороже: там рынок обычно прав"),
-    "no_big": ("Перекосы рынка", "Против сильно переоценённых",
+    "no_big": ("Правила без модели (перекосы рынка)", "Против сильно переоценённых",
                "Покупает «нет» на вариант за 25-80¢, если смесь модели и рынка считает его переоценённым на 8+ п.п. (правило бота AadiXD200)"),
-    "techno": ("Перекосы рынка", "Дешёвые «да» среди фаворитов",
+    "techno": ("Правила без модели (перекосы рынка)", "Дешёвые «да» среди фаворитов",
                "Покупает «да» за 8-30¢ на одном из 4 самых дорогих вариантов, если смесь модели и рынка не ниже цены (правило бота technosheen)"),
-    "fav": ("Перекосы рынка", "Недооценённые фавориты",
+    "fav": ("Правила без модели (перекосы рынка)", "Недооценённые фавориты",
             "Покупает «да» на вариант за 50-95¢, который смесь модели и рынка считает недооценённым: рынок недоплачивает за фаворитов"),
     "copy": ("Повтор за сильными трейдерами", "Повтор за сильными трейдерами",
              "Повторяет покупки 30 лучших трейдеров погоды за 14 дней — только сделанные накануне дня маркета, не дороже их цены +2¢"),
@@ -220,9 +234,17 @@ WALLET_INFO = {
                "Как «по живым замерам», но постоянный процесс: новая сводка METAR проверяется раз в секунду в минуты выхода сводки, и «нет» на уже невозможный вариант покупается сразу (как HighTempTation)"),
     "obs_wethr": ("Живые замеры", "Живые замеры — wethr (США)",
                   "Как «живые замеры — быстро», но сводки METAR 5 городов США (Чикаго, Атланта, Остин, Денвер, Майами) приходят платным потоком wethr.net (~на минуту раньше NOAA)"),
-    "obs_fmi": ("Живые замеры", "Хельсинки: 10-минутные замеры FMI",
-                "То же, что «по живым замерам», но по 10-минутным данным финской метеослужбы — раньше METAR"),
+    "obs_fmi": ("Живые замеры", "Хельсинки: 10-минутные замеры FMI (ставки остановлены 15.10)",
+                "То же, что «по живым замерам», но по 10-минутным данным финской метеослужбы — раньше METAR. "
+                "С 15.10 не ставит: максимум FMI за день в 15 из 75 дней «убивал» вариант, который выиграл"),
 }
+# 14.10 (решение Alex): выключенные кошельки — история и страница остаются, в подписи дата
+HIDDEN_VERSIONS = {"ml"}  # 14.10: версии модели без кошельков — не показываем на /training
+RETIRED = {**{w: "2026-10-14" for w in ("main", "main_mk", "emos", "emos_mk", "mm", "mm_mk", "ml", "ml_shift")}, "ens": "2026-10-14", "obs_rt": "2026-10-15"}  # как weather_paper.RETIRED (сверяет preflight.py)
+for _w, _d in RETIRED.items():
+    if _w in WALLET_INFO:
+        _g, _n, _t = WALLET_INFO[_w]
+        WALLET_INFO[_w] = (_g, f"{_n} (выключен {_d[8:10]}.{_d[5:7]})", _t)
 # кошельки по живым замерам (paper_obs_trades, колонка wallet) — weather_obs_live.py
 OBS_WALLETS = ("obs", "obs_fmi", "obs_fast", "obs_rt", "obs_wethr")
 # 2026-09-25: страница кошелька в стиле банковского приложения — города по-русски,
@@ -242,9 +264,10 @@ CITY_RU = {
     "wuhan": "Ухань", "zhengzhou": "Чжэнчжоу", "hong_kong": "Гонконг", "taipei": "Тайбэй",
 }
 WALLET_BADGE = {"ml3": "v3", "ml2": "v2", "ml": "v1", "ml_shift": "v1+", "mm": "MX", "emos": "EM", "main": "GI",
-                "mm_mk": "MX", "emos_mk": "EM", "main_mk": "GI", "ml3_mk": "v3", "ml3_cal": "v3+", "ml3_z": "v3Z", "ml3_no": "v3−", "ml3_cal_k": "v3$", "ml4": "v4", "ml4_cal": "v4+", "ml4e": "v4³", "ml4e_cal": "v4³+", "ens": "EN", "ml3_cal15": "v3+¢", "ml3_cal30": "v3+30", "no_cheap": "НЕТ", "fav": "ФАВ", "no_mid": "НЕТ½", "no_big": "НЕТ+", "techno": "ДА¢", "ml3_conf": "v3+У", "ml5_cal": "v5+", "ml5": "v5", "ml_day": "ДН", "ml3_city": "v3+Г", "copy": "CP", "obs": "OB", "obs_fmi": "FI", "obs_fast": "OB+", "obs_rt": "OB⚡", "obs_wethr": "OBW", "llm_gem": "LG", "llm_ds": "LD"}
-WALLET_GROUPS = ["Другие версии обучаемой модели", "Перекосы рынка", "Ансамбли погодных моделей", "Повтор за сильными трейдерами", "Прогноз по формулам (раньше)",
-                 "Тот же сигнал, но покупка своей заявкой", "Живые замеры"]
+                "mm_mk": "MX", "emos_mk": "EM", "main_mk": "GI", "ml3_mk": "v3", "ml3_cal": "v3+", "ml3_z": "v3Z", "ml3_no": "v3−", "ml3_cal_k": "v3$", "ml4": "v4", "ml4_cal": "v4+", "ml4e": "v4³", "ml4e_cal": "v4³+", "ens": "EN", "ml3_cal15": "v3+¢", "ml3_cal30": "v3+30", "no_cheap": "НЕТ", "fav": "ФАВ", "no_mid": "НЕТ½", "no_big": "НЕТ+", "techno": "ДА¢", "ml3_conf": "v3+У", "ml5_cal": "v5+", "ml5": "v5", "ml5_cal30": "v5+30", "no_cheap5": "НЕТ5", "no_mid5": "НЕТ½5", "no_big5": "НЕТ+5", "ml_day": "ДН", "ml_day_fav": "ДН★", "ml3_city": "v3+Г", "copy": "CP", "obs": "OB", "obs_fmi": "FI", "obs_fast": "OB+", "obs_rt": "OB⚡", "obs_wethr": "OBW", "llm_gem": "LG", "llm_ds": "LD"}
+# 14.10 (просьба Alex): группы — по модели, к которой относится кошелёк (MODEL_GROUP ниже)
+WALLET_GROUPS = ["v3 — варианты главной модели", "v5 «от рынка»", "Дневная модель", "v4", "v2", "Правила без модели (перекосы рынка)",
+                 "Повтор за сильными трейдерами", "Живые замеры"]
 
 
 def paper_bucket(lo, hi, unit):
@@ -507,7 +530,7 @@ def line_chart(labels, series, fmt, w=520, h=300, vline=None):
             "first": labels[0], "last": labels[-1], "vline": round(X(vline), 1) if vline is not None else None}
 
 
-SKILL_PARENT = {"main_mk": "main", "emos_mk": "emos", "mm_mk": "mm", "ml3_mk": "ml3", "ml3_cal_k": "ml3_cal", "ml3_cal15": "ml3_cal", "ml3_cal30": "ml3_cal", "ml3_z": "ml3_cal", "ml3_city": "ml3_cal"}  # «своя заявка» — сигнал родителя
+SKILL_PARENT = {"main_mk": "main", "emos_mk": "emos", "mm_mk": "mm", "ml3_mk": "ml3", "ml3_cal_k": "ml3_cal", "ml3_cal15": "ml3_cal", "ml3_cal30": "ml3_cal", "ml5_cal30": "ml5_cal", "ml3_z": "ml3_cal", "ml3_city": "ml3_cal"}  # «своя заявка» — сигнал родителя
 
 
 def model_skill(conn, key):
@@ -1228,6 +1251,7 @@ def llm_page_data(conn, key, city, day):
 
 
 LLM_VS_HOURS = (8, 10, 12, 14, 16, 18)
+LLM_VS_EXTRA = ("llm_mix", "llm_cal", "llm_agy", "llm_agy_nomem")   # 15.10 (Alex): остальные модели в «В течение дня»; llm_agy_bet шансов не пишет
 
 
 def _bucket_score(bk, a):
@@ -1299,18 +1323,25 @@ def llm_vs_ml(conn):
     hours = []
     for H in LLM_VS_HOURS:
         sc = {"v3": [], "mkt": [], **{w: [] for w in LLM_WALLETS}}
+        ex = {w: [] for w in LLM_VS_EXTRA}   # (модель, рынок) — на своих город-днях: эти кошельки начали позже и в других городах
         for k in act:
-            if k not in ml or not all((w, *k, H) in llm for w in LLM_WALLETS):
-                continue
             mk = mkt.get((*k, H)) or mkt.get((*k, H - 1))
             if not mk:
+                continue
+            for w in LLM_VS_EXTRA:
+                if (w, *k, H) in llm and (s := _bucket_score(llm[(w, *k, H)], act[k])) and \
+                        (m := _bucket_score([(lo, hi, m) for (lo, hi), m in mk.items()], act[k])):
+                    ex[w].append((s, m))
+            if k not in ml or not all((w, *k, H) in llm for w in LLM_WALLETS):
                 continue
             sc["mkt"].append(_bucket_score([(lo, hi, m) for (lo, hi), m in mk.items()], act[k]))
             sc["v3"].append(_bucket_score([(lo, hi, p) for lo, hi, p, _m in ml[k] if p is not None], act[k]))
             for w in LLM_WALLETS:
                 sc[w].append(_bucket_score(llm[(w, *k, H)], act[k]))
         if sc["mkt"]:
-            hours.append({"h": H, "n": len(sc["mkt"]), **{k: pack([s for s in v if s]) for k, v in sc.items()}})
+            hours.append({"h": H, "n": len(sc["mkt"]), **{k: pack([s for s in v if s]) for k, v in sc.items()},
+                          "extra": {w: {**pack([s for s, _m in v]), "mkt": avg([m[0] for _s, m in v]), "n": len(v)} if v else None
+                                    for w, v in ex.items()}})
     # 3) деньги: закрытые ставки в тех же городах с первого дня LLM
     money_rows = []
     if table_exists(conn, "paper_trades"):
@@ -1321,6 +1352,7 @@ def llm_vs_ml(conn):
             money_rows.append({"name": n, "n": len(rs), "won": sum(r["status"] == "won" for r in rs), "pnl": pnl,
                                "roi": 100 * pnl / cost if cost else None})
     return {"start": start, "n_days": len(keys), "morning": morning, "hours": hours, "money": money_rows,
+            "extra_names": [(w, LLM_MODEL_NAME[w]) for w in LLM_VS_EXTRA],
             "dates": sorted({d for _c, d in keys})}
 
 
@@ -1459,7 +1491,8 @@ def paper(request: Request, w: str = ""):
         for t in lst:
             t["city_ru"] = CITY_RU.get(t["city"], t["city"].replace("_", " ").title())
     main = next((c for c in wallets if c["key"] == MAIN_WALLET), None)
-    groups = [(g, [c for c in wallets if c["group"] == g]) for g in WALLET_GROUPS]
+    # 14.10 (просьба Alex): выключенные кошельки в списке не показываем; их страница открывается по ссылке /paper?w=…
+    groups = [(g, [c for c in wallets if c["group"] == g and c["key"] not in RETIRED]) for g in WALLET_GROUPS]
     groups = [(g, cs) for g, cs in groups if cs]
     # 2026-09-25 (просьба Alex — переделать страницу целиком): страница всегда
     # про ОДИН кошелёк (по умолчанию главный), остальные — сравнение внизу.
@@ -1486,7 +1519,8 @@ def paper(request: Request, w: str = ""):
     goal["pct"] = min(100, round(100 * goal["n"] / goal["need"]))
     return TEMPLATES.TemplateResponse(
         "paper.html",
-        {"request": request, "main": main, "cur": cur, "groups": groups, "wallets": wallets, "sel": sel,
+        {"request": request, "main": main, "cur": cur, "groups": groups,
+         "wallets": [c for c in wallets if c["key"] not in RETIRED or c["key"] in (sel, SKILL_PARENT.get(sel))], "sel": sel,
          "scen": scenarios(my_waiting), "skill": skill, "fresh": fresh, "alerts": alerts, "closes": (closes[0], closes[-1]) if closes else None,
          "chart": balance_chart(settle_events.get(sel, []), cur["start"] if cur else PAPER_START_BALANCE), "goal": goal,
          "waiting": my_waiting, "results": pick(results), "skips": pick(skips)[:150],
@@ -1571,7 +1605,7 @@ def exam_verdict(exam):
     return v
 
 
-PROGRESS_LINES = (("ml3", "v3 — главная", "#FFD58A"), ("ml5", "v5 — «от рынка»", "#A3E39A"), ("blend", "смесь v3 35/65 с рынком", "#D3DDFB"),
+PROGRESS_LINES = (("ml3", "v3", "#FFD58A"), ("ml5", "v5 «от рынка» — главная", "#A3E39A"), ("blend", "смесь v3 35/65 с рынком", "#D3DDFB"),
                   ("day", "дневная модель, смесь (на неё ставит ml_day)", "#F0A6E0"))
 PROGRESS_STEP = 0.01   # сдвиг среднего «отрыва» за 5 ночей меньше 0.01 — «без изменений» (одна ночь гуляет на ±0.015)
 
@@ -1640,7 +1674,7 @@ def progress_chart(pts, line_defs, step=PROGRESS_STEP, words=("ночь", "но�
     xt = [{"x": round(X(i), 1), "t": d} for i, (d, _) in enumerate(pts) if i % step == 0 or i == len(pts) - 1]
     yt = []
     span = hi - lo
-    unit = next(u for u in (0.005, 0.01, 0.02, 0.05, 0.1, 0.2) if span / u <= 6)
+    unit = next((u for u in (0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5) if span / u <= 6), 10)   # 17.10: разрыв >1.2 ронял /llm
     y = math.ceil(lo / unit) * unit
     while y <= hi:
         yt.append({"y": round(Y(y), 1), "t": f"{y:+.2f}" if abs(y) > 1e-9 else "рынок"})
@@ -1663,6 +1697,9 @@ def llm_progress(conn):
     if not table_exists(conn, "llm_hour_preds"):
         return None
     act = {(c, d): a for c, d, a in conn.execute("SELECT city, local_date, actual_max FROM weather_station_daily WHERE local_date >= '2026-10-01'")}
+    # 17.10: итог Polymarket важнее станции (Чикаго 16.10: станция 58°F, итог 56-57 — все LLM «+0.5 к рынку», /llm падал)
+    act.update({(c, d): (lo + hi) / 2 for c, d, lo, hi in conn.execute(
+        "SELECT city, local_date, win_lo, win_hi FROM weather_poly_outcomes WHERE local_date >= '2026-10-01' AND win_lo IS NOT NULL")})
     acc, wait = {}, set()
     for w, city, d, pj, mj in conn.execute("""SELECT wallet, city, local_date, probs_json, market_json FROM llm_hour_preds
             WHERE local_hour BETWEEN 8 AND 19 AND probs_json IS NOT NULL AND market_json IS NOT NULL"""):
@@ -1698,6 +1735,10 @@ def training(request: Request):
             for it in d.get("importance", []):
                 it["ru"] = feature_ru(it["name"])
             d["verdict"] = exam_verdict(d.get("exam"))
+            # 14.10 (просьба Alex): v1 выключена (кошельки ml, ml_shift — RETIRED) — ночью ещё учится (6 с), на странице её нет
+            d["versions"] = [v for v in d.get("versions") or [] if v.get("key") not in HIDDEN_VERSIONS]
+            for k in HIDDEN_VERSIONS:
+                ((d.get("exam_all") or {}).get("versions") or {}).pop(k, None)
             runs.append(d)
     conn.close()
     last = runs[0] if runs else None
@@ -1999,7 +2040,8 @@ def _model_card(conn, key, info):
 def models_page(request: Request):
     from models_info import MODELS as MODEL_INFO
     conn = db()
-    cards = [_model_card(conn, k, v) for k, v in MODEL_INFO.items()]
+    # 14.10 (просьба Alex): модели, у которых все кошельки выключены, в списке не показываем (страница — по ссылке)
+    cards = [_model_card(conn, k, v) for k, v in MODEL_INFO.items() if not v.get("wallets") or not set(v["wallets"]) <= set(RETIRED)]
     alerts = active_alerts(conn)
     conn.close()
     return TEMPLATES.TemplateResponse("models.html", {"request": request, "models": cards, "m": None, "alerts": alerts})
@@ -2041,6 +2083,7 @@ MM_WALLETS = {
     'mm_ws_zs': ('Живой поток: дешёвая сторона, строго', 'Как «только дешёвая сторона», но исполнение засчитывается, только если оно гарантировано вживую: заявка стояла ≥ 1 с и сделка прошла хуже нашей цены (весь наш уровень съеден). Нижняя оценка — с 02.10'),
     'mm_ws_z30': ('Живой поток: только дешевле 30¢', 'Покупает только сторону дешевле 30¢: лучшая граница на первой половине истории (+17.9%), на проверке +18.4%, в худшем случае очереди +10.8%'),
     'mm_ws_sel': ('Живой поток: выгодные зоны', 'Живой поток, только в выгодных зонах цены и времени'),
+    'mm_ws_ml': ('Живой поток + модель', 'Заявки как «все заявки», но исполнение берётся, только если модель (LightGBM на живых исполнениях, переобучение каждую ночь) ждёт по нему заработок; «да» на вариант, уже убитый сводкой, — никогда. Проверка вслепую: 09-12.10 +0.80¢ на долю против +0.20¢, 06-08.10 +2.31¢ против +0.22¢. С 15.10, решение 30.10'),
     'mm_ws_all': ('Живой поток: все заявки', 'Те же заявки, но переставляются сразу при каждом изменении стакана (задержка ~0.03 с), исполнение — по живой сделке в ту же секунду'),
     'mm_all': ('Все заявки бота', 'Заявки на «да» и «нет» по всем погодным вариантам, кроме пауз (сводки METAR, вечер дня маркета)'),
     'mm_sel': ('Только выгодные зоны', 'Те же заявки, но только в зонах цены и времени, где стоять с заявкой было выгодно в обоих периодах истории'),
@@ -2264,7 +2307,10 @@ def mm_wallet_page(request: Request, key: str, tab: str = "markets", p: int = 1)
 # «последние» плиткой 2×2 со статусами (Finance Health), «ждут итога» с датой квадратиком (Upcoming Payments),
 # закрытые списком с круглым значком (Analytics / VISA).
 GROUP_TONE = {"Главная модель": "g1", "Другие версии обучаемой модели": "g2", "Прогноз по формулам (раньше)": "g3",
-              "Тот же сигнал, но покупка своей заявкой": "g4", "Повтор за сильными трейдерами": "g5", "Живые замеры": "g5", "LLM каждый час": "g2"}
+              "Тот же сигнал, но покупка своей заявкой": "g4", "Повтор за сильными трейдерами": "g5", "Живые замеры": "g5", "LLM каждый час": "g2",
+              # 14.10: группы по моделям (MODEL_GROUP)
+              "v3 — варианты главной модели": "g1", "v5 «от рынка»": "g2", "Дневная модель": "g2", "v4": "g3", "v2": "g3",
+              "Правила без модели (перекосы рынка)": "g4"}
 
 
 def _close_dt(city, local_date):
@@ -2278,7 +2324,7 @@ def _close_dt(city, local_date):
 
 def _wallet_meta(key):
     info = WALLET_INFO.get(key, ("Другое", PAPER_WALLETS.get(key, key), ""))
-    group = "Главная модель" if key == "ml3" else info[0]
+    group = "Главная модель" if key == MAIN_WALLET else info[0]
     return {"key": key, "name": info[1], "badge": WALLET_BADGE.get(key, key[:2].upper()), "tone": GROUP_TONE.get(group, "g2")}
 
 
@@ -2371,7 +2417,7 @@ def city_bets_page(request: Request, city: str):
             if table_exists(conn, "weather_station_daily") else {}
         dates = sorted({r["local_date"] for r in rows}, reverse=True)
         cols = {r[1] for r in conn.execute("PRAGMA table_info(snapshots)")}
-        mcol = "ml3_model_p" if "ml3_model_p" in cols else "model_p"
+        mcol = "ml5_model_p" if "ml5_model_p" in cols else "model_p"   # 20.10: главная — v5
         seen = {}
         for d in dates:  # что показывали рынок и главная модель утром: первый снимок дня с 08:00 местного
             snap = conn.execute(f"""SELECT bucket_lo, bucket_hi, unit, market_p, {mcol} AS mp FROM snapshots
@@ -2821,7 +2867,7 @@ def audit_page(request: Request):
         last["when"] = _when(_dt(last["run_at"]), nv)
         for w in last["wallets"]:
             w["name"] = _wallet_meta(w["key"])["name"]
-            w["main"] = w["key"] == "ml3"
+            w["main"] = w["key"] == MAIN_WALLET
         last["wallets"].sort(key=lambda w: (not w["main"], -w["n_viol"], w["name"]))
         db_ = last["db"]
         db_["size_txt"] = _size(db_.get("size", 0))
@@ -2894,8 +2940,25 @@ _VER_SQL = (
 )
 
 
+def _skill_files_ver():
+    """20.10 (Alex: «/skill — как всё остальное, по новым данным, а не раз в минуту»): ответы прогонов скилла пишутся в
+    файлы data/research, не в базу, — их размер и время входят в отпечаток только для /skill."""
+    out = []
+    for f in sorted(Path("/data/research").glob("agy_skill_bt*.jsonl")) + sorted(Path("/data/agy_box/slots").glob("*.log")):
+        try:
+            st = f.stat()
+            out.append(f"{f.name}:{st.st_size}:{int(st.st_mtime)}")
+        except OSError:
+            pass
+    return "|".join(out)
+
+
 @app.get("/api/version")
-def api_version():
+def api_version(p: str = ""):
+    if p.startswith("/skill"):
+        base = api_version()
+        import hashlib
+        return {"v": hashlib.md5((base["v"] + _skill_files_ver()).encode()).hexdigest()[:12], "at": base["at"]}
     if _VER_CACHE["v"] is not None and time.time() - _VER_CACHE["t"] < 2.5:
         return _VER_CACHE["v"]
     import hashlib
@@ -2925,7 +2988,7 @@ def api_version():
 
 
 @app.get("/api/stream")
-async def api_stream(request: Request):
+async def api_stream(request: Request, p: str = ""):
     import asyncio
     from fastapi.responses import StreamingResponse
     from starlette.concurrency import run_in_threadpool
@@ -2935,7 +2998,7 @@ async def api_stream(request: Request):
         while True:
             if await request.is_disconnected():
                 break
-            v = (await run_in_threadpool(api_version))["v"]
+            v = (await run_in_threadpool(api_version, p))["v"]
             if v != last:
                 last, quiet = v, 0
                 yield f"data: {v}\n\n"
@@ -3107,6 +3170,10 @@ REAL_CANDIDATES = [
      "what": "LightGBM в 10/12/14 ч видит замеры с утра и цену рынка в этот час. На проверке точнее рынка все 8 недель.",
      "rule": "с 06.10: ≥ 40 закрытых ставок и итог ≥ +2% (на проверке свежий период дал +3%)", "since": "2026-10-06",
      "need_n": 40, "need_roi": 2.0, "then": "малый живой тест рядом с бумажным ml_day"},
+    {"key": "dayfav", "name": "Фавориты днём", "wallets": ["ml_day_fav"], "decide": "2026-11-05",
+     "what": "Правило fav (единственный кошелёк в плюсе на всех трёх отрезках), но днём по дневной модели: «да» 50-95¢, если смесь выше цены. На истории не проверить — у дневной модели прогнозы только с 06.10.",
+     "rule": "с 15.10: ≥ 40 закрытых ставок и итог ≥ +5%", "since": "2026-10-15", "need_n": 40, "need_roi": 5.0,
+     "then": "малый живой тест рядом с бумажным ml_day_fav"},
     {"key": "techno", "name": "Дешёвые «да» среди фаворитов", "wallets": ["techno"], "decide": "2026-10-20",
      "what": "«Да» за 8-30¢ на одном из 4 самых дорогих вариантов, если смесь модели и рынка не ниже цены. До 06.10: 34 ставки +71% — выбран по результату, поэтому судим только свежие ставки.",
      "rule": "только ставки с 07.10: ≥ 30 закрытых и итог ≥ +5%", "since": "2026-10-07", "need_n": 30, "need_roi": 5.0,
@@ -3236,6 +3303,24 @@ def real_page(request: Request):
     return TEMPLATES.TemplateResponse("real.html", {"request": request, **data})
 
 
+@app.get("/skill", response_class=HTMLResponse)
+def skill_page(request: Request):
+    from skill_status import skill_page_data   # 17.10: ход проверки скилла agy
+    conn = db()
+    try:
+        data = skill_page_data(conn)
+    finally:
+        conn.close()
+    return TEMPLATES.TemplateResponse("skill.html", {"request": request, **data})
+
+
+@app.get("/skill/log")
+def skill_log():
+    from skill_status import skill_terminal
+    from fastapi.responses import PlainTextResponse
+    return PlainTextResponse(skill_terminal())
+
+
 @app.get("/notes", response_class=HTMLResponse)
 def notes_page(request: Request):
     import notes
@@ -3290,7 +3375,7 @@ def nav_counts():
     Кэш 60 с; база занята или ошибка — панель просто без счётчиков."""
     if _NAV_CACHE["v"] is not None and time.time() - _NAV_CACHE["t"] < 60:
         return _NAV_CACHE["v"]
-    v = {"wallets": len(set(PAPER_WALLETS) | set(OBS_WALLETS)), "open": None, "alerts": 0, "audit": None}
+    v = {"wallets": len((set(PAPER_WALLETS) | set(OBS_WALLETS)) - set(RETIRED)), "open": None, "alerts": 0, "audit": None}
     try:
         import notes
         due = notes.due_notes()

@@ -25,13 +25,17 @@ import json
 import os
 import sqlite3
 import sys
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import requests
 
+from weather_cities import EXTRA_OBS_CITIES
 from weather_edge import CITIES, GAMMA, month_day_year_slug, parse_bucket
+
+EXTRA_DAYS = 10   # 15.10: доп. города (Гонконг, Тайбэй) — снимков по ним нет, итог раньше писал только кошелёк замеров при расчёте
+                  # своей ставки; без ставки дня не было в weather_poly_outcomes и проверка логики его не видела
 
 DB_PATH = Path(os.environ.get("POLY_LAB_DB", Path(__file__).parent.parent / "data" / "db" / "polymarket_lab.sqlite3"))
 
@@ -82,21 +86,26 @@ def run():
     now = datetime.now().astimezone()
 
     total = 0
-    for city, cfg in CITIES.items():
+    for city, cfg in {**CITIES, **EXTRA_OBS_CITIES}.items():
         with item_guard(city, conn):
             today_local = datetime.now(ZoneInfo(cfg["tz"])).date().isoformat()
-            pending = [
-                r["local_date"]
-                for r in conn.execute(
-                    """
-                    SELECT DISTINCT s.local_date FROM snapshots s
-                    LEFT JOIN weather_poly_outcomes p ON s.city = p.city AND s.local_date = p.local_date
-                    WHERE s.city = ? AND p.city IS NULL AND s.local_date < ?
-                    ORDER BY s.local_date
-                    """,
-                    (city, today_local),
-                )
-            ]
+            if city in EXTRA_OBS_CITIES:
+                have = {r[0] for r in conn.execute("SELECT local_date FROM weather_poly_outcomes WHERE city = ?", (city,))}
+                t = date.fromisoformat(today_local)
+                pending = [d for d in ((t - timedelta(days=k)).isoformat() for k in range(EXTRA_DAYS, 0, -1)) if d not in have]
+            else:
+                pending = [
+                    r["local_date"]
+                    for r in conn.execute(
+                        """
+                        SELECT DISTINCT s.local_date FROM snapshots s
+                        LEFT JOIN weather_poly_outcomes p ON s.city = p.city AND s.local_date = p.local_date
+                        WHERE s.city = ? AND p.city IS NULL AND s.local_date < ?
+                        ORDER BY s.local_date
+                        """,
+                        (city, today_local),
+                    )
+                ]
             for d in pending:
                 try:
                     win = fetch_winning_bucket(cfg["poly_slug"], date.fromisoformat(d))

@@ -41,7 +41,8 @@ FAST_DB = DB_PATH.parent / "fastobs.sqlite3"
 MM_DB = DB_PATH.parent / "mm.sqlite3"
 DAYS = 14
 # последнее исправление правил замеров (аудит 11.10: целые °C, Гонконг) — проигрыши до него уже разобраны; исправил снова — сдвинь
-FIXED_FROM = "2026-10-11T12:00:00+00:00"
+# 15.10: obs_fmi выключен, FMI в obs_fast только пишем, DWD запас 0.3 — проигрыши obs_fmi Хельсинки и obs_rt Лакхнау 13.10 разобраны
+FIXED_FROM = "2026-10-15T12:00:00+00:00"
 GAMMA = "https://gamma-api.polymarket.com"
 CHECKS = []
 
@@ -206,7 +207,9 @@ def check_llm(c, since):
     nojson = 0
     for (a,) in c.execute("SELECT answer_json FROM llm_hour_preds WHERE local_date >= ? AND answer_json IS NOT NULL", (since,)):
         try:
-            json.loads(a)
+            # 15.10: так же, как разбирает сам кошелёк (weather_llm_hour._parse): по крайним скобкам — ответ в ```json``` разобран верно
+            i, j = a.find("{"), a.rfind("}")
+            json.loads(a[i:j + 1] if i >= 0 and j > i else a, strict=False)
         except ValueError:
             nojson += 1
     add("Логика", True if not bad else False, "Ставки LLM в рамках правил (10-90¢, одна в день, llm_agy_bet ≤ $5)",

@@ -80,7 +80,7 @@
 <div class="bk">
   <div class="top">
     <h1>Обучение модели</h1>
-    <p>Каждую ночь в 05:20 обучаемые модели (v1, v2, главная v3, v4, v4e, v5) заново учатся на всей истории — с 01.06.2025 по вчерашний день.
+    <p>Каждую ночь в 05:20 обучаемые модели (v2, v3, v4, v4e, главная v5) заново учатся на всей истории — с 01.06.2025 по вчерашний день.
       Здесь видно, что именно произошло: какие данные взяты, что обучено, как модель сдала экзамен и на что она смотрит.</p>
   </div>
 
@@ -156,7 +156,7 @@
       <table>
         <thead><tr><th>Версия</th><th>Сама модель</th><th>Против рынка</th><th>Смесь 35/65 с рынком</th><th>Против рынка</th><th>Ошибка, °C</th></tr></thead>
         <tbody>{% for k, v in exam_all.versions.items() %}<tr>
-          <td><a href="/models/{{ {'ml': 'v1', 'ml2': 'v2', 'ml3': 'v3', 'ml4': 'v4', 'ml4e': 'v4e', 'ml5': 'v5'}[k] }}"><b>{{ v.name }}</b></a>{% if k == 'ml3' %} <span class="muted">(главная)</span>{% endif %}</td>
+          <td><a href="/models/{{ {'ml': 'v1', 'ml2': 'v2', 'ml3': 'v3', 'ml4': 'v4', 'ml4e': 'v4e', 'ml5': 'v5'}[k] }}"><b>{{ v.name }}</b></a>{% if k == 'ml5' %} <span class="muted">(главная)</span>{% endif %}</td>
           <td class="num">{{ '%.3f' | format(v.ll_model) }}</td><td><span class="badge {{ TONE[v.verdict.tone] }}">{{ v.verdict.label.replace('опережаем', 'опережает').replace('отстаём', 'отстаёт') }}</span></td>
           <td class="num">{{ '%.3f' | format(v.ll_blend) }}</td><td><span class="badge {{ TONE[v.verdict_b.tone] }}">{{ v.verdict_b.label.replace('опережаем', 'опережает').replace('отстаём', 'отстаёт') }}</span></td>
           <td class="num">{{ '%.2f' | format(v.err) }}</td></tr>{% endfor %}</tbody>

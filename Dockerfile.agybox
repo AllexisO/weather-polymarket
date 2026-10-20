@@ -1,0 +1,9 @@
+# 16.10 (решение Alex): изолированный контейнер для Antigravity (agy) со своими инструментами — скилл llm_agy_skill.
+# Внутри нет проекта, .env и базы: только Python с numpy/pandas. agy и копия входа в Google монтируются при запуске
+# (data/agy_box/home → /home/agy), рабочая папка — data/agy_box/work → /work. Запуск — agy_box.sh.
+FROM python:3.12-slim
+RUN pip install --no-cache-dir numpy pandas
+RUN useradd -m -d /home/agy agy
+USER agy
+WORKDIR /work
+ENTRYPOINT ["agy"]

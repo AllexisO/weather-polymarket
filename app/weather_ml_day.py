@@ -17,6 +17,13 @@
 (polyexec.simulate_buy) не дороже шанса смеси − 3 п.п., $2. Не исполнилось — в этот день больше не пробуем (как в проверке).
 Каждый час решения пишется в ml_day_preds (шансы модели и смеси, цены рынка, максимум с утра).
 
+Кошелёк ml_day_fav (15.10, решение Alex «давай»; идея Claude): правило fav днём — по той же смеси ml_day в 10/12/14 ч.
+«Да» на вариант за 50-95¢ (цена продавца), у которого смесь выше цены; наибольший перевес; не дороже min(смесь, цена + 1¢);
+одна ставка на город в день, не исполнилось — в этот день больше не пробуем. fav (утро, v3) — единственный кошелёк в плюсе на всех
+трёх отрезках (июль-авг +12%, по сделкам 21.08-24.09 +21%, вживую +34.5%); фаворит БЕЗ модели — минус (data/research/fav_bt.log).
+Проверка до первой ставки (15.10): маркеты и итог — как у ml_day; дневная модель поднимает уровни до максимума с утра — на всех
+1164 прошлых решениях (390 город-дней, 9 дней) выигравший вариант ни разу не получил шанс 0.
+
 Запуск:
   python weather_ml_day.py --train   — обучение на всей истории (крон ночью, после weather_ml_train), модели в data/ml/day_s*/
   python weather_ml_day.py           — решения в 10/12/14 местного (крон каждый час в :05)
@@ -47,6 +54,9 @@ from weather_cities import OBS_CITIES
 DB_PATH = Path(os.environ.get("POLY_LAB_DB", Path(__file__).parent.parent / "data" / "db" / "polymarket_lab.sqlite3"))
 ML_DIR = DB_PATH.parent.parent / "ml"
 WALLET = "ml_day"
+WALLET_FAV = "ml_day_fav"
+FAV_BAND = (0.50, 0.95)  # как YES_BAND["fav"] в weather_paper
+FAV_OVER = 0.01          # «да» не дороже цены + 1¢ (как fav)
 HOURS = (10, 12, 14)
 SEEDS = (11, 22, 33)
 W_MODEL = 0.35          # доля модели в смеси с рынком (как ml3_cal)
@@ -273,30 +283,39 @@ def decide(row, f, mk, unit):
     return model, blend
 
 
-def bet(conn, city, day, now, mk, blend):
+def bet(conn, city, day, now, mk, blend, wallet=WALLET):
     """Лучший перевес смеси ≥ EDGE над ценой продавца; покупка по живому стакану. Не исполнилось — запись nofill (в этот день
-    больше не пробуем, как в проверке)."""
+    больше не пробуем, как в проверке). ml_day_fav — только «да» 50-95¢, смесь выше цены, не дороже min(смесь, цена + 1¢)."""
     from polyexec import simulate_buy, trading_stopped
     from weather_paper import cash
     best = None
     for b in mk:
         q = blend[b["label"]]
+        if wallet == WALLET_FAV:
+            if FAV_BAND[0] <= b["ask"] <= FAV_BAND[1] and q > b["ask"] and (best is None or q - b["ask"] > best[0]):
+                best = (q - b["ask"], "yes", b["ask"], q, b)
+            continue
         for side, price, qq in (("yes", b["ask"], q), ("no", 1 - b["bid"], 1 - q)):
             if MIN_PRICE <= price <= MAX_PRICE and qq - price >= EDGE and (best is None or qq - price > best[0]):
                 best = (qq - price, side, price, qq, b)
     if best is None:
         return None
-    if trading_stopped() or cash(conn, WALLET) < STAKE * 1.1:
+    if trading_stopped() or cash(conn, wallet) < STAKE * 1.1:
         return "ставок нет: STOP или нет денег"
     edge, side, price, q, b = best
     tok = json.loads(b["m"]["clobTokenIds"])[0 if side == "yes" else 1]
-    f = simulate_buy(b["m"], tok, STAKE, q - EDGE)
+    f = simulate_buy(b["m"], tok, STAKE, min(q, price + FAV_OVER) if wallet == WALLET_FAV else q - EDGE)
     filled = f["shares"] > 0
+    if filled and wallet == WALLET_FAV and not (FAV_BAND[0] <= f["avg"] <= FAV_BAND[1]):   # 19.10: полоса — по цене покупки
+        f.update(shares=0.0, cost=0.0, fee=0.0, avg=None,
+                 reason=f"в живом стакане вариант стоит {f['avg'] * 100:.1f}¢ — вне полосы кошелька "
+                        f"{FAV_BAND[0] * 100:.0f}-{FAV_BAND[1] * 100:.0f}¢ (цены устарели)")
+        filled = False
     lt = now.astimezone(ZoneInfo(OBS_CITIES[city]["tz"]))
     conn.execute("""INSERT OR IGNORE INTO paper_trades (wallet, city, local_date, snapshot_ts, unit, bucket_lo, bucket_hi,
         model_p, market_p, price, stake, status, reason, shares, fee, book_json, condition_id, token_id, placed_at, side)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                 (WALLET, city, day, now.isoformat(), OBS_CITIES[city]["unit"], b["lo"], b["hi"], q, price,
+                 (wallet, city, day, now.isoformat(), OBS_CITIES[city]["unit"], b["lo"], b["hi"], q, price,
                   f["avg"] if filled else None, f["cost"] if filled else 0.0, "open" if filled else "nofill",
                   f"смесь {q * 100:.0f}% против цены {price * 100:.0f}¢ ({side}), {lt:%H:%M} местного"
                   + ("" if filled else f"; не исполнилось: {f['reason']}"),
@@ -370,8 +389,11 @@ def run(dry=False):
                           json.dumps({b["label"]: b["price"] for b in mk})))
             conn.commit()
             res = None
-            if not conn.execute("SELECT 1 FROM paper_trades WHERE wallet = ? AND city = ? AND local_date = ?", (WALLET, city, d)).fetchone():
-                res = bet(conn, city, d, now, mk, blend)
+            for w in (WALLET, WALLET_FAV):
+                if not conn.execute("SELECT 1 FROM paper_trades WHERE wallet = ? AND city = ? AND local_date = ?", (w, city, d)).fetchone():
+                    r = bet(conn, city, d, now, mk, blend, w)
+                    if r:
+                        res = (res + "; " if res else "") + f"{w}: {r}"
             top = max(blend, key=blend.get)
             print(f"{city} {lt:%H:%M}: максимум с утра {f['day_max_c']:.1f}°C, смесь — {top} {blend[top] * 100:.0f}%"
                   + (f"; {res}" if res else ""), flush=True)

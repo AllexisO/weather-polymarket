@@ -28,7 +28,9 @@ from weather_mm_paper import (EVENING_H, METAR_PAUSE, MM_DB, PMAX, PMIN, SIZE, T
 WS = "wss://ws-subscriptions-clob.polymarket.com/ws/market"
 LISTEN_MIN = float(os.environ.get("LISTEN_MIN", "57"))
 L_MAX = 30.0
-WALLETS = ("mm_ws_all", "mm_ws_sel", "mm_ws_zone", "mm_ws_z30", "mm_ws_zs", "mm100", "mm100f")
+WALLETS = ("mm_ws_all", "mm_ws_sel", "mm_ws_zone", "mm_ws_z30", "mm_ws_zs", "mm100", "mm100f", "mm_ws_ml")
+# 15.10 (решение Alex, заметка #21): mm_ws_ml — исполнения mm_ws_all, но только где модель (weather_mm_ml.py) ждёт заработок > 0
+STATION_EVERY = 60   # раз в минуту — максимум станций по сводкам (признак модели mm_ws_ml)
 # 02.10 (Alex: «мне нужны гарантии, что боты работают так, как будут работать на Polymarket»): mm_ws_zs — правила mm_ws_zone,
 # но исполнение только когда оно ГАРАНТИРОВАНО вживую: (1) наша заявка простояла без изменений ≥ STRICT_AGE с — успела дойти
 # до биржи, и отмена/перестановка не в пути; (2) сделка прошла СТРОГО хуже нашей цены — значит, весь наш уровень съеден,
@@ -135,6 +137,8 @@ class Bot:
         self.focus = set()    # mm100f: города, где сегодня торгует (main → focus_cities)
         self.l2 = {}          # cid -> ({цена: доли} заявок «да», {цена: доли} предложений «да») — для записи стаканов
         self.l2_dirty = set()
+        self.scorer = None    # mm_ws_ml: weather_mm_ml.Scorer (main); None — кошелёк не исполняется
+        self.stmax = None     # mm_ws_ml: weather_mm_ml.StationMax, обновляется раз в STATION_EVERY с
 
     def requote(self, cid, now, ev_ts=None):
         m = self.m[cid]
@@ -264,6 +268,14 @@ class Bot:
             k = min(left, room) if w == "mm_ws_zs" else min(size, left, room)   # строгий: уровень съеден целиком
             if k <= 1e-9:
                 continue
+            if w == "mm_ws_ml":
+                if self.scorer is None or self.stmax is None:
+                    continue
+                from weather_mm_ml import features, take
+                row = features(side, price, ts, m["city"], m["local_date"], m["lo"], m["hi"], k,
+                               self.stmax.get(m["city"], m["local_date"], ts))
+                if not take(row, self.scorer(row)):
+                    continue
             self.used[(w, q["id"], side)] = self.used.get((w, q["id"], side), 0.0) + k
             self.inv[w][cid][0 if hits_yes else 1] += k
             pair = min(self.inv[w][cid])
@@ -368,6 +380,22 @@ def main():
     bot.focus = focus_cities(db)
     bot.cash100f = bank100(db, "mm100f", FOCUS_CAP)
     print(f"mm100f: свободно ${bot.cash100f:.2f} из ${BANK:.0f}; города фокуса: {', '.join(sorted(bot.focus)) or 'нет'}", flush=True)
+    import weather_mm_ml
+    main_ro = sqlite3.connect(f"file:{os.environ.get('POLY_LAB_DB', '/data/db/polymarket_lab.sqlite3')}?mode=ro", uri=True, timeout=30)
+    since_st = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
+
+    def refresh_station():
+        try:
+            bot.stmax = weather_mm_ml.StationMax(main_ro, since_st)
+        except sqlite3.Error as e:   # база занята — остаётся прошлый максимум
+            print(f"mm_ws_ml: сводки не прочитаны ({e})", flush=True)
+    bot.scorer = weather_mm_ml.Scorer()
+    if not bot.scorer.models:
+        bot.scorer = None
+    else:
+        print(f"mm_ws_ml: модели от {bot.scorer.meta['trained_at'][:16]} ({bot.scorer.meta['rows']} исполнений)", flush=True)
+    refresh_station()
+    last_station = time.time()
     toks = [t for m in markets for t in (m["token"], m["token_no"])]
     end = time.time() + LISTEN_MIN * 60
     reconnects, last_flush, last_sweep, last_book = 0, time.time(), time.time(), time.time()
@@ -414,6 +442,9 @@ def main():
                     except sqlite3.Error as e:  # база стаканов занята — изменения останутся отмеченными, запишутся в следующий раз
                         print(f"стаканы не записались ({e})", flush=True)
                     last_book = time.time()
+                if time.time() - last_station > STATION_EVERY:
+                    refresh_station()
+                    last_station = time.time()
                 # паузы вокруг сводок наступают по времени, а не по событию — раз в 20 с пересчитываем все заявки
                 if time.time() - last_sweep > 20:
                     now = datetime.now(timezone.utc)
@@ -433,6 +464,7 @@ def main():
         db.execute("INSERT OR REPLACE INTO mm_ws_stats VALUES (?,?,?,?,?,?)",
                    (hour, bot.stats["events"], bot.stats["trades"], bot.stats["fills"], bot.stats["quotes"], reconnects))
     db.close()
+    main_ro.close()
     print(f"событий {bot.stats['events']}, сделок {bot.stats['trades']}, наших исполнений {bot.stats['fills']}, "
           f"новых заявок {bot.stats['quotes']}, переподключений {reconnects}, снимков стаканов {n_book}", flush=True)
     if bdb is not None:

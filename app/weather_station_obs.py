@@ -25,6 +25,7 @@ https://mesonet.agron.iastate.edu/request/download.phtml
 from jobmark import item_guard
 import csv
 import io
+import math
 import os
 import sqlite3
 import sys
@@ -36,6 +37,13 @@ from zoneinfo import ZoneInfo
 import requests
 
 from weather_cities import OBS_CITIES
+
+
+def whole_f(tmpf):
+    """Максимум °F-города как в итоге Polymarket — целые °F (15.10, проверка проекта). IEM отдаёт tmpf с десятыми из группы T
+    METAR (десятые °C): KBKF 13.10 18.6 °C = 65.48 → было 65.5 (вариант «66-67»), итог — 65 («64-65»); Денвер — 25 дробных
+    дней из 44. Обратно в десятые °C, затем в °F до целого (половина — вверх): все 18 дней Денвера с 25.09 совпали с итогом."""
+    return math.floor(round((tmpf - 32) * 5 / 9, 1) * 9 / 5 + 32 + 0.5 + 1e-9)
 
 DB_PATH = Path(os.environ.get("POLY_LAB_DB", Path(__file__).parent.parent / "data" / "db" / "polymarket_lab.sqlite3"))
 IEM_ASOS = "https://mesonet.agron.iastate.edu/cgi-bin/request/asos.py"
@@ -150,6 +158,8 @@ def run():
                     # METAR вне США — целые °C, IEM отдаёт их переведёнными в °F;
                     # переводим обратно и округляем до исходного целого.
                     mx = round((mx - 32) * 5 / 9)
+                else:
+                    mx = whole_f(mx)
                 daily.append((city, d, cfg["unit"], mx, len(vals), now.isoformat()))
             conn.executemany(
                 "INSERT OR REPLACE INTO weather_station_daily (city, local_date, unit, actual_max, n_obs, resolved_at) VALUES (?, ?, ?, ?, ?, ?)",

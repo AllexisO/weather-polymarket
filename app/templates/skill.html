@@ -1,0 +1,278 @@
+{% extends "base.html" %}
+{% block title %}Скилл - weather-lab{% endblock %}
+{% block content %}
+{# 17.10 (просьба Alex): оформление Gemini - дизайн-система bk, адаптивность, терминал 380px, автообновление 60 с #}
+{% include "_mm_style.html" %}
+<style>
+  /* Сетка карточек лимитов */
+  .tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-bottom: 24px; }
+  .b-card { display: flex; flex-direction: column; justify-content: space-between; }
+  .b-val { font-size: 26px; font-weight: 700; line-height: 1.15; font-family: var(--bk-font); margin: 6px 0 2px; }
+  .b-bar { height: 7px; border-radius: 4px; background: var(--bk-raise); overflow: hidden; width: 100%; margin: 6px 0 4px; }
+  .b-bar i { display: block; height: 100%; border-radius: 4px; background: var(--bk-accent); transition: width .3s; }
+  .b-bar i.neg { background: var(--bk-neg); }
+  .b-bar i.pos { background: var(--bk-pos); }
+
+  /* Таблица вариантов */
+  .v-cell { display: flex; align-items: baseline; gap: 8px; }
+  .v-title { font-weight: 600; color: var(--bk-text); }
+  .v-sub { color: var(--bk-muted); font-size: 12.5px; margin-top: 2px; }
+  .chip-eng { display: inline-block; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 6px; background: var(--bk-raise); border: 1px solid var(--bk-line); color: var(--bk-text); white-space: nowrap; }
+  .p-bar { height: 6px; border-radius: 3px; background: var(--bk-raise); overflow: hidden; width: 100%; min-width: 80px; margin-top: 4px; }
+  .p-bar i { display: block; height: 100%; border-radius: 3px; background: var(--bk-accent); }
+
+  /* Терминал */
+  .term-box { background: #0B0C0E; border: 1px solid var(--bk-line); border-radius: 14px; overflow: hidden; }
+  .term-bar { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; background: #121316; border-bottom: 1px solid var(--bk-line); font-size: 13px; color: var(--bk-muted); }
+  .term-bar .term-title { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; color: var(--bk-text); }
+  .term-pre { margin: 0; padding: 14px; font: 12.5px/1.45 ui-monospace, Menlo, Consolas, monospace; color: #A3E39A; height: 380px; max-height: 380px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; }
+  .term-pre::-webkit-scrollbar { width: 6px; }
+  .term-pre::-webkit-scrollbar-track { background: #0B0C0E; }
+  .term-pre::-webkit-scrollbar-thumb { background: #262628; border-radius: 3px; }
+  .term-pre::-webkit-scrollbar-thumb:hover { background: #38383C; }
+
+  /* Таблица последних ответов */
+  .code-tag { font: 500 12px ui-monospace, Menlo, Consolas, monospace; color: var(--bk-muted); background: var(--bk-raise); border: 1px solid var(--bk-line); border-radius: 5px; padding: 1px 6px; white-space: nowrap; }
+  .why-cell { font-size: 13px; max-width: 480px; word-break: break-word; line-height: 1.45; }
+
+  @media (max-width: 760px) {
+    .tiles { grid-template-columns: 1fr; }
+    .term-pre { height: 320px; max-height: 320px; }
+  }
+</style>
+
+<div class="bk">
+  <div class="top">
+    <h1>Скилл: ход проверки</h1>
+    <p>Обновлено {{ updated }} · страница обновляется, как только приходит новый ответ · терминал - каждые 5 с</p>
+  </div>
+
+  <div class="tiles">
+    <div class="pane b-card">
+      <div>
+        <div class="muted" style="font-size: 13px;">Claude (Haiku + Sonnet) - писем до сброса недели (чт 22.10)</div>
+        <div class="b-val num">{{ budget.c_used }} <span class="muted" style="font-size: 18px; font-weight: 400;">/ {{ budget.c_max }}</span></div>
+        {% set c_pct = (100 * budget.c_used / budget.c_max) | round | int if budget.c_max else 0 %}
+        <div class="b-bar"><i class="{{ 'neg' if c_pct >= 100 else '' }}" style="width: {{ [c_pct, 100] | min }}%;"></i></div>
+      </div>
+      <div class="muted" style="font-size: 13px; margin-top: 6px;">
+        за последние 5 ч: <b class="num {{ 'neg' if budget.c_5h >= 250 else 'pos' }}">{{ budget.c_5h }}</b> из 250
+      </div>
+    </div>
+
+    <div class="pane b-card">
+      <div>
+        <div class="muted" style="font-size: 13px;">Gemini - скилл</div>
+        {% if budget.g_paused %}
+        <div class="b-val neg" style="font-size: 24px;">Пауза</div>
+        <div class="b-bar"><i class="neg" style="width: 100%;"></i></div>
+        {% else %}
+        <div class="b-val num">{{ budget.g_used }} <span class="muted" style="font-size: 18px; font-weight: 400;">/ {{ budget.g_max }}</span></div>
+        {% set g_pct = (100 * budget.g_used / budget.g_max) | round | int if budget.g_max else 0 %}
+        <div class="b-bar"><i class="{{ 'neg' if g_pct >= 100 else '' }}" style="width: {{ [g_pct, 100] | min }}%;"></i></div>
+        {% endif %}
+      </div>
+      <div class="muted" style="font-size: 13px; margin-top: 6px;">
+        {% if budget.g_paused %}
+        недельный лимит общий с живыми кошельками - до сброса ~23.10
+        {% else %}
+        лимит писем Gemini в неделю
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  {% if veto %}
+  {# 20.10 (Alex: «только цифры, без воды»): вето Gemma - 4 плитки и одна строка цели. Данные - skill_status.veto_rows() #}
+  <style>
+    .vt { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+    .vt .pane { padding: 16px 18px; }
+    .vt .pane + .pane { margin-top: 0; }   /* общее «.pane + .pane» сдвигало 2-4 карточки вниз */
+    .vt .k { color: var(--bk-muted); font-size: 13px; }
+    .vt .v { font-size: 28px; font-weight: 700; line-height: 1.15; margin: 6px 0 4px; font-family: var(--bk-font); }
+    .vt .s { color: var(--bk-muted); font-size: 13px; }
+    .v-goal { margin-top: 12px; font-size: 15px; }
+    /* 20.10 (Alex): «i» у карточки - подсказка при наведении (на телефоне - по нажатию), чёрная как .viz-tip */
+    .vt .k { display: flex; align-items: center; gap: 6px; }
+    .ii { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px;
+          border-radius: 50%; border: 1px solid var(--bk-muted); color: var(--bk-muted); font: 600 11px/1 var(--bk-font);
+          font-style: italic; cursor: help; outline: none; }
+    .ii:hover, .ii:focus { border-color: var(--bk-accent); color: var(--bk-accent); }
+    .ii .tip { display: none; position: absolute; top: 22px; left: -8px; z-index: 20; width: 260px; padding: 10px 12px;
+               background: #000; border: 1px solid var(--bk-line); border-radius: 10px; color: var(--bk-text);
+               font: 400 13px/1.45 var(--bk-font); font-style: normal; text-align: left; box-shadow: 0 6px 20px rgba(0,0,0,.5); }
+    .ii:hover .tip, .ii:focus .tip { display: block; }
+    .vt .pane:nth-child(4) .ii .tip { left: auto; right: -8px; }
+    @media (max-width: 760px) { .vt .pane:nth-child(even) .ii .tip { left: auto; right: -8px; } .ii .tip { width: 210px; } }
+    @media (max-width: 760px) { .vt { grid-template-columns: repeat(2, minmax(0, 1fr)); } .vt .v { font-size: 22px; } }
+  </style>
+  {% for v in veto %}
+  <div class="sec">
+    <div class="sec-head">
+      <h2><span class="dot {{ 'on' if v.running }}"></span> Gemma: {{ v.name }}</h2>
+    </div>
+    <div class="vt">
+      <div class="pane">
+        <div class="k">Готово писем <span class="ii" tabindex="0">i<span class="tip">Сколько писем Gemma уже разобрала из всех. Ниже - сколько часов осталось при нынешней скорости.</span></span></div>
+        <div class="v num">{{ v.done }} <span class="muted" style="font-size: 18px; font-weight: 400;">/ {{ v.need }}</span></div>
+        <div class="b-bar"><i style="width: {{ (100 * v.done / v.need) | round | int if v.need else 0 }}%;"></i></div>
+        <div class="s">{% if v.eta_h %}осталось ~{{ '%.0f' | format(v.eta_h) }} ч{% elif v.done >= v.need %}готово{% endif %}{% if v.avg_min %} · {{ '%.1f' | format(v.avg_min) }} мин/письмо{% endif %}{% if v.err %} · <span class="neg">ошибок {{ v.err }}</span>{% endif %}</div>
+      </div>
+      <div class="pane">
+        <div class="k">Без вето <span class="ii" tabindex="0">i<span class="tip">Доходность, если ставить все ставки правила no_cheap, как сейчас.</span></span></div>
+        <div class="v num">{{ '%+.1f%%' | format(v.roi_all) if v.roi_all is not none else '-' }}</div>
+        <div class="s">{{ v.n }} ставок</div>
+      </div>
+      <div class="pane">
+        <div class="k">С вето <span class="ii" tabindex="0">i<span class="tip">Доходность, если Gemma отменяет ставки, которые считает плохими. Зелёный - лучше, чем без вето.</span></span></div>
+        <div class="v num {% if v.gain is not none %}{{ 'pos' if v.gain > 0 else 'neg' }}{% endif %}">{{ '%+.1f%%' | format(v.roi_kept) if v.roi_kept is not none else '-' }}</div>
+        <div class="s">{{ v.n_kept }} ставок</div>
+      </div>
+      <div class="pane">
+        <div class="k">Отменено <span class="ii" tabindex="0">i<span class="tip">«Верно» - отменила ставку, которая проиграла бы: сберегла деньги. «Зря» - отменила ставку, которая выиграла бы: упустила прибыль.</span></span></div>
+        <div class="v num">{{ v.cancel }}</div>
+        <div class="s"><span class="pos">верно {{ v.cancel_lost }}</span> · <span class="neg">зря {{ v.cancel_won }}</span></div>
+      </div>
+    </div>
+    {% if v.gain is not none %}
+    <div class="v-goal">Вето даёт <b class="num {{ 'pos' if v.gain >= 5 else ('neg' if v.gain < 0 else '') }}">{{ '%+.1f' | format(v.gain) }} п.п.</b> <span class="muted">(нужно ≥ +5)</span>{% if v.won_cut is not none %} · зря отменено <b class="num {{ 'neg' if v.won_cut > 20 else 'pos' }}">{{ '%.0f' | format(v.won_cut) }}%</b> выигрышей <span class="muted">(можно ≤ 20%)</span>{% endif %}</div>
+    {% endif %}
+  </div>
+  {% endfor %}
+  {% endif %}
+
+  <div class="sec">
+    <div class="sec-head">
+      <h2>Варианты скилла</h2>
+      <span class="aside">сравнение logloss с рынком и прогресс обработки писем</span>
+    </div>
+    <div class="pane">
+      <div class="scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Вариант</th>
+              <th>Модель</th>
+              <th class="r" style="min-width: 130px;">Готово писем</th>
+              <th class="r">Ошибок</th>
+              <th>Последний ответ</th>
+              <th class="r" style="min-width: 180px;">logloss: скилл / рынок<br><span class="muted" style="font-weight: 400; font-size: 11px;">меньше - лучше, с итогом</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in rows %}
+            {% set pct_ok = (100 * r.ok / r.need) | round | int if r.need else 0 %}
+            <tr>
+              <td>
+                <div class="v-cell">
+                  <span class="dot {{ 'on' if r.running }}" title="{{ 'считается прямо сейчас' if r.running else 'стоит' }}"></span>
+                  <div>
+                    <span class="v-title">{{ r.name }}</span>
+                    <div class="v-sub">{{ r.what }}</div>
+                  </div>
+                </div>
+              </td>
+              <td><span class="chip-eng">{{ r.engine }}</span></td>
+              <td class="r num">
+                <span>{{ r.ok }} / {{ r.need }}</span>
+                <div class="p-bar"><i style="width: {{ pct_ok }}%;"></i></div>
+              </td>
+              <td class="r num {% if r.err %}neg{% else %}muted{% endif %}">{{ r.err }}</td>
+              <td class="muted">{{ r.last }}</td>
+              <td class="r num">
+                {% if r.ll is not none %}
+                  <b class="{{ 'pos' if r.ll < r.ll_m else 'neg' }}">{{ '%.3f' | format(r.ll) }}</b>
+                  <span class="muted">/ {{ '%.3f' | format(r.ll_m) }}</span>
+                  <span class="muted" style="font-size: 12px;">({{ r.n_ll }})</span>
+                {% else %}
+                  <span class="muted">итогов ещё нет</span>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <p class="foot">Зелёная пульсирующая точка - вариант считается прямо сейчас. Цифры предварительные: итоговое решение - по порогу в <code>agy_skill_compare.py</code> (logloss и деньги на настоящих ценах стакана), когда наберутся письма.</p>
+    </div>
+  </div>
+
+  <div class="sec">
+    <div class="sec-head">
+      <h2>Терминал</h2>
+      <span class="aside">рабочие папки и хвост логов прогонов · каждые 5 с</span>
+    </div>
+    <div class="term-box">
+      <div class="term-bar">
+        <span class="term-title">
+          <span class="dot on" id="term-live-dot" title="Связь активна"></span>
+          <span>agy_box / claude_run</span>
+        </span>
+        <span class="muted" style="font-size: 12px;">автообновление 5 с</span>
+      </div>
+      <pre id="term" class="term-pre">загрузка логов…</pre>
+    </div>
+  </div>
+
+  <div class="sec">
+    <div class="sec-head">
+      <h2>Последние ответы Claude</h2>
+      <span class="aside">за последние 6 часов</span>
+    </div>
+    <div class="pane">
+      {% if recent %}
+      <div class="scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Время</th>
+              <th>Вариант</th>
+              <th>Письмо</th>
+              <th class="r">Секунд</th>
+              <th>Почему (слова модели)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for a in recent %}
+            <tr>
+              <td class="muted num">{{ a.at_s }}</td>
+              <td><b>{{ a.set }}</b></td>
+              <td><span class="code-tag">{{ a.id }}</span></td>
+              <td class="r num">{{ '%.1f' | format(a.sec) if a.sec is number else a.sec }} с</td>
+              <td class="why-cell {{ '' if a.ok else 'neg' }}">{{ a.why }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="empty">За последние 6 часов ответов нет.</div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<script>
+  (function () {
+    var t = document.getElementById('term');
+    var dot = document.getElementById('term-live-dot');
+    function tick() {
+      fetch('/skill/log').then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.text();
+      }).then(function (x) {
+        var isAtBottom = t.scrollTop + t.clientHeight >= t.scrollHeight - 40;
+        t.textContent = x;
+        if (isAtBottom) {
+          t.scrollTop = t.scrollHeight;
+        }
+        if (dot) dot.classList.add('on');
+      }).catch(function () {
+        if (dot) dot.classList.remove('on');
+      });
+    }
+    tick();
+    setInterval(tick, 5000);
+  })();
+</script>
+{% endblock %}

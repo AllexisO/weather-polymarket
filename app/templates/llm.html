@@ -205,12 +205,14 @@
       <h3 style="margin: 0 0 4px;">В течение дня: шанс на верный вариант</h3>
       <p class="foot" style="margin: 0 0 8px;">LLM спрашиваем каждый час — она видит всё больше замеров. Честный соперник днём — рынок в тот же час: он тоже видит замеры.
         LightGBM после 08:00 не меняется.</p>
-      <table class="t"><thead><tr><th>Час</th><th>Город-дней</th><th>Gemini 3.8 Flash</th><th>DeepSeek V4 Pro</th><th>Рынок в этот час</th><th>LightGBM (с утра)</th></tr></thead><tbody>
+      <table class="t"><thead><tr><th>Час</th><th>Город-дней</th><th>Gemini 3.8 Flash</th><th>DeepSeek V4 Pro</th><th>Рынок в этот час</th><th>LightGBM (с утра)</th>{% for w, n in vs.extra_names %}<th>{{ n }}</th>{% endfor %}</tr></thead><tbody>
         {% for r in vs.hours %}{% set top = [r.llm_gem.chance if r.llm_gem else 0, r.llm_ds.chance if r.llm_ds else 0, r.mkt.chance if r.mkt else 0, r.v3.chance if r.v3 else 0] | max %}
         <tr><td>{{ '%02d' | format(r.h) }}:00</td><td class="num">{{ r.n }}</td>
-          {% for k in ['llm_gem', 'llm_ds', 'mkt', 'v3'] %}{% set v = r[k].chance if r[k] else none %}<td class="num">{% if v is not none and v == top %}<b class="pos">{{ pct(v) }}</b>{% else %}{{ pct(v) }}{% endif %}</td>{% endfor %}</tr>{% endfor %}
+          {% for k in ['llm_gem', 'llm_ds', 'mkt', 'v3'] %}{% set v = r[k].chance if r[k] else none %}<td class="num">{% if v is not none and v == top %}<b class="pos">{{ pct(v) }}</b>{% else %}{{ pct(v) }}{% endif %}</td>{% endfor %}
+          {% for w, _n in vs.extra_names %}{% set e = r.extra[w] %}<td class="num">{% if e %}<b class="{{ 'pos' if e.chance > e.mkt else 'neg' }}">{{ pct(e.chance) }}</b><br><span class="muted">рынок {{ pct(e.mkt) }} · {{ e.n }}</span>{% else %}—{% endif %}</td>{% endfor %}</tr>{% endfor %}
       </tbody></table>
-      <p class="foot" style="margin: 8px 0 0;">Зелёным — лучший в этом часу. LLM полезна для ставок, только если её шанс выше рынка в тот же час: рынок — это цена, по которой она покупает.</p>
+      <p class="foot" style="margin: 8px 0 0;">Остальные модели начали позже и работают в других городах (Antigravity — ещё Нью-Йорк, Париж, Токио), поэтому под каждой — рынок на тех же город-днях и сколько их: зелёным — точнее рынка, красным — хуже. «Gemini ставит сама» шансов не называет — её здесь нет.
+        Зелёным в первых колонках — лучший в этом часу. LLM полезна для ставок, только если её шанс выше рынка в тот же час: рынок — это цена, по которой она покупает.</p>
     </div>
     {% endif %}
     {% if vs.money %}

@@ -339,6 +339,7 @@
       {{ navlink('/models', 'модели', 'bar-chart', path.startswith('/models')) }}
       {{ navlink('/mm', 'бот-мейкер', 'results', path == '/mm') }}
       {{ navlink('/llm', 'LLM', 'message', path == '/llm') }}
+      {{ navlink('/skill', 'скилл', 'message', path == '/skill') }}
       {{ navlink('/bets', 'ставки', 'trending', path == '/bets', nc.open) }}
       {{ navlink('/cities', 'города', 'globe', path.startswith('/cities'), nc.cities if nc.cities else none) }}
       {{ navlink('/traders', 'трейдеры', 'shuffle', path.startswith('/traders'), nc.traders if nc.traders else none) }}
@@ -469,7 +470,7 @@
       ver = want;
     }).catch(function () {}).then(function () { busy = false; if (pending !== ver) setTimeout(apply, 2000); });
   }
-  var es = new EventSource('/api/stream');
+  var es = new EventSource('/api/stream?p=' + encodeURIComponent(location.pathname));  /* 20.10: /skill — ещё и файлы прогонов */
   es.onmessage = function (e) {
     if (ver === null) { ver = e.data; return; }  /* первый сигнал — то, что уже на странице */
     pending = e.data;

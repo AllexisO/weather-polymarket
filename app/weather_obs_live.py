@@ -79,6 +79,11 @@ MIN_BID = 0.05  # ниже — прибыль на ставку копеечна
 MIN_FILL = 1.0  # меньше доллара исполнения — считаем, что купить было нельзя
 FMI_WFS = "https://opendata.fmi.fi/wfs"
 FMI_STATIONS = {"helsinki": 100968}  # кошелёк obs_fmi: город -> fmisid (Хельсинки-Вантаа, та же площадка, что EFHK)
+# 15.10 (проверка проекта): ставки obs_fmi выключены. 13.10 FMI 9.0 → «8 уже невозможно», купили «нет» за 75¢ — итог 8 (METAR весь
+# день ≤ 8). Максимум FMI за день против итога Polymarket, 75 дней: «убивает» выигравший вариант в 15 днях (без запаса, как здесь),
+# в 2 даже с запасом 0.5° — датчик/усреднение FMI не совпадает с METAR. По правилу CLAUDE.md («хоть один день расходится — не
+# запускать») ставок нет; история кошелька сохранена.
+FMI_BETS = False
 
 
 def ensure_schema(conn):
@@ -329,7 +334,7 @@ def run():
             if best is not None:
                 bet_dead_buckets(conn, "obs", city, cfg, today, best[0], best[1], now, events_cache,
                                  f"станция уже {best[0]} (сводка {best[1]:%H:%M}Z)")
-    for city, fmisid in FMI_STATIONS.items():
+    for city, fmisid in (FMI_STATIONS.items() if FMI_BETS else ()):
         with item_guard(f"obs_fmi {city}", conn):
             cfg = OBS_CITIES[city]
             try:

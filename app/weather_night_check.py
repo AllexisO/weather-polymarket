@@ -13,6 +13,7 @@
   7. лимит Open-Meteo за сутки, стоп ставок;
   8. (с 30.09) боты-мейкеры: работают, заявки не двоятся и в пределах правил, расчёт не отстаёт, списки свежие;
      зависшие ставки; каждый быстрый источник замеров присылает новое.
+  9. (с 15.10) входные данные: таблицы, которые читают скрипты по крону, пополняются; строки письма LLM не пустые.
 
 Каждая проверка — ok / warn (внимание) / bad (ночью сломается). Итог — в night_check (JSON), страница /audit
 показывает его сверху; bad → weather_alerts поднимает красную плашку.
@@ -26,6 +27,7 @@ import sqlite3
 import time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -65,10 +67,23 @@ def check_audit():
     add("Ставки", not a["n_violations"], f"Ставки против правил и итогов: проверено {a['n_bets']}",
         f"нарушений {a['n_violations']}" + (": " + "; ".join(a["violations"][:3]) if a["violations"] else ""),
         "открыть страницу «Проверка» — там список по кошелькам")
-    broke = [w for w in a["wallets"] if w["key"] not in ("obs", "obs_fmi", "obs_fast", "obs_rt", "obs_wethr") and w["cash"] < 2.0]
+    import weather_paper as wp
+    broke = [w for w in a["wallets"] if w["key"] not in ("obs", "obs_fmi", "obs_fast", "obs_rt", "obs_wethr") and w["key"] not in wp.RETIRED
+             and w["cash"] < 2.0]
     add("Ставки", "warn" if broke else True, "У всех кошельков есть деньги на ставку",
         ", ".join(f"{w['key']} ${w['cash']:.2f}" for w in broke) or "у всех ≥ $2",
         "решить: пополнить или оставить — такие кошельки ночью ставить не будут" if broke else "")
+    # 15.10 (проверка проекта): главная ml3 13-14.10 пропустила 12 ставок «в кошельке меньше $2» — днём деньги стояли в открытых
+    # ставках, а к проверке выплаты вернулись, и строка выше была «в порядке». Пропуски из-за денег за 2 дня — отдельно.
+    c = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=30)
+    since = (date.today() - timedelta(days=1)).isoformat()
+    lack = [(w, n) for w, n in c.execute("""SELECT wallet, COUNT(*) FROM paper_trades WHERE status = 'skip' AND local_date >= ?
+                                             AND reason LIKE 'в кошельке меньше%' GROUP BY wallet ORDER BY 2 DESC""", (since,))
+             if w not in wp.RETIRED]
+    c.close()
+    add("Ставки", "warn" if lack else True, "Кошельки не пропускают ставки из-за денег (вчера и сегодня)",
+        ", ".join(f"{w} — {n} пропусков" for w, n in lack) or "пропусков нет",
+        "денег не хватает днём (стоят в открытых ставках): решить — пополнить или оставить" if lack else "")
 
 
 def check_cron(c, now):
@@ -280,21 +295,22 @@ def check_decisions(c, now):
     have = {}
     for w, city, d in c.execute("SELECT wallet, city, local_date FROM paper_trades WHERE local_date >= ?", (min(due.values()),)):
         have.setdefault(w, set()).add((city, d))
-    wallets = sorted(set(wp.WALLETS) | set(wp.NO_WALLETS) | set(wp.MAKER_WALLETS))
+    # 15.10 (проверка проекта): выключенные 14.10 кошельки (RETIRED) не решают — раньше давали 8 ложных «внимание» каждый день
+    wallets = sorted((set(wp.WALLETS) | set(wp.NO_WALLETS) | set(wp.MAKER_WALLETS)) - set(wp.RETIRED))
     def started(w, city, d):
         # 2026-09-28: кошелёк, заведённый днём, по утру этого дня решать не мог — не считать это пропуском
         st = wp.START_TS.get(w)
         t8 = datetime.fromisoformat(d).replace(hour=8, tzinfo=ZoneInfo(OBS_CITIES[city]["tz"]))
         return not st or t8 >= datetime.fromisoformat(st)
-    for w in ["ml3"] + [x for x in wallets if x != "ml3"]:
+    for w in ["ml5"] + [x for x in wallets if x != "ml5"]:   # 20.10: главная — v5 (ml5)
         miss = [city for city, d in due.items() if started(w, city, d) and (city, d) not in have.get(w, set())]
-        main = w == "ml3"
+        main = w == "ml5"
         if main or miss:
             add("Решения", (True if not miss else ("warn" if not main else False)),
                 f"{'Главная модель' if main else w}: решение по каждому городу, где прошло 08:00",
                 f"решено {len(due) - len(miss)} из {len(due)}" + (f"; нет: {', '.join(miss[:8])}" + (" …" if len(miss) > 8 else "") if miss else ""),
                 "посмотреть лог weather_paper / weather_ml_fast — был ли снимок в 08:00 по этим городам" if miss else "")
-    others_ok = [w for w in wallets if w != "ml3" and not [c2 for c2, d in due.items()
+    others_ok = [w for w in wallets if w != "ml5" and not [c2 for c2, d in due.items()
                                                           if started(w, c2, d) and (c2, d) not in have.get(w, set())]]
     if others_ok:
         add("Решения", True, "Остальные кошельки приняли решения", f"{len(others_ok)} из {len(wallets) - 1} — по всем городам")
@@ -456,7 +472,61 @@ def check_logic(c, now):
         add("Логика", x["level"] == "warn" and "warn", x["title"], x["detail"], x["fix"])
     if not rest:
         add("Логика", True, "Проверка логики (пн и чт): всё сходится",
-            f"{len(checks)} проверок, {datetime.fromisoformat(r[0]).astimezone(ZoneInfo("Europe/Chisinau")):%d.%m %H:%M}")
+            f"{len(checks)} проверок, {datetime.fromisoformat(r[0]).astimezone(ZoneInfo(TZ_HOME)):%d.%m %H:%M}")
+
+
+# 15.10 (Alex: «почему ошибки находятся, только когда я спрашиваю?»): строка «NWS forecaster note» в письме LLM была пустой во всех
+# 2842 письмах с 03.10 — afd_signals не пополняется с 25.09, а проверки смотрели только «скрипт отработал без ошибок».
+# Известные и решённые пустоты — здесь (видны как «в порядке» с пояснением, а не прячутся).
+KNOWN_EMPTY = {"NWS forecaster note": "известно 15.10: полный текст NWS не помогает (PRD §10), строку убрать после 31.10",
+               "afd_signals": "известно 15.10: weather_afd.py выключен, читает только строка письма LLM (см. выше)",
+               "llm_notebook": "известно 13.10: тетрадь LLM выключена решением Alex (NOTEBOOK_ON = False), чтение не срабатывает"}
+EMPTY_VALUES = {"", "none", "nan", "n/a", "null", "-", "unknown"}
+
+
+def check_inputs(c, now):
+    """Данные на входе не пустые и не застряли — то, чего не видно по «скрипт отработал без ошибок»:
+    1) таблица с local_date перестала пополняться (> 2 дней), а работающий по крону скрипт её читает;
+    2) строка письма LLM пустая (none/nan/…) в ≥ 90% писем за сутки."""
+    try:
+        active = {Path(x).stem for x in __import__("re").findall(r"([a-z_0-9]+\.py)", "\n".join(
+            l for l in (DATA / "night" / "crontab.txt").read_text().splitlines() if not l.lstrip().startswith("#")))}
+    except OSError:
+        active = set()
+    src = {s: (Path(__file__).parent / f"{s}.py").read_text() for s in active if (Path(__file__).parent / f"{s}.py").exists()}
+    old = (now.date() - timedelta(days=2)).isoformat()
+    stale = []
+    for (t,) in c.execute("SELECT m.name FROM sqlite_master m WHERE m.type = 'table' AND m.sql NOT LIKE '%WITHOUT ROWID%' "
+                          "AND EXISTS (SELECT 1 FROM pragma_table_info(m.name) p WHERE p.name = 'local_date')").fetchall():
+        last = c.execute(f"SELECT max(local_date) FROM (SELECT local_date FROM {t} ORDER BY rowid DESC LIMIT 500)").fetchone()
+        readers = sorted(s for s, code in src.items() if __import__("re").search(rf"(FROM|JOIN)\s+{t}\b", code))
+        if last and last[0] and last[0] < old and readers:
+            stale.append((t, last[0], readers))
+    for t, last, readers in stale:
+        known = KNOWN_EMPTY.get(t)
+        add("Входные данные", True if known else "warn", f"Таблица {t} не пополняется с {last}",
+            f"её читает: {', '.join(readers)}" + (f" — {known}" if known else ""),
+            "" if known else "включить сбор или убрать чтение — иначе скрипт молча работает без этих данных")
+    if not stale:
+        add("Входные данные", True, "Все таблицы, которые читают скрипты по крону, свежие", f"старше {old} — нет")
+    since = (now - timedelta(days=1)).isoformat()
+    n, empty = 0, {}
+    for (p,) in c.execute("SELECT prompt FROM llm_hour_preds WHERE ts_utc >= ? AND prompt IS NOT NULL", (since,)):
+        n += 1
+        for line in p.splitlines():
+            k, sep, v = line.partition(": ")
+            if sep and 2 < len(k) < 60 and k[0].isalpha() and not k[:2].isdigit():
+                e = empty.setdefault(k, [0, 0])
+                e[0] += 1
+                e[1] += v.strip().lower().rstrip(".") in EMPTY_VALUES
+    bad = [(k, e) for k, e in empty.items() if e[0] >= 10 and e[1] >= 0.9 * e[0]]
+    for k, (cnt, emp) in bad:
+        known = KNOWN_EMPTY.get(k)
+        add("Входные данные", True if known else "warn", f"В письме LLM строка «{k}» пустая",
+            f"пустая в {emp} из {cnt} писем за сутки" + (f" — {known}" if known else ""),
+            "" if known else "LLM не получает эти данные: найти, откуда строка берётся, и почему источник пуст")
+    if n and not bad:
+        add("Входные данные", True, "В письмах LLM нет пустых строк", f"писем за сутки: {n}")
 
 
 def check_notes(mode):
@@ -491,7 +561,7 @@ def main():
     c = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=30)
     extra = {"morning": [(check_night_done, (c, now))], "midday": [(check_decisions, (c, now))]}.get(mode, [])
     for fn, args in extra + [(check_cron, (c, now)), (check_db, (c,)), (check_models, (c, now)), (check_misc, (c, now)),
-                             (check_bots, (c, now)), (check_stuck_bets, (c, now)), (check_logic, (c, now)), (check_fastobs, (now,)), (check_netatmo, (now,)), (check_backup, (now,))]:
+                             (check_bots, (c, now)), (check_stuck_bets, (c, now)), (check_logic, (c, now)), (check_inputs, (c, now)), (check_fastobs, (now,)), (check_netatmo, (now,)), (check_backup, (now,))]:
         with item_guard(fn.__name__):
             fn(*args)
     c.close()

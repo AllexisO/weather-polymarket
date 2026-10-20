@@ -29,6 +29,10 @@ MODEL = "gemini-3.8-flash-medium"
 TIMEOUT = 240            # секунд на одно письмо (обычно 3-20 с)
 PAUSE_SEC = 3600
 QUOTA_WORDS = ("RESOURCE_EXHAUSTED", "quota", "Quota", "rate limit", "Rate limit")
+# 15.10: Google иногда отвечает 503 «Eligibility check failed: UNAVAILABLE» за 2-15 с, через минуту работает
+# (10-15.10 — 9 писем, на /status «с пропусками») — две повторные попытки с паузой
+BUSY_WORDS = ("UNAVAILABLE", "code 503")
+BUSY_RETRY = (20, 40)    # секунд до повтора; вместе с ответами укладывается в AGY_WAIT (480 с) погодного скрипта
 
 
 def log(msg):
@@ -86,6 +90,12 @@ def main():
         res, err = ask(text)
         # агент иногда лезет в инструменты (в режиме без человека им отказано) и отвечает пустым — один повтор
         if res and not (res.get("response") or "").strip() and res.get("status") == "SUCCESS":
+            res, err = ask(text)
+        for wait in BUSY_RETRY:
+            if (res and (res.get("response") or "").strip()) or not any(w in json.dumps(res or {}) + (err or "") for w in BUSY_WORDS):
+                break
+            log(f"{name}: Google 503 — повтор через {wait} с")
+            time.sleep(wait)
             res, err = ask(text)
         blob = json.dumps(res or {}) + (err or "")
         if any(w in blob for w in QUOTA_WORDS) and not (res and (res.get("response") or "").strip()):

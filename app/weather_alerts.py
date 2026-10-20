@@ -25,7 +25,7 @@ DB_PATH = Path(os.environ.get("POLY_LAB_DB", Path(__file__).parent.parent / "dat
 from jobs_info import JOBS as _ALL_JOBS
 JOBS = {key: (label, timedelta(minutes=age)) for key, label, _s, _sch, age, _log in _ALL_JOBS
         if key != "weather_alerts"}  # сам себя не проверяет — это видно на /status
-MAIN_WALLET = "ml3"
+MAIN_WALLET = "ml5"   # 20.10 решение Alex: главная — v5
 LOSS_ALERT = 50.0  # $ за сутки по закрытым ставкам главной модели (решение Alex, 2026-09-26)
 
 
@@ -67,10 +67,13 @@ def check(conn):
         # 2026-09-28: утро / день / вечер — последняя проверка каждого вида
         has_mode = "mode" in [x[1] for x in conn.execute("PRAGMA table_info(night_check)")]
         names = {"morning": "Утренняя", "midday": "Дневная", "evening": "Вечерняя"}
+        # 2026-10-18: проблема снята, если позже прошла проверка без проблем (вечер 17.10 — опоздания после перезагрузки —
+        # висел до следующего вечера, хотя утро и день 18.10 прошли чисто)
+        clean = conn.execute("SELECT MAX(run_at) FROM night_check WHERE bad = 0").fetchone()[0]
         for mode in (names if has_mode else ["evening"]):
             r = conn.execute("SELECT run_at, bad FROM night_check" + (" WHERE mode = ?" if has_mode else " WHERE ? = ?")
                              + " ORDER BY run_at DESC LIMIT 1", (mode,) if has_mode else (1, 1)).fetchone()
-            if r and r[1] and now - datetime.fromisoformat(r[0]) < timedelta(hours=26):
+            if r and r[1] and now - datetime.fromisoformat(r[0]) < timedelta(hours=26) and not (clean and clean > r[0]):
                 found[f"night_check:{mode}"] = f"{names[mode]} проверка: проблем {r[1]} — что делать, на странице «Проверка» (/audit)"
     # 2026-09-27: та же проверка, что preflight.py (все кошельки прогоняются в памяти) —
     # поломка видна раньше, чем упадёт настоящий запуск кошельков
