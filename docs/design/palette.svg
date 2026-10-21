@@ -100,8 +100,8 @@
 <text x="644" y="439" font-size="11" fill="#FFD58A" font-family="ui-monospace, Menlo, Consolas, monospace">#FFFFFF</text>
 <text x="598" y="468" font-size="11" fill="#A1A1AA">главная кнопка</text>
 <rect x="776" y="398" width="176" height="84" rx="10" fill="#1C1C1E" stroke="#2E2E31"/>
-<rect x="786" y="408" width="36" height="36" rx="8" fill="#1E3E62" stroke="#3A3A3E"/>
+<rect x="786" y="408" width="36" height="36" rx="8" fill="#2E2E31" stroke="#3A3A3E"/>
 <text x="832" y="423" font-size="12" font-weight="600" fill="#F4F4F5">градиент feat</text>
-<text x="832" y="439" font-size="11" fill="#FFD58A" font-family="ui-monospace, Menlo, Consolas, monospace">#1E3E62</text>
-<text x="786" y="468" font-size="11" fill="#A1A1AA">→ #0B192C</text>
+<text x="832" y="439" font-size="11" fill="#FFD58A" font-family="ui-monospace, Menlo, Consolas, monospace">#2E2E31</text>
+<text x="786" y="468" font-size="11" fill="#A1A1AA">→ #1C1C1E</text>
 </svg>
