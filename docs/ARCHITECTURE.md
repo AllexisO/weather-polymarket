@@ -210,6 +210,7 @@ $100 на кошелёк (`ml`, `mm_mk`, `mm` — $300, `copy` — $1000, `ml3` 
 | `ml4` / `ml4_cal`, `ml4e` / `ml4e_cal` | v4 и v4e; и их смеси с рынком, порог 3 п.п. |
 | **`ml5`** / `ml5_cal` | **главная с 20.10**: v5 «от рынка» (`train_v5`); чистая (правила ml3) и смесь 35/65 |
 | `no_cheap5` / `no_mid5` / `no_big5` / `ml5_cal30` | с 20.10 10:00: двойники `no_cheap` / `no_mid` / `no_big` / `ml3_cal30` — то же правило на смеси v5 (`ml5c_model_p`) |
+| `ml5_no` | с 21.10 17:00: двойник `ml3_no` — «нет» при перевесе ≥ 10 п.п. на чистой v5 (`ml5_model_p`) |
 | `ml3_cal` | смесь v3 с рынком, порог 3 п.п.; `ml3_cal15` / `ml3_cal30` — не дешевле 15¢ / «да» от 30¢; `ml3_cal_k` — Келли ×0.25 |
 | `ml3_city` | как `ml3_cal`, только лучшая половина городов за 45 дней (`CITY_PICK`) |
 | `ml3_conf` | как `ml3_cal`, без ставки при фаворите ≥ 60¢ (`CONF_SKIP`) |
@@ -318,7 +319,7 @@ Gemini напрямую в Google при `GEMINI_DIRECT`, отказ → OpenRou
   Движок `BT_ENGINE`:
   - `agy` — Gemini, бюджет `gemini_week.txt` и `BT_BUDGET`;
   - `claude` — `claude_box.sh`, ключ `data/agy_box/claude_token` (не читать);
-  - `gemma` — **`gemma_box.py`**, Ollama на ПК Alex, команды в той же коробке с `--network none`;
+  - `gemma` — **`gemma_box.py`**, Ollama в виртуальной машине на NAS, RTX 2060, команды в той же коробке с `--network none`;
   - `or` — тот же `gemma_box.py` через OpenRouter, стоп при балансе < $5.
   - С 20.10 каждый шаг `gemma_box.py` (размышление, команда, вывод, ответ, повторы обвязки) сразу пишется в
     `data/research/agy_trace/<набор><движок><тег>/<письмо>.jsonl` (`GEMMA_TRACE`); терминал /skill показывает его вживую

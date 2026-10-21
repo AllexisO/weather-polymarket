@@ -1,5 +1,5 @@
 #!/bin/sh
-# 21.10 (решение Alex): «ИИ с дневником» в фоне — docs/DIARY.md. Gemma на ПК Alex; не запускается, пока идёт прогон скилла.
+# 21.10 (решение Alex): «ИИ с дневником» в фоне — docs/DIARY.md. Gemma в виртуальной машине на NAS; не запускается, пока идёт прогон скилла.
 # Запуск: ./diary_run.sh <шаг> <город> <месяц> [...]   например: ./diary_run.sh cycle atlanta 2025-12 2026-01 --days=3
 cd /mnt/applications/docker/stacks/weather-lab || exit 1
 mkdir -p data/research/diary
