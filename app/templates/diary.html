@@ -65,6 +65,7 @@
   .term-bar .term-title { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; color: var(--bk-text); }
   .term-pre { margin: 0; padding: 14px; font: 12.5px/1.45 ui-monospace, Menlo, Consolas, monospace; color: #A3E39A;
               height: 460px; max-height: 460px; overflow-y: auto; white-space: pre-wrap; word-break: break-word; }
+  .st-done { color: #D3DDFB; font-weight: 600; }   /* «Завершено» — лавандовый из палитры (DESIGN_SYSTEM.md), «В процессе» — зелёный */
   .why-cell { font-size: 13px; max-width: 420px; word-break: break-word; line-height: 1.45; }
 
   @media (max-width: 900px) {
@@ -81,10 +82,71 @@
 
 <div class="bk">
   <div class="top">
-    <h1>Дневник ИИ{% if city %}: {{ city | replace('_', ' ') | title }}{% endif %}</h1>
+    <h1 id="diary-h1">Дневник ИИ{% if city %}: {{ city | replace('_', ' ') | title }}{% endif %}</h1>
     <p>Обновлено {{ updated }} · страница обновляется при каждом новом ответе · терминал - каждые 3 с · устройство - <code>docs/DIARY.md</code></p>
   </div>
 
+  {# 22.10 (Alex: «чтобы я не спрашивал каждый раз — видно, что происходит»): все запуски, сравнение, заметки #}
+  {% if ov %}
+  <div class="sec" id="ov-block">
+    <div class="sec-head">
+      <h2>Что происходит</h2>
+      <span class="aside">все запуски сразу · нажмите на запуск, чтобы открыть его ниже</span>
+    </div>
+    <div class="pane scroll">
+      <table>
+        <thead><tr><th>Запуск</th><th>Категория</th><th>Модель</th><th>Месяцы</th><th>Статус</th><th>Сейчас</th><th class="r">Сделано</th><th>Закончит</th><th class="r">Запрос</th></tr></thead>
+        <tbody>
+          {% for c in ov.cards %}
+          <tr>
+            <td><a href="/diary?city={{ c.run }}"{% if c.run == city %} style="font-weight:700"{% endif %}>{{ c.run }}</a></td>
+            <td>{{ c.category }}</td>
+            <td>{{ c.model }}</td>
+            <td class="num">{{ c.learn }} → {{ c.test }}{% if c.days %} <span class="muted">· {{ c.days }} дн.</span>{% endif %}</td>
+            <td style="white-space: nowrap;"><span class="{{ 'pos' if c.status.code == 'on' else ('neg' if c.status.code in ('bad', 'warn') else ('st-done' if c.status.code == 'done' else 'muted')) }}">{{ c.status.text }}</span>{% if c.status.at %}<br><span class="num muted">{{ c.status.at }}</span>{% endif %}{% if c.status.since %}<br><b class="num timer" data-since="{{ c.status.since }}">{{ c.status.elapsed }}</b>{% endif %}{% if c.quiet %}<br><span class="neg">{{ c.quiet }}</span>{% endif %}</td>
+            <td>{{ c.now }}</td>
+            <td class="r num">{{ c.done }} из {{ c.need }}<div class="b-bar"><i class="{{ 'pos' if c.pct >= 100 }}" style="width: {{ c.pct }}%"></i></div></td>
+            <td class="num">{% if c.eta %}≈ {{ c.eta }} <span class="muted">(ещё {{ c.left }})</span>{% elif c.pct >= 100 %}<span class="muted">готово</span>{% else %}-{% endif %}</td>
+            <td class="r num">{{ c.avg or '-' }}{% if c.cost %}<br><span class="muted">${{ '%.2f' | format(c.cost) }} по цене API</span>{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="pane scroll">
+      <div class="t-s" style="margin-bottom: 8px;">Средний шанс, который ИИ дал верному варианту, <b>ИИ / рынок</b> в тот же момент (больше — лучше) · ниже — промах максимума, °F</div>
+      <table>
+        <thead><tr><th>Запуск</th>{% for t in ov.compare_tags %}<th class="r">{{ t }}</th>{% endfor %}</tr></thead>
+        <tbody>
+          {% for r in ov.compare %}
+          <tr>
+            <td><a href="/diary?city={{ r.run }}">{{ r.run }}</a><br><span class="muted">{{ r.model }}</span></td>
+            {% for x in r.cells %}
+            <td class="r num">{% if x and x.ai is not none %}<b class="{{ 'pos' if x.mkt is none or x.ai >= x.mkt else 'neg' }}">{{ x.ai }}%</b> <span class="muted">/ {{ x.mkt if x.mkt is not none else '-' }}%</span>{% if x.err is not none %}<br><span class="muted">{{ x.err }}°</span>{% endif %}{% else %}<span class="muted">-</span>{% endif %}</td>
+            {% endfor %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="pane">
+      <div class="t-s" style="margin-bottom: 8px;">Заметки Claude: что видно, что запущено и почему (новые сверху)</div>
+      {% if ov.news %}
+      <table>
+        <tbody>
+          {% for n in ov.news %}
+          <tr><td class="muted num" style="white-space: nowrap; vertical-align: top;">{{ n.at }}</td><td class="why-cell" style="max-width: none;">{{ n.text }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}<div class="empty">Заметок пока нет.</div>{% endif %}
+    </div>
+  </div>
+  {% endif %}
+
+  <div id="run-detail" data-city="{{ city or '' }}">
   {% if not city %}
   <div class="pane"><div class="empty">Дневник ещё не запускали: нет данных в <code>data/research/diary/</code>.</div></div>
   {% else %}
@@ -93,7 +155,7 @@
     <div class="pane">
       <div class="t-k">Модель</div>
       <div class="t-v">{{ model }}</div>
-      <div class="t-s">Ollama · виртуальная машина на NAS (RTX 2060 Super)</div>
+      <div class="t-s">{% if model.startswith("claude") %}Claude Code · изолированный контейнер без инструментов, подписка{% else %}Ollama · виртуальная машина на NAS (RTX 2060 Super){% endif %}</div>
     </div>
     <div class="pane">
       <div class="t-k">Состояние</div>
@@ -281,32 +343,61 @@
         {% endif %}
       </div>
       {% endfor %}
-      <script>
-        document.getElementById('ex-tabs').addEventListener('click', function (e) {
-          var a = e.target.closest('a'); if (!a) return; e.preventDefault();
-          document.querySelectorAll('#ex-tabs a').forEach(function (x) { x.classList.toggle('on', x === a); });
-          document.querySelectorAll('.ex-tab').forEach(function (x) { x.hidden = x.dataset.tab !== a.dataset.tab; });
-        });
-      </script>
       {% else %}
       <div class="empty">Экзаменов ещё не было.</div>
       {% endif %}
     </div>
   </div>
   {% endif %}
+  </div>
 </div>
 
-{% if city %}
 <script>
+  /* 22.10 (Alex): переключение запусков без перезагрузки — подменяем только низ страницы и адрес */
   (function () {
-    var t = document.getElementById('term');
-    var dot = document.getElementById('term-live-dot');
-    function tick() {
-      fetch('/diary/log?city={{ city }}').then(function (r) {
+    var tab = null;   /* выбранная вкладка экзаменов — держим и после живого обновления */
+    function showTab(key) {
+      var links = document.querySelectorAll('#ex-tabs a');
+      if (!links.length) return;
+      if (!key || !document.querySelector('#ex-tabs a[data-tab="' + key + '"]')) return;
+      links.forEach(function (x) { x.classList.toggle('on', x.dataset.tab === key); });
+      document.querySelectorAll('.ex-tab').forEach(function (x) { x.hidden = x.dataset.tab !== key; });
+    }
+    document.addEventListener('click', function (e) {
+      var t = e.target.closest('#ex-tabs a');
+      if (t) { e.preventDefault(); tab = t.dataset.tab; showTab(tab); return; }
+      var a = e.target.closest('a[href^="/diary?"]');
+      if (!a || e.ctrlKey || e.metaKey || e.shiftKey || e.button !== 0) return;
+      e.preventDefault();
+      load(a.getAttribute('href'), true);
+    });
+    function load(href, push) {
+      fetch(href, { cache: 'no-store' }).then(function (r) { if (!r.ok) throw r; return r.text(); }).then(function (html) {
+        var doc = new DOMParser().parseFromString(html, 'text/html');
+        ['run-detail', 'ov-block', 'diary-h1'].forEach(function (id) {
+          var o = document.getElementById(id), n = doc.getElementById(id);
+          if (o && n) { o.innerHTML = n.innerHTML; if (n.dataset.city !== undefined) o.dataset.city = n.dataset.city; }
+        });
+        if (push) history.pushState(null, '', href);
+        tab = null;
+        var term = document.getElementById('term');
+        if (term) term.textContent = 'загрузка…';
+        tick(true);
+      }).catch(function () { location.href = href; });
+    }
+    window.addEventListener('popstate', function () { load(location.pathname + location.search, false); });
+    new MutationObserver(function () { if (tab) showTab(tab); })
+      .observe(document.getElementById('run-detail'), { childList: true, subtree: true });
+
+    function city() { return document.getElementById('run-detail').dataset.city || ''; }
+    function tick(force) {
+      var t = document.getElementById('term'), dot = document.getElementById('term-live-dot');
+      if (!t || !city()) return;
+      fetch('/diary/log?city=' + encodeURIComponent(city())).then(function (r) {
         if (!r.ok) throw new Error('HTTP ' + r.status);
         return r.text();
       }).then(function (x) {
-        var atBottom = t.scrollTop + t.clientHeight >= t.scrollHeight - 40;
+        var atBottom = force || t.scrollTop + t.clientHeight >= t.scrollHeight - 40;
         if (t.textContent !== x) {
           t.textContent = x;
           if (atBottom) t.scrollTop = t.scrollHeight;
@@ -314,9 +405,20 @@
         if (dot) dot.classList.add('on');
       }).catch(function () { if (dot) dot.classList.remove('on'); });
     }
-    tick();
-    setInterval(tick, 3000);
+    tick(true);
+    setInterval(function () { tick(false); }, 3000);
+    /* «В процессе» — таймер идёт сам каждую секунду, не только при новых данных */
+    function timers() {
+      var now = Date.now() / 1000;
+      document.querySelectorAll('.timer[data-since]').forEach(function (el) {
+        var s = Math.max(0, Math.floor(now - Number(el.dataset.since)));
+        var h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60;
+        var txt = (h ? h + ' ч ' : '') + (h || m ? (h ? String(m).padStart(2, '0') : m) + ' мин ' : '') + String(x).padStart(2, '0') + ' с';
+        if (el.textContent !== txt) el.textContent = txt;
+      });
+    }
+    timers();
+    setInterval(timers, 1000);
   })();
 </script>
-{% endif %}
 {% endblock %}

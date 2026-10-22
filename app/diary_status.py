@@ -172,7 +172,7 @@ def page_data(city=None, version=None):
     cs = cities()
     city = city if city in cs else (cs[0] if cs else None)
     if not city:
-        return {"city": None, "cities": cs, "updated": _hm(time.time(), "%d.%m %H:%M:%S")}
+        return {"city": None, "cities": cs, "ov": overview(cs), "updated": _hm(time.time(), "%d.%m %H:%M:%S")}
     base = dl.OUT / city
     try:
         st = json.loads((base / "status.json").read_text())
@@ -257,7 +257,7 @@ def page_data(city=None, version=None):
     for v in versions:
         v["h"] = round(100 * v["words"] / mx)
 
-    return {"city": city, "cities": cs, "st": st, "state": state, "stages": stages, "learn": learn, "test": test,
+    return {"city": city, "cities": cs, "ov": overview(cs), "st": st, "state": state, "stages": stages, "learn": learn, "test": test,
             "model": st.get("model") or (calls[-1].get("model") if calls else dl.MODEL),
             "n_calls": len(run_calls), "avg_s": avg_s, "ok_pct": ok_pct, "n_ex": len(run_ex), "cur_call": cur_call,
             "tokens": sum((c.get("tokens") or 0) for c in run_calls), "rows": rows, "charts": charts,
@@ -305,8 +305,8 @@ def _label(label):
 def files_ver(city=None):
     """Отпечаток для живого обновления /diary: размер и время файлов дневника (кроме live.jsonl — терминал опрашивает сам)."""
     out = []
-    for f in sorted(dl.OUT.glob("*/*")) if dl.OUT.exists() else []:
-        if f.name == "live.jsonl" or f.is_dir():
+    for f in (sorted(dl.OUT.glob("*/*")) + [NEWS]) if dl.OUT.exists() else []:
+        if f.name == "live.jsonl" or f.is_dir() or not f.exists():
             continue
         try:
             st = f.stat()
@@ -314,3 +314,119 @@ def files_ver(city=None):
         except OSError:
             pass
     return "|".join(out)
+
+
+# ---- «Что происходит» (22.10, Alex: «чтобы я не спрашивал каждый раз — видно, что вообще происходит») ----
+NEWS = dl.OUT / "news.jsonl"      # заметки исследователя: python3 app/diary_lab.py note "текст"
+# «Сейчас» — какое действие идёт (22.10, Alex: «Круг 1 - экзамен, Проверка - новый месяц без дневника, Обучение…»)
+NOW_NAME = {"r0": "Контроль - экзамен без дневника", "study": "Обучение - знакомство с днями",
+            "r1": "Круг 1 - экзамен", "review_r1": "Круг 1 - разбор ошибок",
+            "r2": "Круг 2 - экзамен", "review_r2": "Круг 2 - разбор ошибок",
+            "r3": "Круг 3 - экзамен", "review_r3": "Круг 3 - разбор ошибок",
+            "final": "Финал - экзамен по учебному месяцу",
+            "n1": "Проверка - новый месяц с дневником", "n1_empty": "Проверка - новый месяц без дневника"}
+
+
+def _run_card(run):
+    """Один запуск: модель, этап, сколько сделано из скольких, когда закончит."""
+    base = dl.OUT / run
+    try:
+        st = json.loads((base / "status.json").read_text())
+    except (OSError, ValueError):
+        st = {}
+    calls = [c for c in _jsonl(base / "calls.jsonl") if c.get("t", 0) >= st.get("started", 0)] if st else []
+    n_days = {}
+    for m in _months(run):
+        try:
+            k = len(dl.load(run, m)["days"])
+        except (OSError, ValueError):
+            k = 0
+        n_days[m] = min(k, st["days"]) if st.get("days") else k
+    stages, learn, test = _stages(run, st, calls, n_days)
+    state = _state(run, st)
+    if st.get("step") == "exam":     # отдельный экзамен (не цикл): сделано — ответы этого экзамена
+        tag = (st.get("cmd") or "").split()[3:4] or [""]
+        f = dl.exam_file(run, learn, tag[0])
+        stages = [{"key": tag[0], "month": learn, "need": n_days.get(learn, 0) * len(dl.MOMENTS),
+                   "done": len(_jsonl(f)) if f.exists() else 0, "state": "cur" if not st.get("finished") else "done",
+                   "what": TAG_NAME.get(tag[0], tag[0])}]
+        test = None
+    # разбор, который ещё не начался: «нужно» неизвестно до экзамена — считаем все дни
+    need = sum(s["need"] or (n_days.get(s["month"], 0) if s["key"].startswith("review_") else 0) for s in stages)
+    done = sum(min(s["done"], s["need"] or s["done"]) for s in stages)
+    cur = next((s for s in stages if s["state"] == "cur"), None)
+    avg = sum(c["seconds"] for c in calls) / len(calls) if calls else None
+    left = max(need - done, 0)
+    eta = _hm(time.time() + left * avg, "%H:%M") if avg and state["code"] == "on" and left else None
+    cost = sum(c.get("cost_usd") or 0 for c in calls)
+    # «Статус»: Завершено <дата время> / В процессе <сколько идёт — таймер на странице тикает сам>
+    if st.get("finished"):
+        status = {"code": "bad" if st.get("error") else "done", "text": "Остановлено" if st.get("error") else "Завершено",
+                  "at": _hm(st["finished"]), "since": None}
+    elif st:
+        status = {"code": "warn" if state["code"] == "warn" else "on", "text": "В процессе", "since": st.get("started"),
+                  "elapsed": _dur(time.time() - st.get("started", time.time()))}
+    else:
+        status = {"code": "none", "text": "Не запускали", "since": None}
+    now_key = st.get("stage") if st and not st.get("finished") else None
+    # «Категория» (22.10, Alex): откуда работает модель — OpenRouter (id с «/»), Claude (Claude Code по подписке Alex,
+    # в изолированном контейнере), Agy (Gemini через Antigravity), Server (своя Gemma на NAS)
+    m = st.get("model") or ""
+    category = ("OpenRouter" if "/" in m else "Claude" if m.startswith("claude") else "Agy" if m.startswith("gemini")
+                else "Server")
+    return {"run": run, "model": m, "category": category, "state": state, "status": status, "learn": learn, "test": test,
+            "now": NOW_NAME.get(now_key, now_key or ""), "quiet": state["text"] if state["code"] == "warn" else "",
+            "days": st.get("days"), "stage": cur["what"] if cur else "", "done": done, "need": need,
+            "pct": round(100 * done / need) if need else 0, "eta": eta, "left": left,
+            "avg": _dur(avg) if avg else None, "cost": round(cost, 2) if cost else None}
+
+
+def _compare(runs):
+    """Средний шанс верному варианту у ИИ и у рынка по этапам — по всем запускам (в процентах, больше — лучше)."""
+    rows = []
+    for run in runs:
+        try:
+            st = json.loads((dl.OUT / run / "status.json").read_text())
+        except (OSError, ValueError):
+            st = {}
+        cells = []
+        for tag in LEARN_TAGS + TEST_TAGS:
+            month = st.get("test") if tag in TEST_TAGS else st.get("learn")
+            f = dl.exam_file(run, month, tag) if month else None
+            if not f or not f.exists():   # отдельный экзамен (шаг exam): месяц — по файлу
+                fs = sorted((dl.OUT / run).glob(f"exam_*_{tag}.jsonl"))
+                f, month = (fs[-1], fs[-1].stem[5:12]) if fs else (None, None)
+            if not f or not f.exists():
+                cells.append(None)
+                continue
+            try:
+                days = {d["date"]: d for d in dl.load(run, month)["days"]}
+            except (OSError, ValueError):
+                cells.append(None)
+                continue
+            ai, mk, err, n = [], [], [], 0
+            for a in _jsonl(f):
+                d = days.get(a["date"])
+                if not d:
+                    continue
+                n += 1
+                ai.append(a["probs"].get(d["win"], 0) if a.get("ok") else 0)
+                pr = {k: v["p"] for k, v in d["prices"].get(a["moment"], {}).items()}
+                sm = sum(pr.values())
+                if sm:
+                    mk.append(pr.get(d["win"], 0) / sm)
+                if a.get("ok") and dl._num(a.get("expected_max")):
+                    err.append(abs(float(a["expected_max"]) - d["actual_max"]))
+            cells.append({"ai": round(100 * sum(ai) / len(ai)) if ai else None,
+                          "mkt": round(100 * sum(mk) / len(mk)) if mk else None,
+                          "err": round(sum(err) / len(err), 1) if err else None, "n": n})
+        rows.append({"run": run, "model": st.get("model") or "", "months": f"{st.get('learn')} → {st.get('test')}",
+                     "cells": cells})
+    return rows
+
+
+def overview(runs):
+    news = sorted(_jsonl(NEWS), key=lambda x: x.get("t", 0), reverse=True)[:30] if NEWS.exists() else []
+    return {"cards": [_run_card(r) for r in runs], "compare": _compare(runs),
+            "compare_tags": [TAG_NAME[t] for t in LEARN_TAGS + TEST_TAGS],
+            "news": [dict(x, at=_hm(x.get("t"))) for x in news]}

@@ -17,6 +17,13 @@
   cycle  <город> <учебный> <проверочный>  всё подряд: study, r0 (без дневника), r1..r3 с разбором, final, проверка
 --days N — только первые N дней (проба). Движок — Gemma в виртуальной машине на NAS (Ollama, OLLAMA_URL / GEMMA_MODEL); не запускается,
 пока Gemma занята прогоном скилла (agy_skill_bt.py). Запуск в фоне — ./diary_run.sh.
+22.10 (Alex: Opus, изолированно): DIARY_ENGINE=claude — Claude (CLAUDE_MODEL, по умолчанию claude-opus-5-5) через
+claude_box.sh с CLAUDE_NO_TOOLS=1: контейнер без инструментов (нет поиска, интернета, команд, файлов), чистый вход, подписка.
+Месяцы — только после июня 2026 (знания Opus до июня 2026 — более ранняя погода могла попасть в обучение).
+Папка запуска — <город>_<метка> (atlanta_opus): у каждого движка свой дневник и экзамены.
+22.10 (Alex: «проверить модели под RX 7900 XTX до покупки», деньги — остаток OpenRouter): DIARY_ENGINE=openrouter,
+OR_MODEL=<id OpenRouter>. Запуск в контейнере collector (ключ OPENROUTER_API_KEY оттуда). Стоп-кран: все такие прогоны
+вместе — не больше DIARY_BUDGET ($1.20), и баланс не ниже $5 + запас LLM-кошельков до конца месяца ($0.35 в день).
 22.10 (Alex: «видеть и контролировать визуально»): страница /diary (app/diary_status.py). Для неё программа пишет
 live.jsonl — рассуждения модели построчно со временем (ответ идёт потоком), status.json — что запущено и какой этап.
 """
@@ -28,8 +35,10 @@ import os
 import re
 import sqlite3
 import subprocess
+import tempfile
 import sys
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import date, datetime, timedelta, timezone
@@ -42,7 +51,14 @@ ROOT = Path(__file__).resolve().parent.parent
 DB = Path(os.environ.get("POLY_LAB_DB", ROOT / "data" / "db" / "polymarket_lab.sqlite3"))
 OUT = Path(os.environ.get("DIARY_OUT", ROOT / "data" / "research" / "diary"))   # DIARY_OUT — проверка на копии
 URL = os.environ.get("OLLAMA_URL", "http://192.168.1.16:11434") + "/api/chat"
-MODEL = os.environ.get("GEMMA_MODEL", "gemma4:26b")
+ENGINE = os.environ.get("DIARY_ENGINE", "gemma")
+MODEL = {"claude": os.environ.get("CLAUDE_MODEL", "claude-opus-5-5"), "openrouter": os.environ.get("OR_MODEL", "")}.get(
+    ENGINE, os.environ.get("GEMMA_MODEL", "gemma4:26b"))
+OR_URL = "https://openrouter.ai/api/v1"
+OR_BUDGET = float(os.environ.get("DIARY_BUDGET", "1.20"))   # $ на все прогоны через OpenRouter вместе
+OR_FLOOR = 5.0                                               # баланс ниже — стоп (правило Alex)
+LLM_PER_DAY = 0.35                                           # расход LLM-кошельков в день (15-21.10 ~$0.33)
+CLAUDE_SYSTEM = "You are a careful weather forecaster. You have no tools and no internet: use only the text you are given."
 MOMENTS = [("eve", -1, 18), ("m08", 0, 8), ("m12", 0, 12)]   # (метка, день относительно дня маркета, час местного)
 DIARY_WORDS = 1500        # выше — предупреждение в журнале (дневник только дополняется, не обрезается)
 LESSONS_MAX = 3           # уроков с одного дня
@@ -88,7 +104,15 @@ def iowa(cfg, d1, d2):
     raise RuntimeError("Iowa: too many requests")
 
 
+def city_of(run):
+    """atlanta_opus → atlanta: папка запуска = город + метка движка."""
+    while run not in OBS_CITIES and "_" in run:
+        run = run.rsplit("_", 1)[0]
+    return run
+
+
 def build(city, month):
+    run, city = city, city_of(city)
     cfg = OBS_CITIES[city]
     tz = ZoneInfo(cfg["tz"])
     days = list(month_days(month))
@@ -122,7 +146,7 @@ def build(city, month):
         out.append({"date": ds, "start": start, "buckets": [bucket_label(lo, hi) for lo, hi in bks],
                     "win": bucket_label(*win), "actual_max": mx[0], "forecasts": fc, "fcst_vars": fv, "prices": prices,
                     "obs": [o for o in obs if start - 2 * 86400 <= o["t"] < start + 86400]})
-    path = OUT / city / f"data_{month}.json"
+    path = OUT / run / f"data_{month}.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({"city": city, "unit": cfg["unit"], "tz": cfg["tz"], "station": cfg["icao"], "days": out}))
     print(f"{city} {month}: {len(out)} дней с итогом, замеров {len(obs)} → {path}")
@@ -284,7 +308,107 @@ def set_status(city, **kw):
         pass
 
 
+def ask_claude(prompt, step, city, label):
+    """Один запрос — новый изолированный контейнер (claude_box.sh): ни памяти, ни инструментов."""
+    t0 = time.time()
+    live(city, "info", f"▶ запрос {step} {label}: {len(prompt)} символов", step, label)
+    work = Path(tempfile.mkdtemp(dir=ROOT / "data" / "agy_box" / "tmp", prefix="diary."))
+    try:
+        work.chmod(0o777)
+        (work / ".prompt.txt").write_text(prompt)
+        env = dict(os.environ, CLAUDE_NO_TOOLS="1", CLAUDE_MODEL=MODEL, CLAUDE_SYSTEM=CLAUDE_SYSTEM,
+                   DOCKER="sudo -n docker", AGY_UID="3000", AGY_GID="3000")
+        p = subprocess.run([str(ROOT / "claude_box.sh"), str(work / ".prompt.txt"), str(work), "900"],
+                           capture_output=True, text=True, env=env, timeout=1000)
+        out = json.loads(p.stdout) if p.stdout.strip().startswith("{") else {}
+    finally:
+        subprocess.run(["rm", "-rf", str(work)])
+    text = out.get("result") or ""
+    if not text:
+        live(city, "info", f"✗ пустой ответ: rc {p.returncode}, {(p.stderr or p.stdout)[-300:]}", step, label)
+    for line in text.splitlines():
+        if line.strip():
+            live(city, "answer", line[:300], step, label)
+    u = out.get("usage") or {}
+    rec = {"t": round(t0), "step": step, "label": label, "model": MODEL, "seconds": round(time.time() - t0, 1),
+           "prompt_chars": len(prompt), "prompt_tokens": (u.get("input_tokens") or 0) + (u.get("cache_read_input_tokens") or 0)
+           + (u.get("cache_creation_input_tokens") or 0), "tokens": u.get("output_tokens"),
+           "think_tokens": (u.get("output_tokens_details") or {}).get("thinking_tokens"), "cost_usd": out.get("total_cost_usd"),
+           "tools_used": (u.get("server_tool_use") or {}), "think": "", "response": text}
+    with open(OUT / city / "calls.jsonl", "a") as f:
+        f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    live(city, "info", f"✓ ответ за {rec['seconds']:.0f} с, {rec['tokens'] or 0} токенов, ${rec['cost_usd'] or 0:.3f}", step, label)
+    return text
+
+
+def _or_get(path):
+    req = urllib.request.Request(OR_URL + path, headers={"Authorization": f"Bearer {os.environ['OPENROUTER_API_KEY']}"})
+    with urllib.request.urlopen(req, timeout=60) as r:
+        return json.loads(r.read())
+
+
+def or_guard():
+    """Стоп-кран по деньгам: свой бюджет на все прогоны OpenRouter и баланс с запасом для LLM-кошельков."""
+    spent = sum(c.get("cost_usd") or 0 for f in OUT.glob("*/calls.jsonl") for c in map(json.loads, f.open())
+                if c.get("engine") == "openrouter")
+    if spent >= OR_BUDGET:
+        raise SystemExit(f"стоп: прогоны OpenRouter потратили ${spent:.2f} из ${OR_BUDGET:.2f}")
+    d = _or_get("/credits")["data"]
+    bal = float(d["total_credits"]) - float(d["total_usage"])
+    t = date.today()
+    days = ((date(t.year + 1, 1, 1) if t.month == 12 else date(t.year, t.month + 1, 1)) - t).days   # до конца месяца, с сегодня
+    need = OR_FLOOR + LLM_PER_DAY * days
+    if bal < need:
+        raise SystemExit(f"стоп: баланс OpenRouter ${bal:.2f} < ${need:.2f} (порог $5 + LLM-кошельки на {days} дн.)")
+    return spent, bal
+
+
+def ask_openrouter(prompt, step, city, label):
+    spent, bal = or_guard()
+    t0 = time.time()
+    live(city, "info", f"▶ запрос {step} {label}: {len(prompt)} символов (OpenRouter, потрачено ${spent:.2f}, баланс ${bal:.2f})", step, label)
+    body = {"model": MODEL, "messages": [{"role": "user", "content": prompt}], "usage": {"include": True}, "max_tokens": 16000}
+    if os.environ.get("OR_REASONING"):   # 22.10: Gemma 4 31B на OpenRouter без этого отвечает без размышления (наша 26B думает)
+        body["reasoning"] = {"enabled": True}
+    req = urllib.request.Request(OR_URL + "/chat/completions", json.dumps(body).encode(),
+                                 {"Content-Type": "application/json", "Authorization": f"Bearer {os.environ['OPENROUTER_API_KEY']}"})
+    d = {}
+    for attempt in range(4):
+        try:
+            with urllib.request.urlopen(req, timeout=900) as r:
+                d = json.loads(r.read())
+            break
+        except urllib.error.HTTPError as e:   # 429 у бесплатных моделей — подождать
+            live(city, "info", f"✗ OpenRouter {e.code}, повтор через {60 * (attempt + 1)} с", step, label)
+            time.sleep(60 * (attempt + 1))
+    msg = ((d.get("choices") or [{}])[0].get("message") or {})
+    text, think = msg.get("content") or "", msg.get("reasoning") or ""
+    for kind, t in (("think", think), ("answer", text)):
+        for line in t.splitlines():
+            if line.strip():
+                live(city, kind, line[:300], step, label)
+    u = d.get("usage") or {}
+    rec = {"t": round(t0), "step": step, "label": label, "model": MODEL, "engine": "openrouter",
+           "provider": d.get("provider"), "seconds": round(time.time() - t0, 1), "prompt_chars": len(prompt),
+           "prompt_tokens": u.get("prompt_tokens"), "tokens": u.get("completion_tokens"),
+           "think_tokens": (u.get("completion_tokens_details") or {}).get("reasoning_tokens"),
+           "cost_usd": float(u.get("cost") or 0), "think": think[:4000], "response": text}
+    with open(OUT / city / "calls.jsonl", "a") as f:
+        f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    live(city, "info", f"✓ ответ за {rec['seconds']:.0f} с, {rec['tokens'] or 0} токенов, ${rec['cost_usd']:.4f}", step, label)
+    return text
+
+
 def ask(prompt, step, city, want_json=True, label=""):
+    if ENGINE in ("claude", "openrouter"):
+        text = (ask_claude if ENGINE == "claude" else ask_openrouter)(prompt, step, city, label)
+        if not want_json:
+            return text.strip()
+        m = re.search(r"\{.*\}", text, re.S)
+        try:
+            return json.loads(m.group(0)) if m else None
+        except json.JSONDecodeError:
+            return None
     body = {"model": MODEL, "messages": [{"role": "user", "content": prompt}], "stream": True,
             "options": {"num_ctx": int(os.environ.get("GEMMA_CTX", "32768")), "temperature": 1.0, "top_p": 0.95,
                         "top_k": 64, "num_predict": 8000}}
@@ -588,6 +712,11 @@ def cycle(city, learn, test, n=None):
 
 
 def main():
+    if sys.argv[1:2] == ["note"]:      # 22.10: заметка исследователя в блок «Что происходит» на /diary
+        OUT.mkdir(parents=True, exist_ok=True)
+        with open(OUT / "news.jsonl", "a") as f:
+            f.write(json.dumps({"t": round(time.time()), "text": " ".join(sys.argv[2:])}, ensure_ascii=False) + "\n")
+        return
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     n = next((int(a.split("=")[1]) for a in sys.argv if a.startswith("--days=")), None)
     empty = "--empty" in sys.argv
@@ -596,7 +725,7 @@ def main():
         sys.exit(1)
     step, city, month, *rest = args
     (OUT / city).mkdir(parents=True, exist_ok=True)
-    if step not in ("build", "score") and gemma_busy():
+    if step not in ("build", "score") and ENGINE == "gemma" and gemma_busy():
         sys.exit("Gemma занята прогоном скилла (agy_skill_bt.py) — не запускаю, чтобы не тормозить его")
     if step not in ("build", "score"):
         set_status(city, cmd=" ".join(sys.argv[1:]), step=step, learn=month, test=rest[0] if step == "cycle" else None,

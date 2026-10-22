@@ -19,8 +19,15 @@ chmod 644 "$TMPH/env"; chmod 777 "$TMPH/home" "$TMPH/home/.claude"
 BIN="$(readlink -f "$HOME/.local/bin/claude")"
 # 18.10: точная модель вместо псевдонима (псевдоним Claude Code сам выбирает последнюю версию)
 case "${CLAUDE_MODEL:-haiku}" in haiku) CM=claude-haiku-5-5;; sonnet) CM=claude-sonnet-5-5;; *) CM="$CLAUDE_MODEL";; esac
+# 22.10 (Alex: «Opus будет изолирован?»): CLAUDE_NO_TOOLS=1 — для экзаменов дневника: ни одного инструмента (нет поиска,
+# интернета, команд, файлов), свой системный текст вместо текста Claude Code (там сегодняшняя дата и окружение), без MCP.
+if [ -n "$CLAUDE_NO_TOOLS" ]; then
+  set -- --tools "" --strict-mcp-config --system-prompt "${CLAUDE_SYSTEM:-You answer exactly as the task asks. You have no tools.}"
+else
+  set -- --dangerously-skip-permissions
+fi
 timeout $((T + 30)) ${DOCKER:-docker} run --rm -i --user "${AGY_UID:-$(id -u)}:${AGY_GID:-$(id -g)}" --read-only --tmpfs /tmp:size=64m \
   --cap-drop ALL --security-opt no-new-privileges --memory 1g --pids-limit 256 \
   --env-file "$TMPH/env" -v "$TMPH/home:/home/agy" -v "$BIN:/usr/local/bin/claude:ro" \
   -v "$(cd "$WORK" && pwd):/work" -w /work --entrypoint timeout weather-lab-agybox "$T" \
-  claude -p "$(cat "$PROMPT")" --model "$CM" ${CLAUDE_EFFORT:+--effort "$CLAUDE_EFFORT"} --output-format json --dangerously-skip-permissions
+  claude -p "$(cat "$PROMPT")" --model "$CM" ${CLAUDE_EFFORT:+--effort "$CLAUDE_EFFORT"} --output-format json "$@"
