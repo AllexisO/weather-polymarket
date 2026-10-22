@@ -155,12 +155,38 @@ EXTRA_OBS_CITIES = {
 ALL_OBS_CITIES = {**OBS_CITIES, **EXTRA_OBS_CITIES}
 
 # 22.10: с маркетов на 23.10 Polymarket считает Денвер по Denver International (KDEN), до этого — Buckley (KBKF).
-# KDEN 20.07-21.10 холоднее на 0.9 °F в среднем, совпадает в 20% дней. Кошельки, читающие сводки (obs, ml_day), с 23.10 —
-# по новой станции; история и обучение моделей пока по KBKF (переход целиком — решение Alex).
-STATION_FROM = {"denver": ("2026-10-23", "KDEN")}
+# KDEN 20.07-21.10 холоднее на 0.9 °F в среднем, совпадает в 20% дней. 22.10 (решение Alex) — Денвер целиком на KDEN:
+# история замеров, факт, прогнозы (в точке KDEN) и обучение — по новой станции (старые замеры KBKF — city 'old:denver').
+# icao/iem в OBS_CITIES — станция СЕГОДНЯШНЕГО маркета города (до конца 22.10 по Денверу — KBKF, с 23.10 — KDEN):
+# кроновые скрипты читают этот файл при каждом запуске. Станция прошлого дня — station_for(), истории — history_iem().
+STATION_FROM = {"denver": ("2026-10-23", "KDEN", (39.84657, -104.65623))}   # с даты маркета, станция, координаты
+_OLD_ICAO = {c: ALL_OBS_CITIES[c]["icao"] for c in STATION_FROM}
 
 
 def station_for(city, day):
     """ICAO станции итога маркета этого дня (day — дата или ГГГГ-ММ-ДД)."""
     ch = STATION_FROM.get(city)
-    return ch[1] if ch and str(day) >= ch[0] else ALL_OBS_CITIES[city]["icao"]
+    if ch:
+        return ch[1] if str(day) >= ch[0] else _OLD_ICAO[city]
+    return ALL_OBS_CITIES[city]["icao"]
+
+
+def history_iem(city):
+    """Код станции в архиве Iowa Mesonet для истории и обучения — уже новая станция, если город её сменил."""
+    ch = STATION_FROM.get(city)
+    if not ch:
+        return ALL_OBS_CITIES[city]["iem"]
+    return ch[1][1:] if ch[1].startswith("K") else ch[1]
+
+
+def _apply_station_changes():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    for city, (day, icao, ll) in STATION_FROM.items():
+        cfg = ALL_OBS_CITIES[city]
+        cfg["lat"], cfg["lon"] = ll
+        if datetime.now(ZoneInfo(cfg["tz"])).date().isoformat() >= day:
+            cfg["icao"], cfg["iem"] = icao, icao[1:] if icao.startswith("K") else icao
+
+
+_apply_station_changes()

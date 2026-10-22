@@ -286,7 +286,10 @@ weather-lab/
 - `obs` — `weather_obs_live.py` (*/2 мин). Для °F-городов замер в целых °C — нижняя граница (`safe_value`). Гонконг/Тайбэй —
   `weather_cities.EXTRA_OBS_CITIES`, Гонконг — через `bet_dead_buckets`. С маркетов на 23.10 (новые правила Polymarket во всех
   47 городах) — только плановые сводки, SPECI не считается (`routine_only`, у tgftp — по минуте сводки); Денвер — KDEN вместо
-  KBKF (`weather_cities.station_for` / `STATION_FROM`, так же в `weather_ml_day`).
+  KBKF (`weather_cities.station_for` / `STATION_FROM`, так же в `weather_ml_day`). 22.10 Денвер переведён целиком: `icao`/`iem` в
+  `OBS_CITIES` — станция сегодняшнего маркета города (меняется сама в местную полночь 23.10), история и обучение — `history_iem()`
+  (KDEN), прогнозы — в точке KDEN; старые замеры KBKF — `station_obs.city = 'old:denver'`, копия до переноса —
+  `data/research/denver_kbkf_backup_2210.sqlite3`.
 - `obs_fast` — `weather_fastobs.py` (каждую минуту): JMA, KNMI, DWD, FMI, HKO, RCSS → `data/db/fastobs.sqlite3` (`fast_obs`);
   максимум в минуты сводки METAR, запас `ROUND_MARGIN`; без ставок — `NO_BET_SOURCES` (KNMI с 12.10, FMI с 15.10); Synoptic
   выключен 12.10. Фора — `weather_fastobs_report.py`. `obs_fmi` — ставок нет с 15.10 (`FMI_BETS = False`).

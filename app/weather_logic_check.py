@@ -34,7 +34,7 @@ from zoneinfo import ZoneInfo
 import requests
 
 from jobmark import item_guard, mark
-from weather_cities import OBS_CITIES
+from weather_cities import OBS_CITIES, STATION_FROM
 
 DB_PATH = Path(os.environ.get("POLY_LAB_DB", "/data/db/polymarket_lab.sqlite3"))
 FAST_DB = DB_PATH.parent / "fastobs.sqlite3"
@@ -137,6 +137,8 @@ def check_station(c, since, out):
     for city, d, a in c.execute("SELECT city, local_date, actual_max FROM weather_station_daily WHERE local_date >= ? AND actual_max IS NOT NULL",
                                 (since,)):
         o = out.get((city, d))
+        if city in STATION_FROM and d < STATION_FROM[city][0]:
+            continue   # факт уже по новой станции, а итог тех дней — по старой
         if o and not (o[0] <= a < o[1]):
             bad[city].append(f"{d[8:]}.{d[5:7]} станция {a:g}, итог {o[0] + 0.5:g}-{o[1] - 0.5:g}")
     many = {k: v for k, v in bad.items() if len(v) >= 2}

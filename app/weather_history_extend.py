@@ -31,7 +31,7 @@ import requests
 
 import weather_ml_data as mld
 import weather_multimodel as mm
-from weather_cities import OBS_CITIES
+from weather_cities import OBS_CITIES, history_iem
 
 DB_PATH = Path(os.environ.get("POLY_LAB_DB", Path(__file__).parent.parent / "data" / "db" / "polymarket_lab.sqlite3"))
 FROM = date(2025, 6, 1)
@@ -120,7 +120,7 @@ def load_fv(conn, city, cfg):
 
 
 def load_obs(conn, city, cfg):
-    params = {"station": cfg["iem"], "data": ["tmpf", "drct", "sknt", "skyc1", "dwpf", "alti"],
+    params = {"station": history_iem(city), "data": ["tmpf", "drct", "sknt", "skyc1", "dwpf", "alti"],
               "year1": FROM.year, "month1": FROM.month, "day1": FROM.day, "year2": TO.year, "month2": TO.month,
               "day2": TO.day, "tz": "Etc/UTC", "format": "onlycomma", "latlon": "no", "missing": "M", "report_type": [3, 4]}
     for attempt in range(5):
@@ -133,7 +133,7 @@ def load_obs(conn, city, cfg):
     rows = list(csv.DictReader(io.StringIO(r.text)))
     conn.executemany(
         "INSERT OR IGNORE INTO station_obs (city, station, valid_utc, tmpf, drct, sknt, skyc1, dwpf, alti) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        [(city, cfg["iem"], x["valid"], num(x["tmpf"]), num(x["drct"]), num(x["sknt"]), x.get("skyc1"),
+        [(city, history_iem(city), x["valid"], num(x["tmpf"]), num(x["drct"]), num(x["sknt"]), x.get("skyc1"),
           num(x.get("dwpf")), num(x.get("alti"))) for x in rows if x.get("valid") and num(x["tmpf"]) is not None])
     conn.commit()
     time.sleep(6)
@@ -149,6 +149,8 @@ def main():
     if "--part" in sys.argv:
         k, m = map(int, sys.argv[sys.argv.index("--part") + 1].split("/"))
         cities = cities[k - 1::m]
+    if "--city" in sys.argv:   # 22.10: перезагрузка одного города (Денвер на KDEN)
+        cities = [(c, cfg) for c, cfg in cities if c == sys.argv[sys.argv.index("--city") + 1]]
     print(f"период {FROM}..{TO}, городов {len(cities)}", flush=True)
     for city, cfg in cities:
         try:

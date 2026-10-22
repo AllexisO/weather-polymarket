@@ -28,7 +28,7 @@ from pathlib import Path
 
 import requests
 
-from weather_cities import OBS_CITIES
+from weather_cities import OBS_CITIES, history_iem
 
 DB_PATH = Path(os.environ.get("POLY_LAB_DB", Path(__file__).parent.parent / "data" / "db" / "polymarket_lab.sqlite3"))
 IEM_ASOS = "https://mesonet.agron.iastate.edu/cgi-bin/request/asos.py"
@@ -64,7 +64,7 @@ def obs_backfill(conn):
         with item_guard(city, conn):
             if i:
                 time.sleep(6)
-            params = {"station": cfg["iem"], "data": ["dwpf", "alti"], "year1": HISTORY_START.year,
+            params = {"station": history_iem(city), "data": ["dwpf", "alti"], "year1": HISTORY_START.year,
                       "month1": HISTORY_START.month, "day1": HISTORY_START.day, "year2": end.year,
                       "month2": end.month, "day2": end.day, "tz": "Etc/UTC", "format": "onlycomma",
                       "latlon": "no", "missing": "M", "report_type": [3, 4]}
@@ -76,7 +76,7 @@ def obs_backfill(conn):
                 break
             rows = list(csv.DictReader(io.StringIO(r.text)))
             conn.executemany("UPDATE station_obs SET dwpf = ?, alti = ? WHERE station = ? AND valid_utc = ?",
-                             [(num(x["dwpf"]), num(x["alti"]), cfg["iem"], x["valid"]) for x in rows if x.get("valid")])
+                             [(num(x["dwpf"]), num(x["alti"]), history_iem(city), x["valid"]) for x in rows if x.get("valid")])
             conn.commit()
             print(f"{city}: точка росы/давление — {len(rows)} сводок", flush=True)
 

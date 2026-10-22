@@ -68,10 +68,14 @@ def schema(db):
 
 
 def metar_minutes():
-    """Плановые минуты сводок по городу (самые частые минуты valid_utc за 30 дней). Кэш на сутки."""
+    """Плановые минуты сводок по городу (самые частые минуты valid_utc за 30 дней). Кэш на сутки.
+    По станции сегодняшнего маркета (22.10: Денвер KBKF → KDEN) — сменилась станция, кэш пересчитывается."""
+    stations = {city: cfg["iem"] for city, cfg in OBS_CITIES.items()}
     try:
         if METAR_CACHE.exists() and time.time() - METAR_CACHE.stat().st_mtime < 86400:
-            return json.loads(METAR_CACHE.read_text())
+            out = json.loads(METAR_CACHE.read_text())
+            if out.get("_stations", stations) == stations:
+                return out
     except (OSError, ValueError):
         pass
     from collections import Counter
@@ -80,9 +84,10 @@ def metar_minutes():
     out = {}
     for city in OBS_CITIES:
         c = Counter(int(r[0][14:16]) for r in conn.execute(
-            "SELECT valid_utc FROM station_obs WHERE city = ? AND valid_utc >= ?", (city, since)))
+            "SELECT valid_utc FROM station_obs WHERE station = ? AND valid_utc >= ?", (stations[city], since)))
         tot = sum(c.values()) or 1
         out[city] = sorted(m for m, n in c.items() if n / tot >= 0.15) or [0]
+    out["_stations"] = stations
     conn.close()
     METAR_CACHE.write_text(json.dumps(out))
     return out

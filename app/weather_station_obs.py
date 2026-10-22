@@ -36,7 +36,7 @@ from zoneinfo import ZoneInfo
 
 import requests
 
-from weather_cities import OBS_CITIES
+from weather_cities import OBS_CITIES, history_iem
 
 
 def whole_f(tmpf):
@@ -117,7 +117,7 @@ def run():
     now = datetime.now(timezone.utc)
     for i, (city, cfg) in enumerate(OBS_CITIES.items()):
         with item_guard(city, conn):
-            station = cfg["iem"]
+            station = history_iem(city)   # 22.10: Денвер — сразу KDEN (weather_cities.STATION_FROM)
             first, last = conn.execute(
                 "SELECT MIN(valid_utc), MAX(valid_utc) FROM station_obs WHERE station = ?", (station,)
             ).fetchone()
