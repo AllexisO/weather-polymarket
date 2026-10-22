@@ -2958,6 +2958,11 @@ def _skill_files_ver():
 
 @app.get("/api/version")
 def api_version(p: str = ""):
+    if p.startswith("/diary"):     # 22.10: файлы дневника — не в базе
+        from diary_status import files_ver
+        base = api_version()
+        import hashlib
+        return {"v": hashlib.md5((base["v"] + files_ver()).encode()).hexdigest()[:12], "at": base["at"]}
     if p.startswith("/skill"):
         base = api_version()
         import hashlib
@@ -3322,6 +3327,19 @@ def skill_log():
     from skill_status import skill_terminal
     from fastapi.responses import PlainTextResponse
     return PlainTextResponse(skill_terminal())
+
+
+@app.get("/diary", response_class=HTMLResponse)
+def diary_page(request: Request, city: str = "", v: str = ""):
+    from diary_status import page_data   # 22.10 (Alex): ход «ИИ с дневником» — этапы, дневник, экзамены, терминал
+    return TEMPLATES.TemplateResponse("diary.html", {"request": request, **page_data(city or None, v or None)})
+
+
+@app.get("/diary/log")
+def diary_log(city: str = ""):
+    from diary_status import terminal
+    from fastapi.responses import PlainTextResponse
+    return PlainTextResponse(terminal(city or None))
 
 
 @app.get("/notes", response_class=HTMLResponse)

@@ -340,6 +340,7 @@
       {{ navlink('/mm', 'бот-мейкер', 'results', path == '/mm') }}
       {{ navlink('/llm', 'LLM', 'message', path == '/llm') }}
       {{ navlink('/skill', 'скилл', 'message', path == '/skill') }}
+      {{ navlink('/diary', 'дневник ИИ', 'notes', path == '/diary') }}
       {{ navlink('/bets', 'ставки', 'trending', path == '/bets', nc.open) }}
       {{ navlink('/cities', 'города', 'globe', path.startswith('/cities'), nc.cities if nc.cities else none) }}
       {{ navlink('/traders', 'трейдеры', 'shuffle', path.startswith('/traders'), nc.traders if nc.traders else none) }}

@@ -114,7 +114,7 @@ BIAS_SINCE_TS = "2026-08-25T19:58:27+00:00"
 # between), тогда бакет — X±0.5. Юнит (°F/°C) не разбираем регуляркой:
 # он уже задан в CITIES[...]["unit"] и определяет, в чём запрошен ансамбль.
 RE_BELOW = re.compile(r"(-?\d+)\s*°[CF] or below")
-RE_RANGE = re.compile(r"between (-?\d+)-(-?\d+)\s*°[CF]")
+RE_RANGE = re.compile(r"(?:between|be) (-?\d+)[-–](-?\d+)\s*°[CF]")  # 22.10: первые маркеты (дек 2025) — «45–46 °F», «be 55–56°F»
 RE_ABOVE = re.compile(r"(-?\d+)\s*°[CF] or higher")
 RE_EXACT = re.compile(r"be (-?\d+)\s*°[CF] on")
 

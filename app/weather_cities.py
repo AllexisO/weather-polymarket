@@ -153,3 +153,14 @@ EXTRA_OBS_CITIES = {
     "taipei": _c("RCSS", "Asia/Taipei", "celsius", "taipei"),
 }
 ALL_OBS_CITIES = {**OBS_CITIES, **EXTRA_OBS_CITIES}
+
+# 22.10: с маркетов на 23.10 Polymarket считает Денвер по Denver International (KDEN), до этого — Buckley (KBKF).
+# KDEN 20.07-21.10 холоднее на 0.9 °F в среднем, совпадает в 20% дней. Кошельки, читающие сводки (obs, ml_day), с 23.10 —
+# по новой станции; история и обучение моделей пока по KBKF (переход целиком — решение Alex).
+STATION_FROM = {"denver": ("2026-10-23", "KDEN")}
+
+
+def station_for(city, day):
+    """ICAO станции итога маркета этого дня (day — дата или ГГГГ-ММ-ДД)."""
+    ch = STATION_FROM.get(city)
+    return ch[1] if ch and str(day) >= ch[0] else ALL_OBS_CITIES[city]["icao"]

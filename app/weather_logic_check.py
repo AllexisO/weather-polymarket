@@ -270,7 +270,7 @@ def check_rules(w):
         time.sleep(0.2)
     w.commit()
     add("Логика", True if not changed else False, "Правила маркетов Polymarket не менялись (станция, источник, точность)",
-        short(changed, 4) if changed else f"городов {len(OBS_CITIES) - len(miss)}" + (f", впервые записано {new}" if new else "")
+        f"изменилось у {len(changed)} из {len(OBS_CITIES) - len(miss)}: " + short(changed, 4) if changed else f"городов {len(OBS_CITIES) - len(miss)}" + (f", впервые записано {new}" if new else "")
         + (f"; маркета на завтра нет: {', '.join(miss[:8])}" if miss else ""),
         "Polymarket поменял правила итога — проверить станцию/округление/полночь у моделей и кошельков замеров" if changed else "")
     add("Логика", True if not unit_bad else False, "Единица вариантов (°F/°C) совпадает с нашей", short(unit_bad) if unit_bad else "да",

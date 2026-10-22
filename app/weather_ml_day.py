@@ -49,7 +49,7 @@ import requests
 import weather_ml as ml
 import weather_ml_q as mq
 from jobmark import item_guard, mark
-from weather_cities import OBS_CITIES
+from weather_cities import OBS_CITIES, station_for
 
 DB_PATH = Path(os.environ.get("POLY_LAB_DB", Path(__file__).parent.parent / "data" / "db" / "polymarket_lab.sqlite3"))
 ML_DIR = DB_PATH.parent.parent / "ml"
@@ -242,6 +242,7 @@ def morning_row(conn, city, d, tz, metars):
     """Утренняя строка признаков — как weather_ml_live.bucket_probs (прогнозы за сутки, замеры к 07:50, вчерашний максимум),
     плюс рынок в 08:00 из первого быстрого снимка дня (snapshots_fast)."""
     from weather_ml_live import _metar_obs
+    from weather_obs_live import routine_only
     cfg = OBS_CITIES[city]
     unit = cfg["unit"]
     prev = (datetime.fromisoformat(d) - timedelta(days=1)).date().isoformat()
@@ -349,7 +350,8 @@ def run(dry=False):
     for wait in ((10, 30, None) if due else ()):
         try:
             for m in requests.get("https://aviationweather.gov/api/data/metar", timeout=30,
-                                  params={"ids": ",".join(cfg["icao"] for _, cfg, _ in due), "hours": 36, "format": "json"}).json():
+                                  params={"ids": ",".join(station_for(c, lt.date()) for c, _, lt in due), "hours": 36,
+                                          "format": "json"}).json():
                 metars.setdefault(m["icaoId"], []).append(m)
             break
         except (requests.RequestException, ValueError) as e:
@@ -359,10 +361,11 @@ def run(dry=False):
             else:
                 time.sleep(wait)
     from weather_ml_live import _metar_obs
+    from weather_obs_live import routine_only
     for city, cfg, lt in due:
         with item_guard(city, conn):
             d, tz, unit = lt.date().isoformat(), ZoneInfo(cfg["tz"]), cfg["unit"]
-            ms = metars.get(cfg["icao"], [])
+            ms = metars.get(station_for(city, lt.date()), [])   # 22.10: Денвер с 23.10 — KDEN (weather_cities.STATION_FROM)
             row = morning_row(conn, city, d, tz, ms)
             if row is None:
                 print(f"{city}: нет прогнозов моделей на сегодня")
@@ -371,7 +374,9 @@ def run(dry=False):
             if len(mk) < 3:
                 print(f"{city}: маркета на сегодня нет")
                 continue
-            obs = sorted((o[0], o[1]) for o in (_metar_obs(m) for m in ms if m.get("obsTime") and m.get("temp") is not None))
+            # 22.10: в США с 23.10 SPECI не идёт в итог — и в максимум с утра тоже (weather_obs_live.routine_only)
+            obs = sorted((o[0], o[1]) for o in (_metar_obs(m) for m in ms if m.get("obsTime") and m.get("temp") is not None
+                                                and routine_only(m, city, cfg, d)))
             known = [o for o in obs if o[0].astimezone(tz).date().isoformat() == d and o[0] + timedelta(minutes=OBS_DELAY_MIN) <= now]
             f = day_feats(known, row["fc_mean"], lt.hour, {(b["lo"], b["hi"]): b["price"] for b in mk}, unit)
             if f is None:

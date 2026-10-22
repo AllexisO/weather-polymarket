@@ -17,6 +17,8 @@
   cycle  <город> <учебный> <проверочный>  всё подряд: study, r0 (без дневника), r1..r3 с разбором, final, проверка
 --days N — только первые N дней (проба). Движок — Gemma в виртуальной машине на NAS (Ollama, OLLAMA_URL / GEMMA_MODEL); не запускается,
 пока Gemma занята прогоном скилла (agy_skill_bt.py). Запуск в фоне — ./diary_run.sh.
+22.10 (Alex: «видеть и контролировать визуально»): страница /diary (app/diary_status.py). Для неё программа пишет
+live.jsonl — рассуждения модели построчно со временем (ответ идёт потоком), status.json — что запущено и какой этап.
 """
 import csv
 import io
@@ -38,11 +40,11 @@ from weather_cities import OBS_CITIES
 
 ROOT = Path(__file__).resolve().parent.parent
 DB = Path(os.environ.get("POLY_LAB_DB", ROOT / "data" / "db" / "polymarket_lab.sqlite3"))
-OUT = ROOT / "data" / "research" / "diary"
+OUT = Path(os.environ.get("DIARY_OUT", ROOT / "data" / "research" / "diary"))   # DIARY_OUT — проверка на копии
 URL = os.environ.get("OLLAMA_URL", "http://192.168.1.16:11434") + "/api/chat"
 MODEL = os.environ.get("GEMMA_MODEL", "gemma4:26b")
 MOMENTS = [("eve", -1, 18), ("m08", 0, 8), ("m12", 0, 12)]   # (метка, день относительно дня маркета, час местного)
-DIARY_WORDS = 1500        # предел дневника: больше — ИИ теряется в своих заметках
+DIARY_WORDS = 1500        # выше — предупреждение в журнале (дневник только дополняется, не обрезается)
 LESSONS_MAX = 3           # уроков с одного дня
 MISS_P = 0.35             # ошибка: шанс верного варианта ниже этого или промах максимума ≥ 3°
 BASE_SD = 3.0             # простая формула: нормальное распределение вокруг среднего прогноза, σ = 3°F (записано до прогона)
@@ -214,31 +216,112 @@ REVIEW_TASK = ("TASK: this is a day from your exam, now with its RESULT. Your an
                "this day) and list diary lessons that misled you. Answer with JSON only:\n"
                '{{"why": "<short>", "lessons": ["..."], "misleading": ["<quoted diary line>", ...]}}')
 
-CONSOLIDATE_TASK = ("TASK: rewrite your diary. Merge the NEW LESSONS into it, join duplicates, drop lessons marked as "
-                    "misleading unless they still hold in general, keep only what helps forecast the daily maximum. "
-                    "At most {words} words, short bullet points grouped by topic. No dates, no specific days. "
-                    "Answer with the diary text only.")
-
-
 # ---------- движок ----------
 
 def gemma_busy():
-    return subprocess.run(["pgrep", "-f", "agy_skill_bt.py run"], capture_output=True).returncode == 0
+    # 22.10: только сам прогон (python3 …agy_skill_bt.py run) — свободный шаблон ловил и оболочки с этим текстом
+    return subprocess.run(["pgrep", "-f", r"^python[0-9.]* \S*agy_skill_bt\.py run"], capture_output=True).returncode == 0
 
 
-def ask(prompt, step, city, want_json=True):
-    body = {"model": MODEL, "messages": [{"role": "user", "content": prompt}], "stream": False,
+def training_now():
+    return subprocess.run(["pgrep", "-f", r"^python /app/job_wrap\.py weather_ml_(live|day)\.py --train"],
+                          capture_output=True).returncode == 0
+
+
+def night_wait(city):
+    # 22.10: ночное обучение (05:20 weather_ml_live, 05:45 weather_ml_day) идёт на том же процессоре NAS, что и Gemma —
+    # 21.10 оба сняты по таймауту. С 05:05 Gemma ждёт, пока оба не закончатся (не раньше 05:47, не позже 08:30);
+    # 22.10 такая пауза вручную — обучение прошло за 6 и 4 мин.
+    tz = ZoneInfo("Europe/Chisinau")
+    now = datetime.now(tz)
+    t = lambda h, m: now.replace(hour=h, minute=m, second=0, microsecond=0)
+    if not t(5, 5) <= now < t(8, 30):
+        return
+    say(city, "⏸ ночное обучение моделей — Gemma ждёт до его конца (не позже 08:30)")
+    last = time.time()
+    while True:
+        now = datetime.now(tz)
+        if now >= t(8, 30) or (now >= t(5, 47) and not training_now()):
+            break
+        if time.time() - last > 600:                      # строка раз в 10 мин — /diary не считает процесс остановившимся
+            say(city, "⏸ ждём конца ночного обучения")
+            last = time.time()
+        time.sleep(30)
+    say(city, "▶ обучение закончилось — продолжаем")
+
+
+LIVE_MAX = 5_000_000       # live.jsonl больше 5 МБ — старое в live.old.jsonl
+
+
+def live(city, kind, text, step="", label=""):
+    """Строка живого терминала /diary: время, этап, что (info / think / answer), текст."""
+    f = OUT / city / "live.jsonl"
+    try:
+        if f.exists() and f.stat().st_size > LIVE_MAX:
+            f.replace(OUT / city / "live.old.jsonl")
+        with open(f, "a") as fh:
+            fh.write(json.dumps({"t": round(time.time(), 1), "step": step, "label": label, "kind": kind, "text": text},
+                                ensure_ascii=False) + "\n")
+    except OSError:
+        pass
+
+
+def say(city, text):
+    """Строка хода работы: в лог запуска и в живой терминал."""
+    print(text, flush=True)
+    live(city, "info", text, STATE.get("stage", ""))
+
+
+STATE = {}
+
+
+def set_status(city, **kw):
+    """status.json для /diary: команда, этап, начало, закончено ли."""
+    STATE.update(kw)
+    try:
+        (OUT / city / "status.json").write_text(json.dumps(STATE, ensure_ascii=False))
+    except OSError:
+        pass
+
+
+def ask(prompt, step, city, want_json=True, label=""):
+    body = {"model": MODEL, "messages": [{"role": "user", "content": prompt}], "stream": True,
             "options": {"num_ctx": int(os.environ.get("GEMMA_CTX", "32768")), "temperature": 1.0, "top_p": 0.95,
                         "top_k": 64, "num_predict": 8000}}
+    night_wait(city)
     t0 = time.time()
+    live(city, "info", f"▶ запрос {step} {label}: {len(prompt)} символов", step, label)
     req = urllib.request.Request(URL, json.dumps(body).encode(), {"Content-Type": "application/json"})
-    r = json.load(urllib.request.urlopen(req, timeout=1800))
-    text = r["message"].get("content") or ""
-    rec = {"t": round(t0), "step": step, "seconds": round(time.time() - t0, 1), "prompt_chars": len(prompt),
-           "prompt_tokens": r.get("prompt_eval_count"), "tokens": r.get("eval_count"),
-           "think": (r["message"].get("thinking") or "")[:4000], "response": text}
+    think, text, buf, r = [], [], {"think": "", "answer": ""}, {}
+    with urllib.request.urlopen(req, timeout=1800) as resp:      # потоком: каждая строка рассуждения — в терминал сразу
+        for raw in resp:
+            if not raw.strip():
+                continue
+            r = json.loads(raw)
+            msg = r.get("message") or {}
+            for kind, piece, acc in (("think", msg.get("thinking") or "", think), ("answer", msg.get("content") or "", text)):
+                if not piece:
+                    continue
+                acc.append(piece)
+                buf[kind] += piece
+                while "\n" in buf[kind] or len(buf[kind]) > 300:
+                    cut = buf[kind].find("\n")
+                    cut = cut if 0 <= cut <= 300 else 300
+                    line, buf[kind] = buf[kind][:cut], buf[kind][cut + (1 if buf[kind][cut:cut + 1] == "\n" else 0):]
+                    if line.strip():
+                        live(city, kind, line, step, label)
+            if r.get("done"):
+                break
+    for kind in ("think", "answer"):
+        if buf[kind].strip():
+            live(city, kind, buf[kind], step, label)
+    text = "".join(text)
+    rec = {"t": round(t0), "step": step, "label": label, "model": MODEL, "seconds": round(time.time() - t0, 1),
+           "prompt_chars": len(prompt), "prompt_tokens": r.get("prompt_eval_count"), "tokens": r.get("eval_count"),
+           "think": "".join(think)[:4000], "response": text}
     with open(OUT / city / "calls.jsonl", "a") as f:
         f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    live(city, "info", f"✓ ответ за {rec['seconds']:.0f} с, {rec['tokens'] or 0} токенов", step, label)
     if not want_json:
         return text.strip()
     m = re.search(r"\{.*\}", text, re.S)
@@ -268,26 +351,45 @@ def save_diary(city, text, step):
     # даты не должны попасть в дневник (Alex 21.10): строки с датой или днём недели выкидываем
     lines = [ln for ln in text.splitlines() if not DATE_RE.search(ln)]
     text = "\n".join(lines).strip()
-    words = text.split()
-    if len(words) > DIARY_WORDS * 1.2:
-        text = " ".join(words[:int(DIARY_WORDS * 1.2)])
     diary_path(city).write_text(text + "\n")
     hist = OUT / city / "history"
     hist.mkdir(exist_ok=True)
-    (hist / f"{datetime.now():%m%d_%H%M}_{step}.md").write_text(text + "\n")
-    print(f"  дневник: {len(text.split())} слов ({step})", flush=True)
+    (hist / f"{datetime.now():%m%d_%H%M%S}_{step}.md").write_text(text + "\n")
+    n = len(text.split())
+    say(city, f"  дневник: {n} слов ({step})" + (f" — больше {DIARY_WORDS}, проверить окно Gemma" if n > DIARY_WORDS else ""))
+
+
+MISLED_RE = re.compile(r" \(misled me (\d+)×\)$")
+
+
+def _norm(s):
+    return re.sub(r"[^a-z0-9]+", " ", MISLED_RE.sub("", s).lstrip("-* ").lower()).strip()
 
 
 def consolidate(city, lessons, misleading, step):
+    # 22.10 (Alex): дневник только дополняется — новые уроки в конец, старые не стираются.
+    # Урок, который подвёл на разборе, остаётся с пометкой «misled me N×» — видно, что ему меньше веры.
     if not lessons and not misleading:
         return
-    prompt = (f"{ROLE}\n\nDIARY:\n{read_diary(city) or '(empty)'}\n\nNEW LESSONS:\n" + "\n".join(f"- {x}" for x in lessons)
-              + ("\n\nMISLEADING LESSONS (from your mistakes):\n" + "\n".join(f"- {x}" for x in misleading) if misleading else "")
-              + "\n\n" + CONSOLIDATE_TASK.format(words=DIARY_WORDS))
-    text = ask(prompt, f"consolidate_{step}", city, want_json=False)
-    text = re.sub(r"^```\w*\n|\n```$", "", text.strip())
-    if text:
-        save_diary(city, text, step)
+    lines = [ln for ln in read_diary(city).splitlines() if ln.strip()]
+    marked = 0
+    for m in {_norm(x) for x in misleading if _norm(x)}:
+        for i, ln in enumerate(lines):
+            if m in _norm(ln) or (_norm(ln) and _norm(ln) in m):
+                k = MISLED_RE.search(ln)
+                lines[i] = MISLED_RE.sub("", ln) + f" (misled me {int(k.group(1)) + 1 if k else 1}×)"
+                marked += 1
+                break
+    have = {_norm(ln) for ln in lines}
+    added = 0
+    for x in lessons:
+        x = " ".join(str(x).split())
+        if x and _norm(x) not in have and not DATE_RE.search(x):
+            lines.append(f"- {x}")
+            have.add(_norm(x))
+            added += 1
+    say(city, f"  в дневник: +{added} уроков, подвели {marked}")
+    save_diary(city, "\n".join(lines), step)
 
 
 # ---------- шаги ----------
@@ -303,10 +405,10 @@ def study(city, month, n=None):
     for i, day in enumerate(days, 1):
         prompt = (f"{ROLE}\n\nDIARY:\n{read_diary(city) or '(empty)'}\n\nDATA:\n{day_text(meta, day, reveal=True)}\n\n"
                   + STUDY_TASK.format(n=LESSONS_MAX))
-        r = ask(prompt, f"study_{month}", city)
+        r = ask(prompt, f"study_{month}", city, label=day["date"])
         new = [str(x) for x in (r or {}).get("lessons", [])][:LESSONS_MAX]
         lessons += new
-        print(f"study {day['date']}: уроков {len(new)}", flush=True)
+        say(city, f"study {day['date']}: уроков {len(new)}")
         if i % 7 == 0 or i == len(days):          # раз в неделю — сведение в дневник
             consolidate(city, lessons, [], f"study_{month}_{i}")
             lessons = []
@@ -326,16 +428,17 @@ def exam(city, month, tag, empty=False, n=None):
             if (day["date"], m) in done:
                 continue
             t0 = time.time()
-            r = ask(exam_prompt(diary, meta, day, off, hour), f"exam_{month}_{tag}", city) or {}
+            r = ask(exam_prompt(diary, meta, day, off, hour), f"exam_{month}_{tag}", city, label=f"{day['date']} {m}") or {}
             probs = {k: float(v) for k, v in (r.get("probs") or {}).items() if k in day["buckets"] and _num(v)}
             s = sum(probs.values())
             probs = {k: v / s for k, v in probs.items()} if s > 0 else {}
-            rec = {"date": day["date"], "moment": m, "expected_max": r.get("expected_max"), "probs": probs,
+            rec = {"t": round(t0), "date": day["date"], "moment": m, "expected_max": r.get("expected_max"), "probs": probs,
                    "factors": r.get("factors"), "ok": bool(probs), "seconds": round(time.time() - t0, 1),
                    "diary_words": len(diary.split())}
             with f.open("a") as fh:
                 fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
-            print(f"exam {tag} {day['date']} {m}: max {rec['expected_max']} p(верный)={probs.get(day['win'], 0):.2f}", flush=True)
+            say(city, f"exam {tag} {day['date']} {m}: max {rec['expected_max']} (было {day['actual_max']:.0f}) "
+                      f"p(верный {day['win']})={probs.get(day['win'], 0):.2f}")
 
 
 def _num(v):
@@ -368,10 +471,10 @@ def review(city, month, tag, n=None):
                             f"factors: {a['factors']}" for a in bad for m in [a["moment"]])
         prompt = (f"{ROLE}\n\nDIARY:\n{read_diary(city) or '(empty)'}\n\nDATA:\n{day_text(meta, day, reveal=True)}\n\n"
                   + REVIEW_TASK.format(answers=answers, n=LESSONS_MAX))
-        r = ask(prompt, f"review_{month}_{tag}", city) or {}
+        r = ask(prompt, f"review_{month}_{tag}", city, label=day["date"]) or {}
         lessons += [str(x) for x in r.get("lessons", [])][:LESSONS_MAX]
         misleading += [str(x) for x in r.get("misleading", [])]
-        print(f"review {tag} {day['date']}: ошибок {len(bad)}, уроков {len(r.get('lessons', []))}", flush=True)
+        say(city, f"review {tag} {day['date']}: ошибок {len(bad)}, уроков {len(r.get('lessons', []))}")
     # сведение по частям, чтобы запрос влез в окно Gemma
     for i in range(0, len(lessons), 20):
         consolidate(city, lessons[i:i + 20], misleading[i:i + 20] if i == 0 else [], f"review_{month}_{tag}_{i}")
@@ -400,42 +503,63 @@ def baseline_probs(day, buckets, until, moment):
     return out
 
 
-def score(city, month, tags):
+def score_rows(city, month, tag):
+    """Итог экзамена по моментам: logloss ИИ / рынка / формулы, промах, ставки и доходность (верхняя оценка). И для /diary."""
     meta = load(city, month)
     by_date = {d["date"]: d for d in meta["days"]}
+    f = exam_file(city, month, tag)
+    ans = [json.loads(x) for x in f.open()] if f.exists() else []
+    out = []
+    for m, off, hour in MOMENTS:
+        ll = {"ai": [], "mkt": [], "base": []}
+        err, pnl, n_bet = [], 0.0, 0
+        n_all = sum(1 for x in ans if x["moment"] == m)
+        n_ok = sum(1 for x in ans if x["moment"] == m and x["ok"])
+        for a in (x for x in ans if x["moment"] == m and x["ok"]):
+            day = by_date[a["date"]]
+            pr = {k: v["p"] for k, v in day["prices"].get(m, {}).items()}
+            s = sum(pr.values())
+            if s <= 0:
+                continue
+            until = moment_ts(day, off, hour, meta["tz"])
+            base = baseline_probs(day, day["buckets"], until, m)
+            ll["ai"].append(-math.log(max(a["probs"].get(day["win"], 0), 0.01)))
+            ll["mkt"].append(-math.log(max(pr.get(day["win"], 0) / s, 0.01)))
+            ll["base"].append(-math.log(max(base.get(day["win"], 0), 0.01)))
+            if _num(a["expected_max"]):
+                err.append(abs(float(a["expected_max"]) - day["actual_max"]))
+            for b, p_ai in a["probs"].items():   # $1 на вариант, где ИИ выше цены на EDGE; комиссия тех дней 0.05·p(1−p)
+                p = pr.get(b)
+                if p is None or not 0.05 <= p <= 0.95 or p_ai - p < EDGE:
+                    continue
+                buy = min(p + 0.01, 0.999)
+                n_bet += 1
+                pnl += (1 / (buy + 0.05 * buy * (1 - buy)) - 1) if b == day["win"] else -1
+        avg = lambda xs: sum(xs) / len(xs) if xs else None
+        out.append({"tag": tag, "moment": m, "n": len(ll["ai"]), "n_all": n_all, "n_ok": n_ok, "ai": avg(ll["ai"]),
+                    "mkt": avg(ll["mkt"]), "base": avg(ll["base"]), "mae": avg(err), "bets": n_bet,
+                    "roi": pnl / n_bet * 100 if n_bet else None})
+    return out
+
+
+def score(city, month, tags):
     print(f"{city} {month}: logloss верного варианта (меньше — лучше), промах максимума °F, деньги — верхняя оценка (price_history)")
     for tag in tags:
-        ans = [json.loads(x) for x in exam_file(city, month, tag).open()]
-        for m, off, hour in MOMENTS:
-            ll = {"ai": [], "mkt": [], "base": []}
-            err, pnl, n_bet = [], 0.0, 0
-            for a in (x for x in ans if x["moment"] == m and x["ok"]):
-                day = by_date[a["date"]]
-                pr = {k: v["p"] for k, v in day["prices"].get(m, {}).items()}
-                s = sum(pr.values())
-                if s <= 0:
-                    continue
-                until = moment_ts(day, off, hour, meta["tz"])
-                base = baseline_probs(day, day["buckets"], until, m)
-                ll["ai"].append(-math.log(max(a["probs"].get(day["win"], 0), 0.01)))
-                ll["mkt"].append(-math.log(max(pr.get(day["win"], 0) / s, 0.01)))
-                ll["base"].append(-math.log(max(base.get(day["win"], 0), 0.01)))
-                if _num(a["expected_max"]):
-                    err.append(abs(float(a["expected_max"]) - day["actual_max"]))
-                for b, p_ai in a["probs"].items():   # $1 на вариант, где ИИ выше цены на EDGE; комиссия тех дней 0.05·p(1−p)
-                    p = pr.get(b)
-                    if p is None or not 0.05 <= p <= 0.95 or p_ai - p < EDGE:
-                        continue
-                    buy = min(p + 0.01, 0.999)
-                    n_bet += 1
-                    pnl += (1 / (buy + 0.05 * buy * (1 - buy)) - 1) if b == day["win"] else -1
-            k = len(ll["ai"])
-            if not k:
+        for r in score_rows(city, month, tag):
+            if not r["n"]:
                 continue
-            avg = lambda xs: sum(xs) / len(xs)
-            print(f"  {tag:>8} {m}: дней {k:2d}  ИИ {avg(ll['ai']):.3f}  рынок {avg(ll['mkt']):.3f}  формула {avg(ll['base']):.3f}"
-                  f"  промах {avg(err) if err else float('nan'):.1f}°  ставок {n_bet} доходность "
-                  f"{(pnl / n_bet * 100 if n_bet else 0):+.1f}%")
+            print(f"  {tag:>8} {r['moment']}: дней {r['n']:2d}  ИИ {r['ai']:.3f}  рынок {r['mkt']:.3f}  формула {r['base']:.3f}"
+                  f"  промах {r['mae'] if r['mae'] is not None else float('nan'):.1f}°  ставок {r['bets']} доходность "
+                  f"{(r['roi'] or 0):+.1f}%")
+
+
+# этапы полного цикла — для status.json и /diary (метка, что делает, месяц: learn / test)
+STAGES = [("r0", "экзамен без дневника (контроль)", "learn"), ("study", "знакомство: дни с ответом → дневник", "learn"),
+          ("r1", "круг 1: экзамен", "learn"), ("review_r1", "круг 1: разбор ошибок", "learn"),
+          ("r2", "круг 2: экзамен", "learn"), ("review_r2", "круг 2: разбор ошибок", "learn"),
+          ("r3", "круг 3: экзамен", "learn"), ("review_r3", "круг 3: разбор ошибок", "learn"),
+          ("final", "финал по учебному месяцу", "learn"), ("n1", "проверка: новый месяц с дневником", "test"),
+          ("n1_empty", "проверка: новый месяц без дневника", "test")]
 
 
 def cycle(city, learn, test, n=None):
@@ -443,13 +567,21 @@ def cycle(city, learn, test, n=None):
         build(city, learn)
     if not (OUT / city / f"data_{test}.json").exists():
         build(city, test)
+    st = lambda stage: (set_status(city, stage=stage), say(city, f"=== этап {stage}: {dict((k, w) for k, w, _ in STAGES)[stage]}"))
+    st("r0")
     exam(city, learn, "r0", empty=True, n=n)                   # контроль: без дневника
+    st("study")
     study(city, learn, n)
     for r in ("r1", "r2", "r3"):
+        st(r)
         exam(city, learn, r, n=n)
+        st(f"review_{r}")
         review(city, learn, r, n=n)
+    st("final")
     exam(city, learn, "final", n=n)
+    st("n1")
     exam(city, test, "n1", n=n)                                 # честная проверка: новый месяц, без разбора
+    st("n1_empty")
     exam(city, test, "n1_empty", empty=True, n=n)               # тот же месяц без дневника
     score(city, learn, ["r0", "r1", "r2", "r3", "final"])
     score(city, test, ["n1_empty", "n1"])
@@ -466,6 +598,24 @@ def main():
     (OUT / city).mkdir(parents=True, exist_ok=True)
     if step not in ("build", "score") and gemma_busy():
         sys.exit("Gemma занята прогоном скилла (agy_skill_bt.py) — не запускаю, чтобы не тормозить его")
+    if step not in ("build", "score"):
+        set_status(city, cmd=" ".join(sys.argv[1:]), step=step, learn=month, test=rest[0] if step == "cycle" else None,
+                   days=n, model=MODEL, pid=os.getpid(), started=round(time.time()), finished=None, error=None,
+                   stage=step if step != "cycle" else "")
+        say(city, f"=== старт: {' '.join(sys.argv[1:])}, модель {MODEL}")
+    try:
+        _step(step, city, month, rest, n, empty)
+    except BaseException as e:
+        if step not in ("build", "score"):
+            set_status(city, finished=round(time.time()), error=f"{type(e).__name__}: {e}"[:300])
+            say(city, f"!!! остановлено: {type(e).__name__}: {e}")
+        raise
+    if step not in ("build", "score"):
+        set_status(city, finished=round(time.time()))
+        say(city, "=== готово")
+
+
+def _step(step, city, month, rest, n, empty):
     if step == "build":
         build(city, month)
     elif step == "study":

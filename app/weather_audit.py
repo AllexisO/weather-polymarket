@@ -129,7 +129,8 @@ def check_wallets(c, out, now):
             if o is None:
                 # ставки закрываются по финальной цене сразу, а итоги пишет weather_poly_resolve раз в 2 ч —
                 # нарушение, только если итога нет дольше 6 ч
-                if now - _dt(r["settled_at"]) > timedelta(hours=6):
+                # 22.10: Сан-Паулу 19.10 — наш вариант закрыт, а соседний (16°C) оспорен, событие не закрыто — тоже «внимание»
+                if now - _dt(r["settled_at"]) > timedelta(hours=6) and not disputed(r["city"], r["local_date"]):
                     v.append(f"{tag}: закрыта больше 6 ч назад, а официального итога нет")
                 continue
             hit = _same(r["bucket_lo"], o[0]) and _same(r["bucket_hi"], o[1])
@@ -283,6 +284,11 @@ def disputed(city, d):
             # (19.10 Polymarket закрывал маркеты > 20 ч вместо обычных 1.5-5); такие дни — во «внимание», не в нарушения
             _DISPUTED[(city, d)] = bool(ev) and any(m.get("umaResolutionStatus") == "disputed" or not m.get("closed")
                                                     for m in ev[0]["markets"])
+            # 22.10: Анкара 20.10 закрыта Polymarket в 12:30, проверка в 13:00, расчёт в 13:02 — закрыт меньше 3 ч назад,
+            # расчёт (каждые 2 ч) ещё не успел — тоже не наша ошибка
+            ct = ev[0].get("closedTime") if ev else None
+            if ct and datetime.now(timezone.utc) - datetime.fromisoformat(ct.replace("Z", "+00:00")) < timedelta(hours=3):
+                _DISPUTED[(city, d)] = True
             if _DISPUTED[(city, d)]:
                 PM_PENDING.add((city, d))
         except Exception:  # noqa: BLE001

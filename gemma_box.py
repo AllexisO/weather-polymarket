@@ -145,6 +145,13 @@ def bad_veto(text):
         a = json.loads(m.group(0)) if m else None
     except ValueError:
         a = None
+    if os.environ.get("BT_SKILL_DIR") == "skill_veto_b":   # 22.10 скилл veto_b: только шанс варианта, отмену решает код
+        if not isinstance(a, dict) or "p_bucket" not in a:
+            return "there is no JSON object with \"p_bucket\""
+        try:
+            return None if 0 <= float(a["p_bucket"]) <= 1 else "\"p_bucket\" must be between 0 and 1"
+        except (TypeError, ValueError):
+            return "\"p_bucket\" must be a number between 0 and 1"
     if not isinstance(a, dict) or not isinstance(a.get("cancel"), bool):
         return "there is no JSON object with a boolean \"cancel\""
     try:
@@ -233,7 +240,7 @@ def main():
             fixes += 1          # 19.10 g1: ответ не по форме SKILL.md — вернуть с причиной
             tr(turn, "fix", err)
             msgs.append({"role": "user", "content": f"Your answer is not valid: {err}. Reply now with ONLY the final JSON object "
-                                                     + ("described in SKILL.md (p_win, cancel, why). Make it agree with your own analysis."
+                                                     + ("described in SKILL.md. Make it agree with your own analysis."
                                                         if veto else
                                                         "described in SKILL.md (max_f, probs with every bucket label exactly as in "
                                                         "the letter, summing to 1, why). Make probs agree with your own analysis.")})

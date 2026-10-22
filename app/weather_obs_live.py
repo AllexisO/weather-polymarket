@@ -65,7 +65,7 @@ from zoneinfo import ZoneInfo
 import requests
 
 from polyexec import final_price, simulate_buy, trading_stopped
-from weather_cities import ALL_OBS_CITIES, OBS_CITIES
+from weather_cities import ALL_OBS_CITIES, OBS_CITIES, station_for
 from weather_edge import GAMMA, month_day_year_slug, parse_bucket
 from weather_poly_resolve import fetch_winning_bucket
 
@@ -251,12 +251,37 @@ def fetch_tgftp(icao):
         return None
 
 
-def observed_max_today(metars, cfg):
+ROUTINE_FROM = "2026-10-23"
+_ROUTINE_MIN = {}
+
+
+def routine_only(m, city, cfg, day):
+    """22.10: с маркетов на 23.10 итог во всех 47 городах — только плановые сводки METAR, SPECI не считается (новый текст
+    правил Polymarket, logic_rules; Гонконг — по-прежнему HKO). 20.08-21.10 по 11 городам США SPECI поднимала максимум
+    в 11 днях из 704 (Чикаго 16.10 — проигрыш obs_wethr). True — сводка идёт в итог. У tgftp нет метки METAR/SPECI —
+    плановая по минуте сводки города."""
+    if city not in OBS_CITIES or str(day) < ROUTINE_FROM:
+        return True
+    if m.get("metarType") == "SPECI" or (m.get("rawOb") or "").startswith("SPECI"):
+        return False
+    if m.get("src") == "tgftp":
+        if not _ROUTINE_MIN:
+            try:
+                _ROUTINE_MIN.update(json.loads((DB_PATH.parent / "mm_metar_minutes.json").read_text()))
+            except (OSError, ValueError):
+                pass
+        return datetime.fromtimestamp(m["obsTime"], timezone.utc).minute in _ROUTINE_MIN.get(city, [])
+    return True
+
+
+def observed_max_today(metars, cfg, city=None):
     tz = ZoneInfo(cfg["tz"])
     today = datetime.now(tz).date()
     best = None
     for m in metars:
         if m.get("temp") is None or not m.get("obsTime"):
+            continue
+        if city and not routine_only(m, city, cfg, today):
             continue
         t = datetime.fromtimestamp(m["obsTime"], timezone.utc)
         if t.astimezone(tz).date() != today:
@@ -275,7 +300,7 @@ def run():
     fetch_missing_outcomes(conn, now.isoformat())
     settle(conn, now.isoformat())
 
-    icaos = [cfg["icao"] for cfg in OBS_CITIES.values()]
+    icaos = [station_for(city, datetime.now(ZoneInfo(cfg["tz"])).date()) for city, cfg in OBS_CITIES.items()]
     # 2026-09-28: aviationweather не ответил за 30 с — раньше падал весь запуск; теперь идём дальше на втором
     # источнике (tgftp ниже), а сбой — пропуск («с пропусками» на /status), не падение.
     try:
@@ -330,7 +355,8 @@ def run():
     events_cache = {}
     for city, cfg in OBS_CITIES.items():
         with item_guard(city, conn):
-            today, best = observed_max_today(by_station.get(cfg["icao"], []), cfg)
+            st = station_for(city, datetime.now(ZoneInfo(cfg["tz"])).date())
+            today, best = observed_max_today(by_station.get(st, []), cfg, city)
             if best is not None:
                 bet_dead_buckets(conn, "obs", city, cfg, today, best[0], best[1], now, events_cache,
                                  f"станция уже {best[0]} (сводка {best[1]:%H:%M}Z)")

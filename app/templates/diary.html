@@ -1,0 +1,322 @@
+{% extends "base.html" %}
+{% block title %}Дневник ИИ - weather-lab{% endblock %}
+{% block content %}
+{# 22.10 (просьба Alex): ход «ИИ с дневником» — этапы, дневник, экзамены, живой терминал. Данные - app/diary_status.py.
+   Разметка простая, на классах bk и /skill; оформление можно отдать Gemini. #}
+{% include "_mm_style.html" %}
+<style>
+  .tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 14px; }
+  .tabs a { padding: 6px 14px; border-radius: 999px; border: 1px solid var(--bk-line); color: var(--bk-muted); text-decoration: none; font-size: 13.5px; }
+  .tabs a.on { background: var(--bk-accent-bg); color: var(--bk-accent); border-color: transparent; }
+  .tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-bottom: 24px; }
+  .tiles .pane + .pane { margin-top: 0; }
+  .t-k { color: var(--bk-muted); font-size: 13px; }
+  .t-v { font-size: 24px; font-weight: 700; line-height: 1.2; font-family: var(--bk-font); margin: 6px 0 2px; word-break: break-word; }
+  .t-s { color: var(--bk-muted); font-size: 13px; }
+  .b-bar { height: 7px; border-radius: 4px; background: var(--bk-raise); overflow: hidden; width: 100%; margin: 6px 0 4px; }
+  .b-bar i { display: block; height: 100%; border-radius: 4px; background: var(--bk-accent); }
+  .b-bar i.pos { background: var(--bk-pos); }
+
+  /* Этапы цикла */
+  ol.stages { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+  ol.stages li { display: grid; grid-template-columns: 28px minmax(0, 1fr) 160px; gap: 12px; align-items: center;
+                 padding: 10px 14px; border: 1px solid var(--bk-line); border-radius: 12px; background: var(--bk-raise); }
+  ol.stages li.cur { border-color: var(--bk-accent); }
+  ol.stages li.wait { opacity: .6; }
+  .st-n { width: 26px; height: 26px; border-radius: 7px; display: inline-flex; align-items: center; justify-content: center;
+          font-weight: 700; font-size: 13px; background: var(--bk-line); color: var(--bk-text); }
+  li.done .st-n { background: var(--bk-pos); color: #1C1C1E; }
+  li.cur .st-n { background: var(--bk-accent); color: #1C1C1E; }
+  .st-what { font-weight: 600; }
+  .st-sub { color: var(--bk-muted); font-size: 12.5px; }
+
+  /* Графики */
+  .charts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+  .charts .pane + .pane { margin-top: 0; }
+  .dchart { width: 100%; height: auto; display: block; }
+  .dchart .g { stroke: var(--bk-line); stroke-width: 1; }
+  .dchart .ax { fill: var(--bk-muted); font-size: 11px; font-family: var(--bk-font); }
+  .dchart polyline { fill: none; stroke-width: 2; }
+  .dchart .s-ai { stroke: #FFD58A; fill: #FFD58A; }
+  .dchart polyline.s-ai { fill: none; stroke-width: 2.5; }
+  .dchart .s-mkt { stroke: #D3DDFB; fill: #D3DDFB; }
+  .dchart polyline.s-mkt { fill: none; }
+  .dchart .s-base { stroke: #71717A; fill: #71717A; }
+  .dchart polyline.s-base { fill: none; stroke-dasharray: 4 4; }
+  .key { display: inline-flex; align-items: center; gap: 6px; margin-right: 14px; font-size: 12.5px; color: var(--bk-muted); }
+  .key i { display: inline-block; width: 16px; height: 3px; border-radius: 2px; }
+
+  /* Дневник */
+  .dgrid { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 14px; }
+  .dgrid .pane + .pane { margin-top: 0; }
+  .diary-text { margin: 0; white-space: pre-wrap; word-break: break-word; font: 14px/1.6 var(--bk-font); color: var(--bk-text);
+                max-height: 560px; overflow-y: auto; }
+  .ver { display: grid; grid-template-columns: minmax(0, 1fr) 56px; gap: 8px; align-items: center; padding: 6px 8px;
+         border-radius: 8px; text-decoration: none; color: var(--bk-text); font-size: 13px; }
+  .ver:hover, .ver.sel { background: var(--bk-raise); }
+  .ver .vb { height: 6px; border-radius: 3px; background: var(--bk-raise); overflow: hidden; }
+  .ver .vb i { display: block; height: 100%; background: var(--bk-accent); }
+  .ver-list { max-height: 520px; overflow-y: auto; }
+
+  /* Терминал - как на /skill */
+  .term-box { background: #0B0C0E; border: 1px solid var(--bk-line); border-radius: 14px; overflow: hidden; }
+  .term-bar { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; background: #121316;
+              border-bottom: 1px solid var(--bk-line); font-size: 13px; color: var(--bk-muted); }
+  .term-bar .term-title { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; color: var(--bk-text); }
+  .term-pre { margin: 0; padding: 14px; font: 12.5px/1.45 ui-monospace, Menlo, Consolas, monospace; color: #A3E39A;
+              height: 460px; max-height: 460px; overflow-y: auto; white-space: pre-wrap; word-break: break-word; }
+  .why-cell { font-size: 13px; max-width: 420px; word-break: break-word; line-height: 1.45; }
+
+  @media (max-width: 900px) {
+    .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .charts, .dgrid { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 600px) {
+    .tiles { grid-template-columns: 1fr; }
+    ol.stages li { grid-template-columns: 28px minmax(0, 1fr); }
+    ol.stages li .st-p { grid-column: 2; }
+    .term-pre { height: 340px; max-height: 340px; }
+  }
+</style>
+
+<div class="bk">
+  <div class="top">
+    <h1>Дневник ИИ{% if city %}: {{ city | replace('_', ' ') | title }}{% endif %}</h1>
+    <p>Обновлено {{ updated }} · страница обновляется при каждом новом ответе · терминал - каждые 3 с · устройство - <code>docs/DIARY.md</code></p>
+  </div>
+
+  {% if not city %}
+  <div class="pane"><div class="empty">Дневник ещё не запускали: нет данных в <code>data/research/diary/</code>.</div></div>
+  {% else %}
+
+  <div class="tiles">
+    <div class="pane">
+      <div class="t-k">Модель</div>
+      <div class="t-v">{{ model }}</div>
+      <div class="t-s">Ollama · виртуальная машина на NAS (RTX 2060 Super)</div>
+    </div>
+    <div class="pane">
+      <div class="t-k">Состояние</div>
+      <div class="t-v"><span class="dot {{ 'on' if state.code == 'on' }}"></span>
+        <span class="{{ 'pos' if state.code == 'on' else ('neg' if state.code in ('bad', 'warn') else '') }}">{{ state.text }}</span></div>
+      <div class="t-s">
+        {% if cur_call %}сейчас: {{ cur_call.what }} · {{ cur_call.since }}{% elif st.cmd %}{{ st.cmd }}{% endif %}
+        {% if st.error %}<br><span class="neg">{{ st.error }}</span>{% endif %}
+      </div>
+    </div>
+    <div class="pane">
+      <div class="t-k">Ответов экзамена в нужном виде</div>
+      <div class="t-v num {% if ok_pct is not none %}{{ 'pos' if ok_pct >= 90 else 'neg' }}{% endif %}">{{ '%.0f%%' | format(ok_pct) if ok_pct is not none else '-' }}</div>
+      <div class="t-s">{{ n_ex }} ответов в этом запуске · нужно ≥ 90%</div>
+    </div>
+    <div class="pane">
+      <div class="t-k">Запросов к модели</div>
+      <div class="t-v num">{{ n_calls }}</div>
+      <div class="t-s">{% if avg_s %}в среднем {{ '%.1f' | format(avg_s / 60) }} мин на запрос · {{ '{:,}'.format(tokens).replace(',', ' ') }} токенов{% else %}в этом запуске ещё нет{% endif %}</div>
+    </div>
+  </div>
+
+  <div class="sec">
+    <div class="sec-head">
+      <h2>Этапы</h2>
+      <span class="aside">учёба - {{ learn or '-' }}, проверка - {{ test or '-' }}{% if st.days %} · проба: {{ st.days }} дн.{% endif %}</span>
+    </div>
+    <ol class="stages">
+      {% for s in stages %}
+      <li class="{{ s.state }}">
+        <span class="st-n">{% if s.state == 'done' %}✓{% else %}{{ loop.index }}{% endif %}</span>
+        <div>
+          <div class="st-what">{{ s.what }}</div>
+          <div class="st-sub">{{ s.month }}{% if s.state == 'cur' %} · идёт сейчас{% endif %}</div>
+        </div>
+        <div class="st-p r num">
+          {% if s.need %}{{ s.done }} / {{ s.need }}{% elif s.key.startswith('review_') %}<span class="muted">после экзамена</span>{% else %}<span class="muted">-</span>{% endif %}
+          {% set pct = (100 * s.done / s.need) | round | int if s.need else 0 %}
+          <div class="b-bar"><i class="{{ 'pos' if s.state == 'done' }}" style="width: {{ [pct, 100] | min }}%;"></i></div>
+        </div>
+      </li>
+      {% endfor %}
+    </ol>
+  </div>
+
+  <div class="sec">
+    <div class="sec-head">
+      <h2>Насколько ИИ права</h2>
+      <span class="aside">logloss выигравшего варианта по кругам, меньше - лучше</span>
+    </div>
+    <div style="margin-bottom: 10px;">
+      <span class="key"><i style="background:#FFD58A"></i>ИИ</span>
+      <span class="key"><i style="background:#D3DDFB"></i>рынок в тот же момент</span>
+      <span class="key"><i style="background:#71717A"></i>простая формула (средний прогноз ±3°F)</span>
+    </div>
+    <div class="charts">
+      {% for c in charts %}
+      <div class="pane">
+        <div class="t-k" style="margin-bottom: 8px;">Ставка {{ c.name }}</div>
+        {% if c.svg %}{{ c.svg | safe }}{% else %}<div class="empty">экзаменов ещё нет</div>{% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% if rows %}
+    <div class="pane" style="margin-top: 14px;">
+      <div class="scroll">
+        <table>
+          <thead>
+            <tr><th>Экзамен</th><th>Момент</th><th class="r">Дней</th><th class="r">ИИ</th><th class="r">Рынок</th><th class="r">Формула</th>
+                <th class="r">Промах, °F</th><th class="r">Ставок</th><th class="r">Доходность*</th></tr>
+          </thead>
+          <tbody>
+            {% for r in rows if r.n_all %}
+            <tr>
+              <td><b>{{ tag_name[r.tag] }}</b> <span class="muted">{{ r.month }}</span></td>
+              <td>{{ moment_name[r.moment] }}</td>
+              <td class="r num">{{ r.n }}{% if r.n_all != r.n_ok %} <span class="neg">({{ r.n_all - r.n_ok }} без ответа)</span>{% endif %}</td>
+              <td class="r num">{% if r.ai is not none %}<b class="{{ 'pos' if r.ai < r.mkt else 'neg' }}">{{ '%.3f' | format(r.ai) }}</b>{% else %}-{% endif %}</td>
+              <td class="r num">{{ '%.3f' | format(r.mkt) if r.mkt is not none else '-' }}</td>
+              <td class="r num muted">{{ '%.3f' | format(r.base) if r.base is not none else '-' }}</td>
+              <td class="r num">{{ '%.1f' | format(r.mae) if r.mae is not none else '-' }}</td>
+              <td class="r num">{{ r.bets }}</td>
+              <td class="r num">{% if r.roi is not none %}<span class="{{ 'pos' if r.roi > 0 else 'neg' }}">{{ '%+.1f%%' | format(r.roi) }}</span>{% else %}-{% endif %}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <p class="foot">Зелёный logloss - ИИ лучше рынка в тот же момент. *Доходность - верхняя оценка по истории цен (покупка на 1¢ дороже, комиссия), не по стакану. Решение - по порогу в docs/RESEARCH_JOURNAL.md 21.10.</p>
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="sec">
+    <div class="sec-head">
+      <h2>Дневник</h2>
+      <span class="aside">{% if version %}версия {{ version.at }} ({{ version.step }}) · <a href="/diary?city={{ city }}">текущий</a>{% else %}текущий{% endif %} · {{ diary_words }} слов из {{ diary_max }}</span>
+    </div>
+    <div class="dgrid">
+      <div class="pane">
+        {% if diary %}<pre class="diary-text">{{ diary }}</pre>{% else %}<div class="empty">Дневник пока пустой: ИИ начнёт его писать на этапе «знакомство».</div>{% endif %}
+      </div>
+      <div class="pane">
+        <div class="t-k" style="margin-bottom: 8px;">Версии ({{ versions | length }}) · слов</div>
+        {% if versions %}
+        <div class="ver-list">
+          {% for v in versions %}
+          <a class="ver {{ 'sel' if version and version.file == v.file }}" href="/diary?city={{ city }}&v={{ v.file }}">
+            <span>{{ v.at }} <span class="muted">{{ v.step }}</span><div class="vb"><i style="width: {{ v.h }}%;"></i></div></span>
+            <span class="r num">{{ v.words }}</span>
+          </a>
+          {% endfor %}
+        </div>
+        {% else %}<div class="empty">версий ещё нет</div>{% endif %}
+      </div>
+    </div>
+  </div>
+
+  {% if lessons %}
+  <div class="sec">
+    <div class="sec-head">
+      <h2>Последние уроки</h2>
+      <span class="aside">что ИИ решила запомнить после учёбы и разборов</span>
+    </div>
+    <div class="pane">
+      <div class="scroll">
+        <table>
+          <thead><tr><th>Время</th><th>Откуда</th><th>День</th><th>Урок</th></tr></thead>
+          <tbody>
+            {% for l in lessons %}
+            <tr><td class="muted num">{{ l.at }}</td><td>{{ l.step }}</td><td class="num">{{ l.day }}</td><td class="why-cell">{{ l.text }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="sec">
+    <div class="sec-head">
+      <h2>Терминал</h2>
+      <span class="aside">как думает модель · время у каждой строки · каждые 3 с</span>
+    </div>
+    <div class="term-box">
+      <div class="term-bar">
+        <span class="term-title"><span class="dot on" id="term-live-dot" title="Связь активна"></span><span>diary_lab · {{ city }}</span></span>
+        <span class="muted" style="font-size: 12px;">ход - шаги программы · думает - рассуждение модели · ответ - что она ответила</span>
+      </div>
+      <pre id="term" class="term-pre">загрузка…</pre>
+    </div>
+  </div>
+
+  <div class="sec">
+    <div class="sec-head">
+      <h2>Ответы экзаменов</h2>
+      <span class="aside">прогноз ИИ против того, что было</span>
+    </div>
+    <div class="pane">
+      {% if recent %}
+      <div class="tabs" id="ex-tabs">{% for g in recent %}<a href="#" data-tab="{{ g.tag }}" class="{{ 'on' if g.tag == recent_on }}">{{ g.name }} <span class="muted">{{ g.rows | length }}</span></a>{% endfor %}</div>
+      {% for g in recent %}
+      <div class="scroll ex-tab" data-tab="{{ g.tag }}"{% if g.tag != recent_on %} hidden{% endif %}>
+        {% if not g.rows %}<div class="empty">Этого экзамена ещё не было.</div>{% else %}
+        <table>
+          <thead>
+            <tr><th>Время</th><th>День</th><th>Момент</th><th class="r">Прогноз</th><th class="r">Было</th>
+                <th class="r">Шанс верного: ИИ / рынок</th><th>Почему (слова модели)</th></tr>
+          </thead>
+          <tbody>
+            {% for a in g.rows %}
+            <tr>
+              <td class="muted num">{{ a.at }}</td>
+              <td class="num">{{ a.date }}</td>
+              <td>{{ a.moment }}</td>
+              <td class="r num">{{ a.exp if a.exp is not none else '-' }}</td>
+              <td class="r num">{{ '%.0f' | format(a.fact) }} <span class="muted">({{ a.win }})</span></td>
+              <td class="r num">{% if a.p_ai is not none %}<b class="{{ 'pos' if a.p_mkt is none or a.p_ai >= a.p_mkt else 'neg' }}">{{ '%.0f%%' | format(100 * a.p_ai) }}</b>{% else %}<span class="neg">нет ответа</span>{% endif %}
+                <span class="muted">/ {{ '%.0f%%' | format(100 * a.p_mkt) if a.p_mkt is not none else '-' }}</span></td>
+              <td class="why-cell">{{ a.factors }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% endif %}
+      </div>
+      {% endfor %}
+      <script>
+        document.getElementById('ex-tabs').addEventListener('click', function (e) {
+          var a = e.target.closest('a'); if (!a) return; e.preventDefault();
+          document.querySelectorAll('#ex-tabs a').forEach(function (x) { x.classList.toggle('on', x === a); });
+          document.querySelectorAll('.ex-tab').forEach(function (x) { x.hidden = x.dataset.tab !== a.dataset.tab; });
+        });
+      </script>
+      {% else %}
+      <div class="empty">Экзаменов ещё не было.</div>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+</div>
+
+{% if city %}
+<script>
+  (function () {
+    var t = document.getElementById('term');
+    var dot = document.getElementById('term-live-dot');
+    function tick() {
+      fetch('/diary/log?city={{ city }}').then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.text();
+      }).then(function (x) {
+        var atBottom = t.scrollTop + t.clientHeight >= t.scrollHeight - 40;
+        if (t.textContent !== x) {
+          t.textContent = x;
+          if (atBottom) t.scrollTop = t.scrollHeight;
+        }
+        if (dot) dot.classList.add('on');
+      }).catch(function () { if (dot) dot.classList.remove('on'); });
+    }
+    tick();
+    setInterval(tick, 3000);
+  })();
+</script>
+{% endif %}
+{% endblock %}
