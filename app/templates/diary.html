@@ -30,6 +30,42 @@
   .st-what { font-weight: 600; }
   .st-sub { color: var(--bk-muted); font-size: 12.5px; }
 
+  /* «Сейчас» (24.10, Alex: один большой блок с живой полосой и всей информацией) */
+  .now-box { border: 1px solid var(--bk-accent); margin-bottom: 24px; }
+  .nb-head { color: var(--bk-muted); font-size: 13px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .nb-main { font-size: 22px; font-weight: 700; margin: 8px 0 4px; word-break: break-word; }
+  .nb-main .nb-act { color: var(--bk-accent); }
+  .nb-time { color: var(--bk-muted); font-size: 13.5px; }
+  .nb-bar { height: 10px; margin: 10px 0 4px; }
+  .nb-bar i { transition: width 1s linear; }
+  .nb-bar i.over { background: var(--bk-neg); }
+  .nb-pct { font-size: 12.5px; color: var(--bk-muted); }
+  .nb-think { margin-top: 10px; padding: 8px 10px; border-radius: 8px; background: #0B0C0E; color: #A3E39A;
+              font: 12.5px/1.45 ui-monospace, Menlo, Consolas, monospace; white-space: pre-wrap; word-break: break-word; min-height: 7.25em; }
+  .nb-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 12px; font-size: 13px; }
+  .nb-grid .b-bar { margin: 4px 0; }
+  @media (max-width: 600px) { .nb-grid { grid-template-columns: 1fr; } .nb-main { font-size: 18px; } }
+
+  /* Дни этапа (24.10, Alex: «живой прогресс каждого дня») */
+  .days { grid-column: 1 / -1; }
+  .days summary { cursor: pointer; color: var(--bk-muted); font-size: 12.5px; }
+  .dcells { display: grid; grid-template-columns: repeat(auto-fill, minmax(74px, 1fr)); gap: 6px; margin-top: 8px; }
+  .dc { display: flex; flex-direction: column; gap: 2px; padding: 6px 7px; border-radius: 8px; border: 1px solid var(--bk-line);
+        background: transparent; color: var(--bk-text); font: 12px/1.3 var(--bk-font); text-align: left; cursor: pointer; min-width: 0; }
+  .dc b { font-size: 13px; }
+  .dc span { color: var(--bk-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dc span.pos { color: var(--bk-pos); }
+  .dc span.neg { color: var(--bk-neg); }
+  .dc.done { border-color: var(--bk-pos); }
+  .dc.part { border-style: dashed; border-color: var(--bk-pos); }
+  .dc.cur { border-color: var(--bk-accent); background: var(--bk-accent-bg); }
+  .dc.cur span { color: var(--bk-accent); }
+  .dc.wait, .dc.skip { opacity: .45; cursor: default; }
+  .dc.sel { outline: 2px solid var(--bk-accent); }
+  .dd { margin-top: 8px; padding: 10px 12px; border: 1px solid var(--bk-line); border-radius: 10px; font-size: 13px; line-height: 1.45; }
+  .dd div + div { margin-top: 4px; }
+  .dd i { font-style: normal; color: var(--bk-muted); margin-right: 6px; }
+
   /* Графики */
   .charts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
   .charts .pane + .pane { margin-top: 0; }
@@ -86,6 +122,102 @@
     <p>Обновлено {{ updated }} · страница обновляется при каждом новом ответе · терминал - каждые 3 с · устройство - <code>docs/DIARY.md</code></p>
   </div>
 
+  {# 24.10 (Alex): плитки и этапы выбранного запуска — над «Что происходит» #}
+  <div id="run-top">
+  {% if city %}
+  <div class="tiles">
+    <div class="pane">
+      <div class="t-k">Модель</div>
+      <div class="t-v">{{ model }}</div>
+      <div class="t-s">{% if model.startswith("claude") %}Claude Code · изолированный контейнер без инструментов, подписка{% else %}Ollama · виртуальная машина на NAS (RTX 2060 Super){% endif %}</div>
+    </div>
+    <div class="pane">
+      <div class="t-k">Состояние</div>
+      <div class="t-v"><span class="dot {{ 'on' if state.code == 'on' }}"></span>
+        <span class="{{ 'pos' if state.code == 'on' else ('neg' if state.code in ('bad', 'warn') else '') }}">{{ state.text }}</span></div>
+      <div class="t-s">
+        {% if cur_call %}сейчас: {{ cur_call.what }} · {{ cur_call.since }}{% elif st.cmd %}{{ st.cmd }}{% endif %}
+        {% if st.error %}<br><span class="neg">{{ st.error }}</span>{% endif %}
+      </div>
+    </div>
+    <div class="pane">
+      <div class="t-k">Ответов экзамена в нужном виде</div>
+      <div class="t-v num {% if ok_pct is not none %}{{ 'pos' if ok_pct >= 90 else 'neg' }}{% endif %}">{{ '%.0f%%' | format(ok_pct) if ok_pct is not none else '-' }}</div>
+      <div class="t-s">{{ n_ex }} ответов в этом запуске · нужно ≥ 90%</div>
+    </div>
+    <div class="pane">
+      <div class="t-k">Запросов к модели</div>
+      <div class="t-v num">{{ n_calls }}</div>
+      <div class="t-s">{% if avg_s %}в среднем {{ '%.1f' | format(avg_s / 60) }} мин на запрос · {{ '{:,}'.format(tokens).replace(',', ' ') }} токенов{% else %}в этом запуске ещё нет{% endif %}</div>
+    </div>
+  </div>
+
+  {% if now_box %}
+  {% set nb = now_box %}
+  <div class="pane now-box" id="now-box">
+    <div class="nb-head"><span class="dot on"></span><b>Сейчас</b> · {{ nb.stage }} ({{ nb.month }}) · день {{ nb.day_n }} из {{ nb.day_of }}</div>
+    <div class="nb-main">{{ nb.date }} — <span class="nb-act">{{ nb.now }}</span></div>
+    <div class="nb-time">начал в {{ nb.started }} · идёт <b class="num timer" data-since="{{ nb.since }}"></b>{% if nb.avg %} · обычно такой шаг ~{{ nb.avg // 60 }} мин {{ '%02d' | format(nb.avg % 60) }} с{% if nb.avg_n %} (по {{ nb.avg_n }} прошлым){% endif %}{% endif %}</div>
+    <div class="b-bar nb-bar"><i class="live-bar" data-since="{{ nb.since }}" data-avg="{{ nb.avg or 0 }}"></i></div>
+    <div class="nb-pct" id="nb-pct"></div>
+    <div class="nb-think" id="nb-think"></div>
+    <div class="nb-grid">
+      <div>Этап: <b class="num">{{ nb.stage_done }} из {{ nb.stage_need }}</b>
+        {% set p1 = (100 * nb.stage_done / nb.stage_need) | round | int if nb.stage_need else 0 %}
+        <div class="b-bar"><i style="width: {{ [p1, 100] | min }}%;"></i></div></div>
+      <div>Весь прогон: <b class="num">{{ nb.run_done }} из {{ nb.run_need }} ({{ nb.run_pct }}%)</b>{% if nb.eta %} · закончит ≈ {{ nb.eta }} <span class="muted">(ещё {{ nb.left }})</span>{% endif %}
+        <div class="b-bar"><i class="pos" style="width: {{ [nb.run_pct, 100] | min }}%;"></i></div></div>
+    </div>
+    {% if nb.detail %}<div class="dd" style="margin-top: 12px;">{% for k, v in nb.detail %}<div><i>{{ k }}</i>{{ v }}</div>{% endfor %}</div>{% endif %}
+  </div>
+  {% endif %}
+
+  <div class="sec">
+    <div class="sec-head">
+      <h2>Этапы</h2>
+      <span class="aside">учёба - {{ learn or '-' }}, проверка - {{ test or '-' }}{% if st.days %} · проба: {{ st.days }} дн.{% endif %}</span>
+    </div>
+    <ol class="stages">
+      {% for s in stages %}
+      <li class="{{ s.state }}">
+        <span class="st-n">{% if s.state == 'done' %}✓{% else %}{{ loop.index }}{% endif %}</span>
+        <div>
+          <div class="st-what">{{ s.what }}</div>
+          <div class="st-sub">{{ s.month }}{% if s.state == 'cur' %} · идёт сейчас{% endif %}</div>
+        </div>
+        <div class="st-p r num">
+          {% if s.need %}{{ s.done }} / {{ s.need }}{% elif s.key.startswith('review_') %}<span class="muted">после экзамена</span>{% else %}<span class="muted">-</span>{% endif %}
+          {% set pct = (100 * s.done / s.need) | round | int if s.need else 0 %}
+          <div class="b-bar"><i class="{{ 'pos' if s.state == 'done' }}" style="width: {{ [pct, 100] | min }}%;"></i></div>
+        </div>
+        {% if s.days %}
+        <details class="days" data-k="{{ s.key }}"{% if s.state == 'cur' %} open{% endif %}>
+          <summary>по дням{% if s.key == 'walk' %} · прогноз / было, ставка $2{% elif s.key.startswith('study') or s.key.startswith('review_') %} · сколько уроков записала{% else %} · шанс верного варианта{% endif %}</summary>
+          <div class="dcells">
+            {% for d in s.days %}
+            <button type="button" class="dc {{ d.state }}" data-d="{{ s.key }}-{{ d.date }}"{% if not d.detail %} disabled{% endif %}>
+              <b>{{ d.n }}</b>
+              {% if d.state == 'cur' %}<span>{{ d.now }}</span><span class="timer" data-since="{{ d.since }}"></span>
+              {% else %}<span>{{ d.short or ('ждёт' if d.state == 'wait' else '') }}</span>{% if d.pnl is defined and d.pnl is not none %}<span class="{{ 'pos' if d.pnl > 0 else 'neg' }}">{{ '+' if d.pnl > 0 else '−' }}${{ '%.2f' | format(d.pnl | abs) }}</span>{% elif s.key == 'walk' and d.state == 'done' %}<span>без ставки</span>{% endif %}{% endif %}
+            </button>
+            {% endfor %}
+          </div>
+          {% for d in s.days %}{# у каждого дня свой блок — порядок не сдвигается при живом обновлении #}
+          <div class="dd" data-d="{{ s.key }}-{{ d.date }}" hidden>
+            <div><b>{{ d.date }}</b> <span class="muted">· было {{ '%.0f' | format(d.fact) }}°F, выиграл {{ d.win }}</span></div>
+            {% for k, v in d.detail %}<div><i>{{ k }}</i>{{ v }}</div>{% endfor %}
+          </div>
+          {% endfor %}
+        </details>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ol>
+  </div>
+
+  {% endif %}
+  </div>
+
   {# 22.10 (Alex: «чтобы я не спрашивал каждый раз — видно, что происходит»): все запуски, сравнение, заметки #}
   {% if ov %}
   <div class="sec" id="ov-block">
@@ -115,7 +247,7 @@
     </div>
 
     <div class="pane scroll">
-      <div class="t-s" style="margin-bottom: 8px;">Средний шанс, который ИИ дал верному варианту, <b>ИИ / рынок</b> в тот же момент (больше — лучше) · ниже — промах максимума, °F</div>
+      <div class="t-s" style="margin-bottom: 8px;">Средний шанс, который ИИ дал верному варианту, <b>ИИ / рынок</b> в тот же момент (больше — лучше) · ниже — промах максимума, °F · ещё ниже — деньги: $1 на вариант, где ИИ выше цены на 10 п.п. (цена из истории — оценка сверху, не настоящие сделки)</div>
       <table>
         <thead><tr><th>Запуск</th>{% for t in ov.compare_tags %}<th class="r">{{ t }}</th>{% endfor %}</tr></thead>
         <tbody>
@@ -123,7 +255,7 @@
           <tr>
             <td><a href="/diary?city={{ r.run }}">{{ r.run }}</a><br><span class="muted">{{ r.model }}</span></td>
             {% for x in r.cells %}
-            <td class="r num">{% if x and x.ai is not none %}<b class="{{ 'pos' if x.mkt is none or x.ai >= x.mkt else 'neg' }}">{{ x.ai }}%</b> <span class="muted">/ {{ x.mkt if x.mkt is not none else '-' }}%</span>{% if x.err is not none %}<br><span class="muted">{{ x.err }}°</span>{% endif %}{% else %}<span class="muted">-</span>{% endif %}</td>
+            <td class="r num">{% if x and x.ai is not none %}<b class="{{ 'pos' if x.mkt is none or x.ai >= x.mkt else 'neg' }}">{{ x.ai }}%</b> <span class="muted">/ {{ x.mkt if x.mkt is not none else '-' }}%</span>{% if x.err is not none %}<br><span class="muted">{{ x.err }}°</span>{% endif %}<br>{% if x.bets %}<span class="{{ 'pos' if x.pnl >= 0 else 'neg' }}">{{ '+' if x.pnl >= 0 else '−' }}${{ '%.2f' | format(x.pnl | abs) }}</span> <span class="muted">· {{ x.bets }} ст.</span>{% else %}<span class="muted">0 ставок</span>{% endif %}{% else %}<span class="muted">-</span>{% endif %}</td>
             {% endfor %}
           </tr>
           {% endfor %}
@@ -151,55 +283,7 @@
   <div class="pane"><div class="empty">Дневник ещё не запускали: нет данных в <code>data/research/diary/</code>.</div></div>
   {% else %}
 
-  <div class="tiles">
-    <div class="pane">
-      <div class="t-k">Модель</div>
-      <div class="t-v">{{ model }}</div>
-      <div class="t-s">{% if model.startswith("claude") %}Claude Code · изолированный контейнер без инструментов, подписка{% else %}Ollama · виртуальная машина на NAS (RTX 2060 Super){% endif %}</div>
-    </div>
-    <div class="pane">
-      <div class="t-k">Состояние</div>
-      <div class="t-v"><span class="dot {{ 'on' if state.code == 'on' }}"></span>
-        <span class="{{ 'pos' if state.code == 'on' else ('neg' if state.code in ('bad', 'warn') else '') }}">{{ state.text }}</span></div>
-      <div class="t-s">
-        {% if cur_call %}сейчас: {{ cur_call.what }} · {{ cur_call.since }}{% elif st.cmd %}{{ st.cmd }}{% endif %}
-        {% if st.error %}<br><span class="neg">{{ st.error }}</span>{% endif %}
-      </div>
-    </div>
-    <div class="pane">
-      <div class="t-k">Ответов экзамена в нужном виде</div>
-      <div class="t-v num {% if ok_pct is not none %}{{ 'pos' if ok_pct >= 90 else 'neg' }}{% endif %}">{{ '%.0f%%' | format(ok_pct) if ok_pct is not none else '-' }}</div>
-      <div class="t-s">{{ n_ex }} ответов в этом запуске · нужно ≥ 90%</div>
-    </div>
-    <div class="pane">
-      <div class="t-k">Запросов к модели</div>
-      <div class="t-v num">{{ n_calls }}</div>
-      <div class="t-s">{% if avg_s %}в среднем {{ '%.1f' | format(avg_s / 60) }} мин на запрос · {{ '{:,}'.format(tokens).replace(',', ' ') }} токенов{% else %}в этом запуске ещё нет{% endif %}</div>
-    </div>
-  </div>
 
-  <div class="sec">
-    <div class="sec-head">
-      <h2>Этапы</h2>
-      <span class="aside">учёба - {{ learn or '-' }}, проверка - {{ test or '-' }}{% if st.days %} · проба: {{ st.days }} дн.{% endif %}</span>
-    </div>
-    <ol class="stages">
-      {% for s in stages %}
-      <li class="{{ s.state }}">
-        <span class="st-n">{% if s.state == 'done' %}✓{% else %}{{ loop.index }}{% endif %}</span>
-        <div>
-          <div class="st-what">{{ s.what }}</div>
-          <div class="st-sub">{{ s.month }}{% if s.state == 'cur' %} · идёт сейчас{% endif %}</div>
-        </div>
-        <div class="st-p r num">
-          {% if s.need %}{{ s.done }} / {{ s.need }}{% elif s.key.startswith('review_') %}<span class="muted">после экзамена</span>{% else %}<span class="muted">-</span>{% endif %}
-          {% set pct = (100 * s.done / s.need) | round | int if s.need else 0 %}
-          <div class="b-bar"><i class="{{ 'pos' if s.state == 'done' }}" style="width: {{ [pct, 100] | min }}%;"></i></div>
-        </div>
-      </li>
-      {% endfor %}
-    </ol>
-  </div>
 
   <div class="sec">
     <div class="sec-head">
@@ -363,7 +447,19 @@
       links.forEach(function (x) { x.classList.toggle('on', x.dataset.tab === key); });
       document.querySelectorAll('.ex-tab').forEach(function (x) { x.hidden = x.dataset.tab !== key; });
     }
+    /* дни этапа: выбранная клетка и раскрытые этапы держатся и после живого обновления (24.10) */
+    var day = null, opened = {};
+    function showDays() {
+      document.querySelectorAll('details.days').forEach(function (x) { if (x.dataset.k in opened) x.open = opened[x.dataset.k]; });
+      document.querySelectorAll('.dc').forEach(function (x) { x.classList.toggle('sel', x.dataset.d === day); });
+      document.querySelectorAll('.dd').forEach(function (x) { x.hidden = x.dataset.d !== day; });
+    }
+    document.addEventListener('toggle', function (e) {
+      if (e.target.matches && e.target.matches('details.days')) opened[e.target.dataset.k] = e.target.open;
+    }, true);
     document.addEventListener('click', function (e) {
+      var c = e.target.closest('.dc');
+      if (c) { day = day === c.dataset.d ? null : c.dataset.d; showDays(); return; }
       var t = e.target.closest('#ex-tabs a');
       if (t) { e.preventDefault(); tab = t.dataset.tab; showTab(tab); return; }
       var a = e.target.closest('a[href^="/diary?"]');
@@ -374,7 +470,7 @@
     function load(href, push) {
       fetch(href, { cache: 'no-store' }).then(function (r) { if (!r.ok) throw r; return r.text(); }).then(function (html) {
         var doc = new DOMParser().parseFromString(html, 'text/html');
-        ['run-detail', 'ov-block', 'diary-h1'].forEach(function (id) {
+        ['run-top', 'run-detail', 'ov-block', 'diary-h1'].forEach(function (id) {
           var o = document.getElementById(id), n = doc.getElementById(id);
           if (o && n) { o.innerHTML = n.innerHTML; if (n.dataset.city !== undefined) o.dataset.city = n.dataset.city; }
         });
@@ -386,8 +482,10 @@
       }).catch(function () { location.href = href; });
     }
     window.addEventListener('popstate', function () { load(location.pathname + location.search, false); });
-    new MutationObserver(function () { if (tab) showTab(tab); })
+    new MutationObserver(function () { if (tab) showTab(tab); showDays(); })
       .observe(document.getElementById('run-detail'), { childList: true, subtree: true });
+    new MutationObserver(function () { showDays(); })
+      .observe(document.getElementById('run-top'), { childList: true, subtree: true });
 
     function city() { return document.getElementById('run-detail').dataset.city || ''; }
     function tick(force) {
@@ -398,6 +496,14 @@
         return r.text();
       }).then(function (x) {
         var atBottom = force || t.scrollTop + t.clientHeight >= t.scrollHeight - 40;
+        var th = document.getElementById('nb-think');      /* последние 5 строк терминала — в блок «Сейчас» (Alex 24.10) */
+        if (th) {
+          var txt = x.trim().split('\n').slice(-5).map(function (ln) {
+            var parts = ln.split('│');
+            return parts.length >= 4 ? parts[0].trim().slice(-8) + '  ' + parts[1].trim() + ': ' + parts.slice(3).join('│').trim() : ln;
+          }).join('\n');
+          if (th.textContent !== txt) th.textContent = txt;
+        }
         if (t.textContent !== x) {
           t.textContent = x;
           if (atBottom) t.scrollTop = t.scrollHeight;
@@ -410,6 +516,16 @@
     /* «В процессе» — таймер идёт сам каждую секунду, не только при новых данных */
     function timers() {
       var now = Date.now() / 1000;
+      /* полоса «Сейчас»: прошло против обычного времени шага */
+      document.querySelectorAll('.live-bar[data-since]').forEach(function (el) {
+        var s = Math.max(0, now - Number(el.dataset.since)), avg = Number(el.dataset.avg) || 0, pct = el.parentNode.nextElementSibling;
+        if (!avg) { el.style.width = '100%'; return; }
+        var r = s / avg;
+        el.style.width = Math.min(100, r * 100).toFixed(1) + '%';
+        el.classList.toggle('over', r > 1);
+        if (pct && pct.id === 'nb-pct') pct.textContent = r <= 1 ? Math.round(r * 100) + '% обычного времени, осталось ~' + Math.max(0, Math.round((avg - s) / 60)) + ' мин'
+          : 'дольше обычного на ' + Math.round((s - avg) / 60) + ' мин';
+      });
       document.querySelectorAll('.timer[data-since]').forEach(function (el) {
         var s = Math.max(0, Math.floor(now - Number(el.dataset.since)));
         var h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60;

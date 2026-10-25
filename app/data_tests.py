@@ -126,8 +126,10 @@ def llm(c):
     bad, n = [], 0
     for w, city, d, h, pj, kj in c.execute("SELECT wallet, city, local_date, local_hour, probs_json, market_json FROM llm_hour_preds "
                                            "WHERE local_date >= ? AND probs_json IS NOT NULL", (since,)):
-        n += 1
         p = json.loads(pj)
+        if p is None:     # "null": шансы из ответа не разобрать — ставки нет (weather_llm_hour «шансы не разобрать»), 24.10
+            continue
+        n += 1
         if abs(sum(p.values()) - 1) > 0.02 or any(not -1e-9 <= v <= 1 + 1e-9 for v in p.values()):
             bad.append(f"{w} {city} {d} {h}ч: сумма {sum(p.values()):.3f}")
         elif kj and set(p) != set(json.loads(kj)):

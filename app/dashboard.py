@@ -1298,7 +1298,7 @@ def llm_vs_ml(conn):
     llm = {}
     for w, c, d, h, pj in conn.execute(f"SELECT wallet, city, local_date, local_hour, probs_json FROM llm_hour_preds WHERE probs_json IS NOT NULL AND city IN ({qc})",
                                        LLM_CITIES):
-        bk = [(*r, p) for lab, p in json.loads(pj).items() if (r := _llm_range(lab))]
+        bk = [(*r, p) for lab, p in (json.loads(pj) or {}).items() if (r := _llm_range(lab))]
         if bk:
             llm[(w, c, d, h)] = bk
     avg = lambda xs: sum(xs) / len(xs) if xs else None
@@ -1710,7 +1710,7 @@ def llm_progress(conn):
         if a is None:   # день — только целиком: пока хоть у одного города нет итога, день не показываем
             wait.add(d)
             continue
-        pr, mk = json.loads(pj or "{}"), json.loads(mj or "{}")
+        pr, mk = json.loads(pj or "{}") or {}, json.loads(mj or "{}")   # "null" — ответ LLM не разобран (24.10)
         tot = sum(mk.values()) or 1.0
         lab = next((lab for lab in mk if (rg := _llm_range(lab)) and rg[0] <= a < rg[1]), None)
         if lab is None or lab not in pr:
@@ -2081,7 +2081,7 @@ MM_DB = DB_PATH.parent / "mm.sqlite3"
 # 02.10 (решение Alex): сверху — по чему решаем (mm100) и тот же бот «в идеальном мире»; остальные — исследование
 MM_WALLETS = {
     'mm100': ('Счёт $100 — строго как вживую', 'Банк ровно $100, заявки по 5 долей только на дешёвую сторону и только пока хватает свободных денег (заявка замораживает деньги, как на Polymarket). Исполнение — только гарантированное, отменённая заявка ещё 1 с может быть «подобрана», без возврата комиссии. С 02.10'),
-    'mm100f': ('Сосредоточенный $100 — строго как вживую', 'Как «Счёт $100», но только в 5 городах с самой большой торговлей за прошлые 7 дней и без пары не больше 5 долей одной стороны — чтобы складывались пары. С 07.10, порог на 08-21.10 (страница «Реальные деньги»)'),
+    'mm100f': ('Сосредоточенный $100 — закрыт 23.10', 'Закрыт 23.10 (решение Alex): за 08-21.10 +$0.56 и −$26.44, итог −$25.88 — порог не прошёл, новых заявок нет. Был: как «Счёт $100», но только в 5 городах с самой большой торговлей за прошлые 7 дней и без пары не больше 5 долей одной стороны — чтобы складывались пары. С 07.10, порог на 08-21.10 (страница «Реальные деньги»)'),
     'mm_ws_zone': ('Тот же бот в идеальном мире', 'Правила как у «Счёт $100», но без ограничения денег и с допущением «наша заявка всегда первая в очереди» — верхняя граница, вживую столько не будет. Разница со «Счёт $100» показывает, сколько прибыли держится на этом допущении'),
     'mm_ws_zs': ('Живой поток: дешёвая сторона, строго', 'Как «только дешёвая сторона», но исполнение засчитывается, только если оно гарантировано вживую: заявка стояла ≥ 1 с и сделка прошла хуже нашей цены (весь наш уровень съеден). Нижняя оценка — с 02.10'),
     'mm_ws_z30': ('Живой поток: только дешевле 30¢', 'Покупает только сторону дешевле 30¢: лучшая граница на первой половине истории (+17.9%), на проверке +18.4%, в худшем случае очереди +10.8%'),
@@ -3162,6 +3162,21 @@ def services_page(request: Request):
 # сейчас, порог (записан заранее, docs/PRD.md §4а), сколько осталось до решения. Кандидаты, выбранные ПОСЛЕ того, как увидели их
 # плюс (techno), судим только по свежим ставкам — с 07.10.
 REAL_CANDIDATES = [
+    # 24.10 (решение Alex): общий банк $100 на 4 кошелька — их же настоящие бумажные ставки по времени; ставка пропускается, если
+    # свободных денег не хватает, деньги возвращаются при расчёте. Состав выбран по месяцу 23.09-23.10 (задним числом) — поэтому
+    # считаем только ставки на дни с 24.10. llm_mix и ml5_cal30 не взяты (Alex: LLM меняются с 01.11, у ml5_cal30 12 ставок);
+    # ml_day добавлен 24.10 до первой ставки периода (Alex). Как один настоящий счёт — _real_pool.
+    {"key": "pool", "name": "Общие $100 на 5 кошельков", "wallets": ["fav", "ml5_cal", "ml5", "ml4e_cal", "ml_day"], "decide": "2026-11-21",
+     "what": "fav, ml5_cal, ml5, ml4e_cal и ml_day ставят как обычно, но как с одного настоящего счёта $100: нет свободных денег — ставка пропускается; деньги возвращаются, когда Polymarket закрыл маркет; если кошельки покупают одну и ту же долю, следующая покупка идёт по стакану без уже купленного нами (5 лучших цен кончились — сколько купилось, меньше 5 долей — не купили). За 27.09-23.10 так вышло бы +$168 по закрытым ставкам (+13% на вложенное), но состав выбран, уже зная итог, — поэтому судим только новые дни.",
+     "rule": "ставки на дни 24.10-20.11: ≥ 150 закрытых и доходность на вложенное ≥ +5%", "since": "2026-10-24", "until": "2026-11-20",
+     "need_n": 150, "need_roi": 5.0, "then": "живые $100 на Polymarket рядом с бумажным общим банком (сначала §4 п.2-4 в docs/PRD.md)"},
+    # 24.10 (Alex: «чем больше денег, тем дороже ставка»): тот же банк, ставка 2% от счёта. Проверка 27.09-23.10 (задним числом):
+    # 2% +$184 против ~$2 +$168; 4% +$30, 6% +$61, 10% — банкрот; банк $500 +38%, $1000 +10%, $3000 −14% (не хватает стакана).
+    {"key": "pool2", "name": "Общие $100 на 5 кошельков, ставка 2% от счёта", "wallets": ["fav", "ml5_cal", "ml5", "ml4e_cal", "ml_day"],
+     "decide": "2026-11-21", "frac": 0.02,
+     "what": "То же, что выше, но ставка растёт вместе со счётом: 2% от всех денег (свободные + в открытых ставках), не меньше 5 долей; каждая покупка — по стакану Polymarket в момент ставки (5 лучших цен). За 27.09-23.10 так вышло бы +$184 против +$168 у ставки ~$2, но свободных денег в худший момент оставалось $0.15; ставки 4-10% — хуже или банкротство.",
+     "rule": "ставки на дни 24.10-20.11: ≥ 150 закрытых и доходность на вложенное ≥ +5%; сравнение с банком выше — по итогу в $", "since": "2026-10-24",
+     "until": "2026-11-20", "need_n": 150, "need_roi": 5.0, "then": "живые $100 со ставкой 2% от счёта — если итог лучше, чем у ставки ~$2"},
     {"key": "mm", "name": "Бот-мейкер, счёт $100", "wallets": ["mm100"], "decide": "2026-10-14",
      "what": "Ставит заявки на дешёвую сторону и зарабатывает на склейке «да» + «нет». Строго как вживую: банк $100, 5 долей, только гарантированные исполнения.",
      "rule": "на счёте больше $101 к 14.10 и плюс в обе недели (02-08.10 и 09-13.10)", "since": "2026-10-02",
@@ -3214,13 +3229,85 @@ def _llm_accuracy(conn, wallet, since, until):
         a = conn.execute("SELECT actual_max FROM weather_station_daily WHERE city = ? AND local_date = ?", (city, d)).fetchone()
         if not a or a[0] is None:
             continue
-        pr, mk = json.loads(pj or "{}"), json.loads(mj or "{}")
+        pr, mk = json.loads(pj or "{}") or {}, json.loads(mj or "{}")   # "null" — ответ LLM не разобран (24.10)
         tot = sum(mk.values()) or 1.0
         for lab, p in pr.items():
             rg = _llm_range(lab)
             if rg and rg[0] <= a[0] < rg[1] and lab in mk:
                 diffs.append(100 * (p - mk[lab] / tot))
     return (sum(diffs) / len(diffs), len(diffs)) if diffs else None
+
+
+def _pool_rebuy(r, taken, spend=None):
+    """Покупка с одного счёта по стакану (сохранён на момент покупки, 5 лучших цен) без долей, которые банк уже купил раньше:
+    на ту же сумму или на spend (не меньше 5 долей, как на Polymarket). 5 цен кончились — сколько купилось; меньше 5 долей — None."""
+    try:
+        asks = [list(x) for x in json.loads(r["book_json"])["after"]]
+    except (TypeError, ValueError, KeyError):
+        return None
+    for lv in asks:                       # убираем уже купленное нами — с дешёвых цен
+        used = min(lv[1], taken)
+        lv[1] -= used
+        taken -= used
+    p0 = r["price"]
+    k = r["fee"] / (r["shares"] * p0 * (1 - p0)) if r["shares"] and 0 < p0 < 1 else 0.0  # ставка комиссии этой покупки
+    live = [lv for lv in asks if lv[1] > 1e-9]
+    left = max(spend or r["stake"] + r["fee"], 5 * (live[0][0] + k * live[0][0] * (1 - live[0][0])) * 1.001 if live else 0)
+    sh, cost, fee = 0.0, 0.0, 0.0
+    for price, size in asks:
+        per = price + k * price * (1 - price)
+        take = min(size, left / per)
+        if take <= 0:
+            continue
+        sh, cost, fee, left = sh + take, cost + take * price, fee + take * k * price * (1 - price), left - take * per
+    if sh < 5:
+        return None
+    fp = (r["payout"] or 0) / r["shares"] if r["shares"] else 0.0
+    return {**r, "shares": sh, "stake": cost, "fee": fee, "price": cost / sh,
+            "payout": sh * fp if r["status"] in ("won", "lost", "void") else None}
+
+
+def _real_pool(conn, wallets, since, until, bank=100.0, frac=None):
+    """Общий банк как один настоящий счёт: ставки кошельков по времени; нет свободных денег — пропуск; деньги возвращаются
+    в settled_at (когда Polymarket закрыл маркет); повторная покупка той же доли — по стакану без уже купленного (_pool_rebuy).
+    frac — ставка = доля счёта (свободные + в открытых ставках), каждая покупка по стакану."""
+    ts = lambda s: datetime.fromisoformat(s).timestamp() if s else None
+    q = ",".join("?" * len(wallets))
+    rs = conn.execute(f"""SELECT * FROM paper_trades WHERE wallet IN ({q}) AND local_date BETWEEN ? AND ?
+                          AND status IN ('won', 'lost', 'void', 'open', 'resting')""", (*wallets, since, until)).fetchall()
+    rs = sorted((dict(r) for r in rs), key=lambda r: ts(r["placed_at"] or r["snapshot_ts"]))
+    cash, back, took, skip, low, held, rebuy, nofill, busy = bank, [], [], 0, bank, {}, 0, 0, 0.0
+    for r in rs:
+        r["fee"] = r["fee"] or 0.0
+        t = ts(r["placed_at"] or r["snapshot_ts"])
+        back.sort(key=lambda x: x[0])
+        while back and back[0][0] <= t:
+            _, pay, c0 = back.pop(0)
+            cash, busy = cash + pay, busy - c0
+        key = (r["city"], r["local_date"], r["bucket_lo"], r["bucket_hi"], r["side"] or "yes")
+        rebuy += key in held
+        if key in held or frac:
+            r = _pool_rebuy(r, held.get(key, 0.0), frac * (cash + busy) if frac else None)
+            if r is None:
+                nofill += 1
+                continue
+        cost = r["stake"] + r["fee"]
+        if cost > cash:
+            skip += 1
+            continue
+        cash, busy = cash - cost, busy + cost
+        low = min(low, cash)
+        took.append(r)
+        held[key] = held.get(key, 0.0) + r["shares"]
+        if r["status"] in ("won", "lost", "void"):
+            back.append((ts(r["settled_at"]) or t, r["payout"] or 0, cost))
+    cash += sum(p for _, p, _ in back)      # всё закрытое уже вернулось на счёт
+    st = [r for r in took if r["status"] in ("won", "lost", "void")]
+    pnl, cost = sum(_pnl(r) for r in st), sum(r["stake"] + r["fee"] for r in st)
+    op = [r for r in took if r["status"] in ("open", "resting")]
+    return {"n": len(st), "pnl": pnl, "roi": 100 * pnl / cost if cost else None, "cash": cash, "low": low, "skip": skip,
+            "open": len(op), "open_cost": sum(r["stake"] + r["fee"] for r in op), "rebuy": rebuy, "nofill": nofill,
+            "max_stake": max((r["stake"] + r["fee"] for r in took), default=0.0)}
 
 
 def real_page_data(conn):
@@ -3279,6 +3366,26 @@ def real_page_data(conn):
                 c["status"] = "pass" if ok else ("wait" if not tot[1] or not w2[1] else "bad")
                 c["status_text"] = "проходит" if ok else ("ждём закрытых маркетов" if not tot[1] else
                                                          f"счёт ${bal:.2f}; нужен итог > 0 и плюс в обе недели")
+        elif c["key"] in ("pool", "pool2"):
+            p = _real_pool(conn, c["wallets"], c["since"], c["until"], frac=c.get("frac"))
+            tn = lambda v: "pos" if v > 0.005 else ("neg" if v < -0.005 else "")
+            c["rows"] = [{"label": "Свободно на счёте", "value": f"${p['cash']:.2f}", "tone": tn(p["cash"] + p["open_cost"] - 100),
+                          "note": f"ещё ${p['open_cost']:.2f} в {p['open']} открытых ставках" if p["open"] else None},
+                         {"label": "Закрытые ставки", "value": money_str(p["pnl"]) if p["n"] else "ещё нет", "tone": tn(p["pnl"]),
+                          "note": f"{p['n']} шт., доходность {p['roi']:+.1f}% на вложенное" if p["n"] else None},
+                         {"label": "Пропущено — не хватило денег", "value": str(p["skip"]),
+                          "note": f"меньше всего свободно было ${p['low']:.2f}"},
+                         {"label": "Та же доля второй раз — по остатку стакана", "value": str(p["rebuy"]),
+                          "note": f"из них не купили — не хватило стакана: {p['nofill']}" if p["rebuy"] else None}] + \
+                        ([{"label": "Самая большая ставка", "value": f"${p['max_stake']:.2f}",
+                           "note": f"не купили — меньше 5 долей в стакане: {p['nofill']}"}] if c.get("frac") else [])
+            c["paper"] = [_real_paper(conn, w, c["since"], c["until"]) for w in c["wallets"]]
+            ok_n, ok_roi = p["n"] >= c["need_n"], p["roi"] is not None and p["roi"] >= c["need_roi"]
+            c["status"] = "pass" if ok_n and ok_roi else ("wait" if not ok_n else "bad")
+            c["status_text"] = "проходит" if c["status"] == "pass" else "; ".join(
+                ([f"ещё {c['need_n'] - p['n']} закрытых ставок"] if not ok_n else []) +
+                ([f"доходность {p['roi']:+.1f}% → нужно ≥ +5%" if p["roi"] is not None else "доходность ≥ +5%"] if not ok_roi else []))
+            c["progress"] = min(100, round(100 * p["n"] / c["need_n"]))
         else:
             rows = [_real_paper(conn, w, c["since"], c.get("until")) for w in c["wallets"]]
             for r in rows:

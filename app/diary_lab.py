@@ -15,6 +15,9 @@
   review <город> <ГГГГ-ММ> <метка>   разбор ошибок экзамена → правка дневника
   score  <город> <ГГГГ-ММ> <метка…>  точность против рынка и простой формулы, деньги (по price_history — верхняя оценка)
   cycle  <город> <учебный> <проверочный>  всё подряд: study, r0 (без дневника), r1..r3 с разбором, final, проверка
+  walk   <город> <учебный> <проверочный>  схема Alex 24.10: учёба WALK_STUDY кругов, потом проверочный месяц день за днём —
+                                     ответ в 08:00 → ставка $2 → итог дня и урок в дневник → следующий день
+  DIARY_V2=1 walk — «дневник 2» (24.10): книга правил «IF число THEN сдвиг °F» со счётом, таблица прошлых дней, правка правил
 --days N — только первые N дней (проба). Движок — Gemma в виртуальной машине на NAS (Ollama, OLLAMA_URL / GEMMA_MODEL); не запускается,
 пока Gemma занята прогоном скилла (agy_skill_bt.py). Запуск в фоне — ./diary_run.sh.
 22.10 (Alex: Opus, изолированно): DIARY_ENGINE=claude — Claude (CLAUDE_MODEL, по умолчанию claude-opus-5-5) через
@@ -36,6 +39,7 @@ import re
 import sqlite3
 import subprocess
 import tempfile
+import statistics
 import sys
 import time
 import urllib.error
@@ -62,6 +66,8 @@ CLAUDE_SYSTEM = "You are a careful weather forecaster. You have no tools and no 
 MOMENTS = [("eve", -1, 18), ("m08", 0, 8), ("m12", 0, 12)]   # (метка, день относительно дня маркета, час местного)
 DIARY_WORDS = 1500        # выше — предупреждение в журнале (дневник только дополняется, не обрезается)
 LESSONS_MAX = 3           # уроков с одного дня
+RECENT = int(os.environ.get("DIARY_RECENT", "0"))   # 23.10: дней «ошибки прогнозов» в данных дня (0 — нет); сдвиг меняется от месяца к месяцу
+V2 = os.environ.get("DIARY_V2") == "1"   # 24.10 «дневник 2»: книга правил с числами + таблица прошлых дней (walk2)
 MISS_P = 0.35             # ошибка: шанс верного варианта ниже этого или промах максимума ≥ 3°
 BASE_SD = 3.0             # простая формула: нормальное распределение вокруг среднего прогноза, σ = 3°F (записано до прогона)
 EDGE = 0.10               # деньги: покупаем вариант, если шанс ИИ выше цены на 10 п.п. и больше
@@ -111,41 +117,59 @@ def city_of(run):
     return run
 
 
+def build_day(conn, city, d, obs, prices=True):
+    """Данные одного дня (24.10: одна функция для учёбы, экзамена и живой ставки — diary_rules.predict).
+    Итога ещё нет (сегодня) — win и actual_max None."""
+    cfg = OBS_CITIES[city]
+    tz = ZoneInfo(cfg["tz"])
+    ds = d.isoformat()
+    win = conn.execute("SELECT win_lo, win_hi FROM weather_poly_outcomes WHERE city=? AND local_date=?", (city, ds)).fetchone()
+    mx = conn.execute("SELECT actual_max FROM weather_station_daily WHERE city=? AND local_date=?", (city, ds)).fetchone()
+    fc = dict(conn.execute("SELECT model, fcst_max FROM mm_forecasts WHERE city=? AND local_date=? AND lead='day1'", (city, ds)))
+    fv = dict(conn.execute("SELECT var, value FROM ml_fcst_vars WHERE city=? AND local_date=?", (city, ds)))
+    bks = conn.execute("SELECT DISTINCT bucket_lo, bucket_hi FROM price_history WHERE city=? AND local_date=? ORDER BY 1",
+                       (city, ds)).fetchall() if prices else []
+    pr = {}
+    for tag, off, hour in MOMENTS if prices else []:
+        ts = datetime.combine(d + timedelta(days=off), datetime.min.time(), tz).replace(hour=hour).timestamp()
+        row = {}
+        for lo, hi in bks:
+            p = conn.execute("SELECT p, t_utc FROM price_history WHERE city=? AND local_date=? AND bucket_lo=? AND bucket_hi=? "
+                             "AND t_utc<=? ORDER BY t_utc DESC LIMIT 1", (city, ds, lo, hi, ts)).fetchone()
+            if p:
+                row[bucket_label(lo, hi)] = {"p": p[0], "age_min": round((ts - p[1]) / 60)}
+        pr[tag] = row
+    start = datetime.combine(d, datetime.min.time(), tz).timestamp()
+    recent = []                     # дни D-RECENT-1 … D-2: итог известен ещё до вечера накануне (момент eve)
+    for k in range(RECENT + 1, 1, -1):
+        pd = (d - timedelta(days=k)).isoformat()
+        a = conn.execute("SELECT actual_max FROM weather_station_daily WHERE city=? AND local_date=?", (city, pd)).fetchone()
+        f = [v for (v,) in conn.execute("SELECT fcst_max FROM mm_forecasts WHERE city=? AND local_date=? AND lead='day1'", (city, pd))
+             if v is not None]
+        if a and a[0] is not None and f:
+            recent.append(round(a[0] - statistics.median(f), 1))
+    return {"date": ds, "start": start, "buckets": [bucket_label(lo, hi) for lo, hi in bks],
+            "win": bucket_label(*win) if win and mx else None, "actual_max": mx[0] if win and mx else None,
+            "forecasts": fc, "fcst_vars": fv, "prices": pr, **({"recent_err": recent} if RECENT else {}),
+            "obs": [o for o in obs if start - 2 * 86400 <= o["t"] < start + 86400]}
+
+
+def iowa_obs(cfg, d1, d2):
+    obs = iowa(cfg, d1, d2)
+    for o in obs:
+        o["t"] = datetime.strptime(o.pop("valid"), "%Y-%m-%d %H:%M").replace(tzinfo=timezone.utc).timestamp()
+        o.pop("station", None)
+    return obs
+
+
 def build(city, month):
     run, city = city, city_of(city)
     cfg = OBS_CITIES[city]
     tz = ZoneInfo(cfg["tz"])
     days = list(month_days(month))
-    obs = iowa(cfg, days[0] - timedelta(days=2), days[-1] + timedelta(days=2))
-    for o in obs:
-        o["t"] = datetime.strptime(o.pop("valid"), "%Y-%m-%d %H:%M").replace(tzinfo=timezone.utc).timestamp()
-        o.pop("station", None)
+    obs = iowa_obs(cfg, days[0] - timedelta(days=2), days[-1] + timedelta(days=2))
     conn = db()
-    out = []
-    for d in days:
-        ds = d.isoformat()
-        win = conn.execute("SELECT win_lo, win_hi FROM weather_poly_outcomes WHERE city=? AND local_date=?", (city, ds)).fetchone()
-        mx = conn.execute("SELECT actual_max FROM weather_station_daily WHERE city=? AND local_date=?", (city, ds)).fetchone()
-        if not win or not mx:
-            continue
-        fc = dict(conn.execute("SELECT model, fcst_max FROM mm_forecasts WHERE city=? AND local_date=? AND lead='day1'", (city, ds)))
-        fv = dict(conn.execute("SELECT var, value FROM ml_fcst_vars WHERE city=? AND local_date=?", (city, ds)))
-        bks = conn.execute("SELECT DISTINCT bucket_lo, bucket_hi FROM price_history WHERE city=? AND local_date=? ORDER BY 1",
-                           (city, ds)).fetchall()
-        prices = {}
-        for tag, off, hour in MOMENTS:
-            ts = datetime.combine(d + timedelta(days=off), datetime.min.time(), tz).replace(hour=hour).timestamp()
-            row = {}
-            for lo, hi in bks:
-                p = conn.execute("SELECT p, t_utc FROM price_history WHERE city=? AND local_date=? AND bucket_lo=? AND bucket_hi=? "
-                                 "AND t_utc<=? ORDER BY t_utc DESC LIMIT 1", (city, ds, lo, hi, ts)).fetchone()
-                if p:
-                    row[bucket_label(lo, hi)] = {"p": p[0], "age_min": round((ts - p[1]) / 60)}
-            prices[tag] = row
-        start = datetime.combine(d, datetime.min.time(), tz).timestamp()
-        out.append({"date": ds, "start": start, "buckets": [bucket_label(lo, hi) for lo, hi in bks],
-                    "win": bucket_label(*win), "actual_max": mx[0], "forecasts": fc, "fcst_vars": fv, "prices": prices,
-                    "obs": [o for o in obs if start - 2 * 86400 <= o["t"] < start + 86400]})
+    out = [x for x in (build_day(conn, city, d, obs) for d in days) if x["win"] is not None]
     path = OUT / run / f"data_{month}.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({"city": city, "unit": cfg["unit"], "tz": cfg["tz"], "station": cfg["icao"], "days": out}))
@@ -195,15 +219,27 @@ def day_text(meta, day, until=None, reveal=False):
         "MODEL FORECASTS of the daily max, issued the day before (°F): "
         + (", ".join(f"{k} {v:.1f}" for k, v in sorted(day["forecasts"].items())) or "none"),
         "FORECAST conditions 11:00-17:00 local (ECMWF average): "
-        + (f"cloud {fv.get('cloud_cover', 0):.0f}%, dew point {fv.get('dew_point_2m', 0):.1f}°C, RH {fv.get('relative_humidity_2m', 0):.0f}%, "
+        + ((f"cloud {fv.get('cloud_cover', 0):.0f}%, dew point {c2f(fv.get('dew_point_2m', 0)):.0f}°F, RH {fv.get('relative_humidity_2m', 0):.0f}%, "
+            f"solar radiation {fv.get('shortwave_radiation', 0):.0f} W/m², wind {fv.get('wind_speed_10m', 0) / 1.852:.0f} kt from {wind}, "
+            f"precipitation {fv.get('precipitation', 0):.1f} mm" if V2 else   # 24.10 дневник 2: те же единицы, что в замерах
+           f"cloud {fv.get('cloud_cover', 0):.0f}%, dew point {fv.get('dew_point_2m', 0):.1f}°C, RH {fv.get('relative_humidity_2m', 0):.0f}%, "
            f"solar radiation {fv.get('shortwave_radiation', 0):.0f} W/m², wind {fv.get('wind_speed_10m', 0):.0f} km/h from {wind}, "
-           f"precipitation {fv.get('precipitation', 0):.1f} mm" if fv else "none"),
+           f"precipitation {fv.get('precipitation', 0):.1f} mm") if fv else "none"),
     ]
+    if day.get("recent_err"):
+        r = day["recent_err"]
+        parts.append(f"RECENT FORECAST ERROR at this station, last {len(r)} finished days, oldest first (the day before the "
+                     f"market day is not finished yet and is not included): actual max minus the median of the model forecasts, °F: "
+                     + ", ".join(f"{v:+.1f}" for v in r) + f". Mean {statistics.mean(r):+.1f}.")
     rows = [o for o in day["obs"] if (until is None or o["t"] <= until) and (reveal or o["t"] < day["start"] + 86400)]
     parts.append("OBSERVATIONS (the market day starts at 00:00; earlier rows are the previous days):\n" + obs_table(rows, tz))
     if reveal:
         parts.append(f"RESULT: the highest temperature was {day['actual_max']:.0f}°F, winning bucket {day['win']}.")
     return "\n\n".join(parts)
+
+
+def c2f(c):
+    return c * 9 / 5 + 32
 
 
 def moment_ts(day, off, hour, tz):
@@ -255,7 +291,7 @@ def training_now():
 def night_wait(city):
     # 22.10: ночное обучение (05:20 weather_ml_live, 05:45 weather_ml_day) идёт на том же процессоре NAS, что и Gemma —
     # 21.10 оба сняты по таймауту. С 05:05 Gemma ждёт, пока оба не закончатся (не раньше 05:47, не позже 08:30);
-    # 22.10 такая пауза вручную — обучение прошло за 6 и 4 мин.
+    # job_log 19-22.10: без Gemma weather_ml_train 9-24 мин, weather_ml_day 19-21 мин; 21.10 с Gemma — сняты через 3 ч и 40 мин.
     tz = ZoneInfo("Europe/Chisinau")
     now = datetime.now(tz)
     t = lambda h, m: now.replace(hour=h, minute=m, second=0, microsecond=0)
@@ -399,30 +435,17 @@ def ask_openrouter(prompt, step, city, label):
     return text
 
 
-def ask(prompt, step, city, want_json=True, label=""):
-    if ENGINE in ("claude", "openrouter"):
-        text = (ask_claude if ENGINE == "claude" else ask_openrouter)(prompt, step, city, label)
-        if not want_json:
-            return text.strip()
-        m = re.search(r"\{.*\}", text, re.S)
-        try:
-            return json.loads(m.group(0)) if m else None
-        except json.JSONDecodeError:
-            return None
-    body = {"model": MODEL, "messages": [{"role": "user", "content": prompt}], "stream": True,
-            "options": {"num_ctx": int(os.environ.get("GEMMA_CTX", "32768")), "temperature": 1.0, "top_p": 0.95,
-                        "top_k": 64, "num_predict": 8000}}
-    night_wait(city)
-    t0 = time.time()
-    live(city, "info", f"▶ запрос {step} {label}: {len(prompt)} символов", step, label)
+def _stream(body, city, step, label):
+    """Один ответ Ollama потоком: каждая строка рассуждения — в терминал сразу. → (мысли, ответ, вызовы инструмента, последняя запись)."""
     req = urllib.request.Request(URL, json.dumps(body).encode(), {"Content-Type": "application/json"})
-    think, text, buf, r = [], [], {"think": "", "answer": ""}, {}
-    with urllib.request.urlopen(req, timeout=1800) as resp:      # потоком: каждая строка рассуждения — в терминал сразу
+    think, text, calls, buf, r = [], [], [], {"think": "", "answer": ""}, {}
+    with urllib.request.urlopen(req, timeout=1800) as resp:
         for raw in resp:
             if not raw.strip():
                 continue
             r = json.loads(raw)
             msg = r.get("message") or {}
+            calls += msg.get("tool_calls") or []
             for kind, piece, acc in (("think", msg.get("thinking") or "", think), ("answer", msg.get("content") or "", text)):
                 if not piece:
                     continue
@@ -439,13 +462,94 @@ def ask(prompt, step, city, want_json=True, label=""):
     for kind in ("think", "answer"):
         if buf[kind].strip():
             live(city, kind, buf[kind], step, label)
-    text = "".join(text)
+    return "".join(think), "".join(text), calls, r
+
+
+TOOL_MAX = 8               # вызовов инструмента за один запрос; дальше — «отвечай» без инструмента
+
+
+def _json(text):
+    m = re.search(r"\{.*\}", text, re.S)
+    try:
+        return json.loads(m.group(0)) if m else None
+    except json.JSONDecodeError:
+        return None
+
+
+def ask(prompt, step, city, want_json=True, label="", tool=None, review=None):
+    """tool = (описание для Ollama, функция(аргументы) → текст): 24.10 инструмент «проверь условие» дневника 2 (Alex) —
+    Gemma зовёт, программа считает и отвечает, Gemma продолжает. Только движок Ollama.
+    review = функция(ответ JSON) → текст или None: 25.10 (Alex, «вариант А») программа проверяет готовый ответ и один раз
+    показывает Gemma итог проверки — она может поправить ответ; второй ответ окончательный."""
+    if ENGINE in ("claude", "openrouter"):
+        text = (ask_claude if ENGINE == "claude" else ask_openrouter)(prompt, step, city, label)
+        if not want_json:
+            return text.strip()
+        m = re.search(r"\{.*\}", text, re.S)
+        try:
+            return json.loads(m.group(0)) if m else None
+        except json.JSONDecodeError:
+            return None
+    msgs = [{"role": "user", "content": prompt}]
+    body = {"model": MODEL, "messages": msgs, "stream": True,
+            "options": {"num_ctx": int(os.environ.get("GEMMA_CTX", "32768")), "temperature": 1.0, "top_p": 0.95,
+                        "top_k": 64, "num_predict": 16000 if V2 else 8000}}   # 24.10: дневнику 2 нужно больше на таблицу (12000 обрезало ответ)
+    night_wait(city)
+    t0 = time.time()
+    live(city, "info", f"▶ запрос {step} {label}: {len(prompt)} символов", step, label)
+    thinks, used, tokens, r, reviews, cut = [], [], 0, {}, [], 0
+    while True:
+        if tool and len(used) < TOOL_MAX:
+            body["tools"] = [tool[0]]
+        else:
+            body.pop("tools", None)
+        think, text, calls, r = _stream(body, city, step, label)
+        thinks.append(think)
+        tokens += r.get("eval_count") or 0
+        if not (tool and calls):
+            if want_json and not _json(text) and not cut and (r.get("done_reason") == "length" or
+                                                              (r.get("eval_count") or 0) >= body["options"]["num_predict"]):
+                # 25.10: ответ оборвался на пределе — один раз переспросить без рассуждений (14.08 и 18.08 день терялся)
+                cut = 1
+                live(city, "tool", "✂ ответ оборвался на пределе — прошу ответить сразу JSON", step, label)
+                msgs += [{"role": "assistant", "content": text},
+                         {"role": "user", "content": "Your answer was cut off: the reasoning was too long. Do not reason "
+                                                     "any more — answer right now with the JSON only, in the required format."}]
+                body["think"] = False
+                continue
+            fb = review(_json(text) or {}) if review and not reviews else None
+            if not fb:
+                break
+            reviews.append({"answer": text, "feedback": fb})
+            live(city, "tool", f"🔎 проверка ответа: {fb}"[:300], step, label)
+            msgs += [{"role": "assistant", "content": text}, {"role": "user", "content": fb}]
+            continue
+        msgs.append({"role": "assistant", "content": text, "tool_calls": calls})
+        for c in calls:
+            fn = c.get("function") or {}
+            args = fn.get("arguments") or {}
+            if len(used) >= TOOL_MAX:
+                res = f"tool limit reached ({TOOL_MAX} calls) — answer now with the JSON"
+            else:
+                try:
+                    res = tool[1](args)
+                except Exception as e:            # ошибка инструмента — Gemma видит её текст, запрос не падает
+                    res = f"tool error: {e}"
+            used.append({"args": args, "result": res})
+            live(city, "tool", f"🔧 {json.dumps(args, ensure_ascii=False)} → {res}"[:300], step, label)
+            msgs.append({"role": "tool", "tool_name": fn.get("name", ""), "content": res})
+    if reviews and not _json(text):           # поправленный ответ пустой или оборван — остаётся первый
+        text = reviews[0]["answer"]
     rec = {"t": round(t0), "step": step, "label": label, "model": MODEL, "seconds": round(time.time() - t0, 1),
-           "prompt_chars": len(prompt), "prompt_tokens": r.get("prompt_eval_count"), "tokens": r.get("eval_count"),
-           "think": "".join(think)[:4000], "response": text}
+           "prompt_chars": len(prompt), "prompt_tokens": r.get("prompt_eval_count"), "tokens": tokens,
+           "last_tokens": r.get("eval_count"), "turns": len(thinks), "cut": cut, "think": "\n---\n".join(thinks)[:4000], "response": text}
+    if tool:
+        rec["tools"] = used
+    if reviews:
+        rec["reviews"] = reviews
     with open(OUT / city / "calls.jsonl", "a") as f:
         f.write(json.dumps(rec, ensure_ascii=False) + "\n")
-    live(city, "info", f"✓ ответ за {rec['seconds']:.0f} с, {rec['tokens'] or 0} токенов", step, label)
+    live(city, "info", f"✓ ответ за {rec['seconds']:.0f} с, {tokens} токенов" + (f", проверок {len(used)}" if tool else ""), step, label)
     if not want_json:
         return text.strip()
     m = re.search(r"\{.*\}", text, re.S)
@@ -523,18 +627,18 @@ def days_of(city, month, n):
     return data, data["days"][:n] if n else data["days"]
 
 
-def study(city, month, n=None):
+def study(city, month, n=None, tag=""):
     meta, days = days_of(city, month, n)
     lessons = []
     for i, day in enumerate(days, 1):
         prompt = (f"{ROLE}\n\nDIARY:\n{read_diary(city) or '(empty)'}\n\nDATA:\n{day_text(meta, day, reveal=True)}\n\n"
                   + STUDY_TASK.format(n=LESSONS_MAX))
-        r = ask(prompt, f"study_{month}", city, label=day["date"])
+        r = ask(prompt, f"study_{month}{tag}", city, label=day["date"])
         new = [str(x) for x in (r or {}).get("lessons", [])][:LESSONS_MAX]
         lessons += new
         say(city, f"study {day['date']}: уроков {len(new)}")
         if i % 7 == 0 or i == len(days):          # раз в неделю — сведение в дневник
-            consolidate(city, lessons, [], f"study_{month}_{i}")
+            consolidate(city, lessons, [], f"study_{month}{tag}_{i}")
             lessons = []
 
 
@@ -711,6 +815,88 @@ def cycle(city, learn, test, n=None):
     score(city, test, ["n1_empty", "n1"])
 
 
+# 24.10 (схема Alex): учёба на месяце с ответами (WALK_STUDY кругов), потом проверочный месяц как вживую — каждый день
+# ответ в 08:00 с дневником → ставка $2 по правилу EDGE (один вариант, где перевес над ценой 08:00 больше всего) → итог дня
+# со всеми данными, ставка и деньги → уроки и «подвёл» в дневник сразу → следующий день. Каждый ответ — день, которого ИИ
+# ещё не видела; урок пишется только после ответа. Сравнение — с n1 / n1_empty того же месяца в 08:00 (atlanta_gemma7).
+WALK_STUDY = int(os.environ.get("WALK_STUDY", "2"))
+WALK_STAKE = 2.0
+WALK_STAGES = [("study1", "учёба: круг 1", "learn"), ("study2", "учёба: круг 2", "learn"),
+               ("walk", "день за днём: 08:00 → ставка → итог → урок", "test")]
+WALK_TASK = ("TASK: this is the market day you just forecast at 08:00, now with all its data and RESULT. Your answer at 08:00 "
+             "was:\n{answer}\n{bet}\nFind what you got right and wrong: which observation or forecast you misread or ignored, "
+             "which diary lesson helped or misled you. Write at most {n} GENERAL lessons (conditions → effect, no dates, no "
+             "specific numbers of this day; none if the day taught nothing new) and list diary lessons that misled you. "
+             "Answer with JSON only:\n"
+             '{{"why": "<short>", "lessons": ["..."], "misleading": ["<quoted diary line>", ...]}}')
+
+
+def walk_bet(day, probs, moment="m08"):
+    """Одна ставка $2: вариант с наибольшим перевесом ИИ над ценой, если перевес ≥ EDGE (цена 5-95¢, покупка +1¢, комиссия)."""
+    pr = {k: v["p"] for k, v in day["prices"].get(moment, {}).items()}
+    cands = [(p_ai - pr[b], b) for b, p_ai in probs.items() if b in pr and 0.05 <= pr[b] <= 0.95 and p_ai - pr[b] >= EDGE]
+    if not cands:
+        return None
+    _, b = max(cands)
+    buy = min(pr[b] + 0.01, 0.999)
+    pnl = WALK_STAKE * (1 / (buy + 0.05 * buy * (1 - buy)) - 1) if b == day["win"] else -WALK_STAKE
+    return {"bucket": b, "price": round(buy, 3), "p_ai": round(probs[b], 3), "pnl": round(pnl, 2)}
+
+
+def walk(city, learn, test, n=None):
+    for m in (learn, test):
+        if not (OUT / city / f"data_{m}.json").exists():
+            build(city, m)
+    st = lambda stage: (set_status(city, stage=stage), say(city, f"=== этап {stage}: {dict((k, w) for k, w, _ in WALK_STAGES)[stage]}"))
+    for k in range(1, WALK_STUDY + 1):
+        if sum(1 for c in _calls(city) if c.get("step") == f"study_{learn}_p{k}") >= len(days_of(city, learn, n)[1]):
+            continue                                     # круг уже пройден (перезапуск)
+        st(f"study{k}")
+        study(city, learn, n, tag=f"_p{k}")
+    st("walk")
+    meta, days = days_of(city, test, n)
+    f = exam_file(city, test, "walk")
+    done = {x["date"] for x in map(json.loads, f.open())} if f.exists() else set()
+    _, off, hour = next(x for x in MOMENTS if x[0] == "m08")
+    total = sum(json.loads(x).get("bet", {}).get("pnl", 0) or 0 for x in f.open()) if f.exists() else 0.0
+    for day in days:
+        if day["date"] in done:
+            continue
+        diary = read_diary(city)
+        t0 = time.time()
+        r = ask(exam_prompt(diary, meta, day, off, hour), f"exam_{test}_walk", city, label=f"{day['date']} m08") or {}
+        probs = {k: float(v) for k, v in (r.get("probs") or {}).items() if k in day["buckets"] and _num(v)}
+        s = sum(probs.values())
+        probs = {k: v / s for k, v in probs.items()} if s > 0 else {}
+        bet = walk_bet(day, probs) if probs else None
+        total += bet["pnl"] if bet else 0
+        answer = f"expected max {r.get('expected_max')}, probabilities {json.dumps(probs)}, factors: {r.get('factors')}"
+        bet_txt = (f"You bet ${WALK_STAKE:.0f} on bucket {bet['bucket']} at {bet['price'] * 100:.0f}¢ (you gave it "
+                   f"{bet['p_ai'] * 100:.0f}%): you {'WON' if bet['pnl'] > 0 else 'LOST'} {abs(bet['pnl']):.2f}$."
+                   if bet else "You did not bet: no bucket was at least 10 points above its price.")
+        prompt = (f"{ROLE}\n\nDIARY:\n{diary or '(empty)'}\n\nDATA:\n{day_text(meta, day, reveal=True)}\n\n"
+                  + WALK_TASK.format(answer=answer, bet=bet_txt, n=LESSONS_MAX))
+        rv = ask(prompt, f"walk_review_{test}", city, label=day["date"]) or {}
+        consolidate(city, [str(x) for x in rv.get("lessons", [])][:LESSONS_MAX], [str(x) for x in rv.get("misleading", [])],
+                    f"walk_{day['date']}")
+        rec = {"t": round(t0), "date": day["date"], "moment": "m08", "expected_max": r.get("expected_max"), "probs": probs,
+               "factors": r.get("factors"), "ok": bool(probs), "seconds": round(time.time() - t0, 1),
+               "diary_words": len(diary.split()), "bet": bet, "why": rv.get("why")}
+        with f.open("a") as fh:
+            fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        say(city, f"walk {day['date']}: max {rec['expected_max']} (было {day['actual_max']:.0f}) "
+                  f"p(верный {day['win']})={probs.get(day['win'], 0):.2f}; "
+                  + (f"ставка {bet['bucket']} по {bet['price'] * 100:.0f}¢ → {bet['pnl']:+.2f}$" if bet else "без ставки")
+                  + f"; итого {total:+.2f}$")
+    score(city, test, ["walk"])
+
+
+
+def _calls(city):
+    p = OUT / city / "calls.jsonl"
+    return [json.loads(x) for x in p.open()] if p.exists() else []
+
+
 def main():
     if sys.argv[1:2] == ["note"]:      # 22.10: заметка исследователя в блок «Что происходит» на /diary
         OUT.mkdir(parents=True, exist_ok=True)
@@ -725,21 +911,21 @@ def main():
         sys.exit(1)
     step, city, month, *rest = args
     (OUT / city).mkdir(parents=True, exist_ok=True)
-    if step not in ("build", "score") and ENGINE == "gemma" and gemma_busy():
+    if step not in ("build", "score", "predict") and ENGINE == "gemma" and gemma_busy():
         sys.exit("Gemma занята прогоном скилла (agy_skill_bt.py) — не запускаю, чтобы не тормозить его")
-    if step not in ("build", "score"):
-        set_status(city, cmd=" ".join(sys.argv[1:]), step=step, learn=month, test=rest[0] if step == "cycle" else None,
+    if step not in ("build", "score", "predict"):
+        set_status(city, cmd=" ".join(sys.argv[1:]), step=step, learn=month, test=rest[0] if step in ("cycle", "walk") else None,
                    days=n, model=MODEL, pid=os.getpid(), started=round(time.time()), finished=None, error=None,
                    stage=step if step != "cycle" else "")
         say(city, f"=== старт: {' '.join(sys.argv[1:])}, модель {MODEL}")
     try:
         _step(step, city, month, rest, n, empty)
     except BaseException as e:
-        if step not in ("build", "score"):
+        if step not in ("build", "score", "predict"):
             set_status(city, finished=round(time.time()), error=f"{type(e).__name__}: {e}"[:300])
             say(city, f"!!! остановлено: {type(e).__name__}: {e}")
         raise
-    if step not in ("build", "score"):
+    if step not in ("build", "score", "predict"):
         set_status(city, finished=round(time.time()))
         say(city, "=== готово")
 
@@ -757,6 +943,15 @@ def _step(step, city, month, rest, n, empty):
         score(city, month, rest)
     elif step == "cycle":
         cycle(city, month, rest[0], n=n)
+    elif step == "walk":
+        if V2:
+            import diary_rules        # 24.10 дневник 2: правила с подсчётом программой
+            diary_rules.walk(city, month, rest[0], n=n)
+        else:
+            walk(city, month, rest[0], n=n)
+    elif step == "predict":           # 24.10 живая ставка утром: diary_rules.predict, month — дата (ГГГГ-ММ-ДД) или today
+        import diary_rules
+        diary_rules.predict(city, None if month == "today" else month, dry="--dry" in sys.argv)
 
 
 if __name__ == "__main__":

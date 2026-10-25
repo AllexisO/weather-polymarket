@@ -12,7 +12,8 @@
   .bk { overflow-wrap: anywhere; } .pane { min-width: 0; }
   .cands { display: grid; gap: 14px; }
   .cand { display: grid; grid-template-columns: minmax(0, 1fr) 220px; gap: 18px; }
-  @media (max-width: 760px) { .cand { grid-template-columns: 1fr; } }
+  .cand > div { min-width: 0; }   /* 25.10: иначе широкая таблица раздвигала страницу на телефоне */
+  @media (max-width: 760px) { .cand { grid-template-columns: minmax(0, 1fr); } }
   .cand h3 { margin: 0 0 6px; font-size: 18px; }
   .cand .what { color: var(--bk-muted); font-size: 14px; margin: 0 0 10px; }
   .rule { font-size: 14px; margin: 0 0 10px; } .rule b { font-weight: 600; }
@@ -27,6 +28,8 @@
   table.t th { text-align: left; color: var(--bk-muted); font-weight: 500; padding: 6px 8px; border-bottom: 1px solid var(--bk-line); }
   table.t td { padding: 7px 8px; border-bottom: 1px solid var(--bk-line); vertical-align: top; }
   .tw { overflow-x: auto; }
+  .bk table.t td { overflow-wrap: normal; }   /* 25.10: в ячейках перенос по словам, а не по буквам (таблица листается внутри .tw) */
+  .luck { font-size: 12px; min-width: 9em; }
   .warn { color: #FFD58A; font-size: 13.5px; margin-top: 8px; }
   .muted { color: var(--bk-muted); }
   ol.steps { margin: 0; padding-left: 20px; line-height: 1.7; }
@@ -52,11 +55,12 @@
           <div class="tw"><table class="t"><thead><tr><th>Кошелёк</th><th>Закрыто</th><th>Угадано</th><th>Итог</th><th>Доходность</th>{% if c.acc %}<th>Точность против рынка</th>{% endif %}</tr></thead><tbody>
             {% for r in c.paper %}<tr><td>{{ r.label }}{% if r.open %} <span class="muted">· ждут {{ r.open }}</span>{% endif %}</td>
               <td class="num">{{ r.n }}</td><td class="num">{{ r.won }}</td>
-              <td class="num"><b class="{{ tone(r.pnl) }}">{{ money(r.pnl) if r.n else '—' }}</b>{% if r.luck and r.n %}<div class="muted" style="font-size: 12px;">{{ r.luck[0] }}</div>{% endif %}</td>
+              <td class="num"><b class="{{ tone(r.pnl) }}">{{ money(r.pnl) if r.n else '—' }}</b>{% if r.luck and r.n %}<div class="muted luck">{{ r.luck[0] }}</div>{% endif %}</td>
               <td class="num">{{ '%+.0f%%' | format(r.roi) if r.roi is not none else '—' }}</td>
               {% if c.acc %}<td class="num">{% if r.acc %}{{ '%+.1f' | format(r.acc[0]) }} п.п. <span class="muted">({{ r.acc[1] }} ч)</span>{% elif r.wallet in ('llm_mix', 'llm_cal') %}<span class="muted">не нужно</span>{% else %}—{% endif %}</td>{% endif %}</tr>{% endfor %}
           </tbody></table></div>
-          {% elif c.rows %}
+          {% endif %}
+          {% if c.rows %}
           <div class="tw"><table class="t"><tbody>
             {% for r in c.rows %}<tr><td>{{ r.label }}</td><td class="num"><b class="{{ r.tone }}">{{ r.value }}</b>{% if r.note %} <span class="muted">· {{ r.note }}</span>{% endif %}</td></tr>{% endfor %}
           </tbody></table></div>

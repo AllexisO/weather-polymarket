@@ -17,9 +17,10 @@ TZ = ZoneInfo("Europe/Chisinau")
 MOMENT_NAME = {"eve": "накануне 18:00", "m08": "08:00", "m12": "12:00"}
 KIND_NAME = {"info": "ход   ", "think": "думает", "answer": "ответ "}
 LEARN_TAGS = ["r0", "r1", "r2", "r3", "final"]
-TEST_TAGS = ["n1_empty", "n1"]
+TEST_TAGS = ["n1_empty", "n1", "walk"]
 TAG_NAME = {"r0": "без дневника", "r1": "круг 1", "r2": "круг 2", "r3": "круг 3", "final": "финал",
-            "n1_empty": "новый месяц без дневника", "n1": "новый месяц с дневником"}
+            "n1_empty": "новый месяц без дневника", "n1": "новый месяц с дневником",
+            "walk": "день за днём, 08:00"}   # 24.10: diary_lab walk — схема Alex
 QUIET_MIN = 20     # дольше нет новых строк — «нет признаков работы»
 
 
@@ -77,10 +78,18 @@ def _stages(city, st, calls, n_days):
     out = []
     started_after = False
     cur = st.get("stage") if st and not st.get("finished") else None
-    for key, what, which in dl.STAGES:
+    walk = (st or {}).get("step") == "walk"
+    for key, what, which in (dl.WALK_STAGES if walk else dl.STAGES):
         month = learn if which == "learn" else test
         nd = n_days.get(month, 0)
-        if key == "study":
+        if walk and key.startswith("study"):
+            done = sum(1 for c in calls if c.get("step") == f"study_{learn}_p{key[5:]}")
+            need = nd
+        elif walk:
+            f = dl.exam_file(city, month, "walk") if month else None
+            done = len(_jsonl(f)) if f and f.exists() else 0
+            need = nd
+        elif key == "study":
             done = sum(1 for c in calls if c.get("step") == f"study_{learn}")
             need = nd
         elif key.startswith("review_"):
@@ -119,6 +128,113 @@ def _miss_days(city, month, tag, n):
     return sum(1 for d in days if dl.misses(d, [a for a in ans if a["date"] == d["date"]]))
 
 
+def _resp(c):
+    """JSON из ответа модели в calls.jsonl (уроки, «подвели»)."""
+    m = re.search(r"\{.*\}", c.get("response") or "", re.S)
+    try:
+        return json.loads(m.group(0)) if m else {}
+    except ValueError:
+        return {}
+
+
+def _day_grid(city, st, s, calls, now_call, n_days):
+    """24.10 (Alex: «живой прогресс каждого дня»): клетка на день этапа — готов / идёт сейчас (что делает, с какого
+    времени) / ждёт / не нужен (разбор только дней с промахом); у готовой — коротко итог и подробности по нажатию."""
+    month = s["month"]
+    try:
+        meta = dl.load(city, month)
+    except (OSError, ValueError, TypeError):
+        return []
+    days = meta["days"][:n_days.get(month) or None]
+    key, learn = s["key"], st.get("learn")
+    walk = st.get("step") == "walk"
+    if key.startswith("study"):
+        step = f"study_{learn}_p{key[5:]}" if walk else f"study_{learn}"
+    elif key.startswith("review_"):
+        step = f"review_{learn}_{key[7:]}"
+    else:
+        step = None
+    by_call = {c.get("label"): c for c in calls if step and c.get("step") == step}
+    ans = {}
+    if not step:
+        f = dl.exam_file(city, month, key)
+        for a in (_jsonl(f) if f.exists() else []):
+            ans.setdefault(a["date"], []).append(a)
+    review_calls = {c.get("label"): c for c in calls if c.get("step") == f"walk_review_{month}"} if key == "walk" else {}
+    need_review = None
+    if key.startswith("review_"):
+        f = dl.exam_file(city, learn, key[7:])
+        ex = _jsonl(f) if f.exists() else []
+        need_review = {d["date"] for d in days if dl.misses(d, [a for a in ex if a["date"] == d["date"]])} if ex else None
+    out = []
+    for d in days:
+        date = d["date"]
+        cell = {"date": date, "n": date[8:], "state": "wait", "short": "", "detail": [], "fact": d["actual_max"], "win": d["win"]}
+        is_now = bool(now_call and s["state"] == "cur" and str(now_call["label"]).startswith(date) and
+                      (now_call["step"] == step or (not step and now_call["step"].startswith(f"exam_{month}_{key}"))
+                       or (key == "walk" and now_call["step"] == f"walk_review_{month}")))
+        if step:
+            c = by_call.get(date)
+            if c:
+                r = _resp(c)
+                ls = [str(x) for x in (r.get("lessons") or [])][:dl.LESSONS_MAX]
+                if not ls and ("add" in r or "edit" in r):     # дневник 2: книга правил
+                    ls = [str(x) for x in r.get("add") or []] + [f"правка R{e.get('id')}: {e.get('rule')}" for e in r.get("edit") or []
+                                                                  if isinstance(e, dict)]
+                    if r.get("check"):
+                        cell["detail"].append(("Таблица", str(r["check"])))
+                cell.update(state="done", short=f"{len(ls)} ур.", detail=cell["detail"] + [("Уроки", x) for x in ls] +
+                            [("Подвели", str(x)) for x in (r.get("misleading") or [])] + [("Время", f"{c.get('seconds', 0):.0f} с")])
+            elif need_review is not None and date not in need_review:
+                cell.update(state="skip", short="не нужен")
+        else:
+            got = ans.get(date, [])
+            for a in sorted(got, key=lambda a: [m for m, _, _ in dl.MOMENTS].index(a["moment"])):
+                pr = {k: v["p"] for k, v in d["prices"].get(a["moment"], {}).items()}
+                sm = sum(pr.values())
+                p_ai = a["probs"].get(d["win"]) if a["ok"] else None
+                p_m = pr.get(d["win"], 0) / sm if sm else None
+                cell["detail"].append((MOMENT_NAME[a["moment"]],
+                                       f"прогноз {a.get('expected_max')} · было {d['actual_max']:.0f} ({d['win']}) · шанс верного: ИИ "
+                                       + (f"{100 * p_ai:.0f}%" if p_ai is not None else "нет ответа")
+                                       + (f" / рынок {100 * p_m:.0f}%" if p_m is not None else "")))
+                if a.get("factors"):
+                    cell["detail"].append(("Почему", a["factors"]))
+                if key == "walk":
+                    b = a.get("bet")
+                    cell["detail"].append(("Ставка", f"$2 на {b['bucket']} по {100 * b['price']:.0f}¢ (ИИ дала {100 * b['p_ai']:.0f}%) → "
+                                           f"{'+' if b['pnl'] > 0 else '−'}${abs(b['pnl']):.2f}" if b else "не ставила: нигде нет перевеса 10 п.п."))
+                    cell["pnl"] = b["pnl"] if b else None
+                    if a.get("why"):
+                        cell["detail"].append(("Разбор", str(a["why"])))
+                    rc = review_calls.get(date)
+                    rr = _resp(rc) if rc else {}
+                    for x in (rr.get("lessons") or rr.get("add") or [])[:dl.LESSONS_MAX * 2]:
+                        cell["detail"].append(("Урок", str(x)))
+                    cell["short"] = f"{a.get('expected_max')} / {d['actual_max']:.0f}"
+            if key != "walk" and got:
+                ps = [a["probs"].get(d["win"], 0) for a in got if a["ok"]]
+                cell["short"] = (f"{100 * sum(ps) / len(ps):.0f}%" if ps else "нет") + ("" if len(got) >= len(dl.MOMENTS) else f" · {len(got)}/3")
+            if got and (key == "walk" or len(got) >= len(dl.MOMENTS)):
+                cell["state"] = "done"
+            elif got:
+                cell["state"] = "part"
+        if is_now:
+            mo = str(now_call["label"]).split(" ")[-1]
+            what = {"walk_review": "разбор итога и уроки", "exam": f"ответ {MOMENT_NAME.get(mo, '')}".strip(),
+                    "study": "читает день и пишет уроки", "review": "разбирает ошибки"}
+            k = next((x for x in what if now_call["step"].startswith(x)), None)
+            cell.update(state="cur", now=what.get(k, "идёт"), since=now_call["t"])
+            ec = next((c for c in calls if c.get("step") == f"exam_{month}_walk" and str(c.get("label")).startswith(date)), None)
+            if key == "walk" and k == "walk_review" and ec:    # ответ 08:00 уже есть, ставка и итог — после разбора
+                r = _resp(ec)
+                top = sorted(((float(v), b) for b, v in (r.get("probs") or {}).items() if dl._num(v)), reverse=True)[:3]
+                cell["detail"] = [("08:00", f"прогноз {r.get('expected_max')} · " + ", ".join(f"{b} {100 * v:.0f}%" for v, b in top)),
+                                  ("Почему", str(r.get("factors") or ""))]
+        out.append(cell)
+    return out
+
+
 def _chart(rows, moment, tags):
     """SVG: logloss верного варианта по кругам — ИИ, рынок, простая формула (меньше — лучше)."""
     pts = [(t, r) for t in tags for r in rows if r["tag"] == t and r["moment"] == moment and r["n"]]
@@ -135,7 +251,7 @@ def _chart(rows, moment, tags):
         parts.append(f'<line x1="{L}" x2="{W - R}" y1="{y(v):.1f}" y2="{y(v):.1f}" class="g"/>'
                      f'<text x="{L - 6}" y="{y(v) + 4:.1f}" class="ax" text-anchor="end">{v:.1f}</text>')
     for t, _ in pts:
-        lab = {"final": "фин", "n1_empty": "янв −", "n1": "янв +"}.get(t, t)
+        lab = {"final": "фин", "n1_empty": "нов −", "n1": "нов +", "walk": "день"}.get(t, t)
         parts.append(f'<text x="{xs[t]:.1f}" y="{H - B + 18}" class="ax" text-anchor="middle">{lab}</text>')
     for key, cls in (("base", "s-base"), ("mkt", "s-mkt"), ("ai", "s-ai")):
         line = [(xs[t], y(r[key])) for t, r in pts if r[key] is not None]
@@ -160,7 +276,7 @@ def _lessons(calls, last=12):
             r = json.loads(m.group(0)) if m else {}
         except ValueError:
             r = {}
-        for x in (r.get("lessons") or [])[:dl.LESSONS_MAX]:
+        for x in (r.get("lessons") or r.get("add") or [])[:dl.LESSONS_MAX]:
             out.append({"at": _hm(c["t"]), "step": "учёба" if c["step"].startswith("study_") else "разбор",
                         "day": c.get("label", ""), "text": str(x)})
         if len(out) >= last:
@@ -200,14 +316,33 @@ def page_data(city=None, version=None):
     run_ex = [a for a in exams if a.get("t", 0) >= st.get("started", 0)] if st else []
     ok_pct = 100 * sum(a["ok"] for a in run_ex) / len(run_ex) if run_ex else None
     avg_s = sum(c["seconds"] for c in run_calls) / len(run_calls) if run_calls else None
-    cur_call = None
-    live = _jsonl(base / "live.jsonl")[-400:]
-    for e in reversed(live):
+    cur_call = now_call = None
+    live = _jsonl(base / "live.jsonl")[-5000:]   # 24.10: один запрос Gemma — больше 400 строк рассуждений
+    for i in range(len(live) - 1, -1, -1):
+        e = live[i]
         if e["kind"] == "info" and e["text"].startswith("▶ запрос"):
-            done = any(x["kind"] == "info" and x["text"].startswith("✓") and x["t"] >= e["t"] for x in live)
+            # по порядку строк, не по времени: ✓ прошлого запроса бывает в ту же десятую секунды (24.10)
+            done = any(x["kind"] == "info" and x["text"].startswith("✓") for x in live[i + 1:])
             if not done:
-                cur_call = {"what": e["text"][10:], "since": _dur(time.time() - e["t"])}
+                cur_call = {"what": e["text"].removeprefix("▶ запрос "), "since": _dur(time.time() - e["t"])}
+                now_call = {"step": e.get("step", ""), "label": e.get("label", ""), "t": e["t"]}
             break
+    for s in stages:      # клетки дней этапа (24.10, Alex)
+        s["days"] = _day_grid(city, st, s, calls, now_call, n_days) if s["month"] else []
+    # 24.10 (Alex): большой блок «Сейчас» — день, этап, что делает, полоса времени запроса (живая), общий ход
+    now_box = None
+    cur_s = next((x for x in stages if x.get("state") == "cur"), None)
+    cell = next((c for c in cur_s["days"] if c["state"] == "cur"), None) if cur_s else None
+    if cell and now_call and not st.get("finished"):
+        same = [c["seconds"] for c in calls if c.get("step") == now_call["step"] and c.get("seconds")][-10:]
+        card = _run_card(city)
+        now_box = {"stage": cur_s["what"], "month": cur_s["month"], "stage_done": cur_s["done"], "stage_need": cur_s["need"],
+                   "day_n": cur_s["days"].index(cell) + 1, "day_of": len(cur_s["days"]), "date": cell["date"], "now": cell["now"],
+                   "since": now_call["t"], "started": _hm(now_call["t"], "%H:%M:%S"),
+                   "avg": round(sum(same) / len(same)) if same else (round(sum(c["seconds"] for c in calls[-10:]) / len(calls[-10:]))
+                                                                     if calls else None),
+                   "avg_n": len(same), "detail": cell["detail"], "run_done": card["done"], "run_need": card["need"],
+                   "run_pct": card["pct"], "eta": card["eta"], "left": card["left"]}
 
     # итоги экзаменов: учебный месяц по кругам и проверочный
     rows = []
@@ -257,7 +392,7 @@ def page_data(city=None, version=None):
     for v in versions:
         v["h"] = round(100 * v["words"] / mx)
 
-    return {"city": city, "cities": cs, "ov": overview(cs), "st": st, "state": state, "stages": stages, "learn": learn, "test": test,
+    return {"city": city, "cities": cs, "ov": overview(cs), "st": st, "now_box": now_box, "state": state, "stages": stages, "learn": learn, "test": test,
             "model": st.get("model") or (calls[-1].get("model") if calls else dl.MODEL),
             "n_calls": len(run_calls), "avg_s": avg_s, "ok_pct": ok_pct, "n_ex": len(run_ex), "cur_call": cur_call,
             "tokens": sum((c.get("tokens") or 0) for c in run_calls), "rows": rows, "charts": charts,
@@ -293,7 +428,7 @@ def _step_name(step):
         return "учёба"
     if step.startswith("consolidate_"):
         return "запись в дневник"
-    return dict((k, w) for k, w, _ in dl.STAGES).get(step, step)
+    return dict((k, w) for k, w, _ in dl.STAGES + dl.WALK_STAGES).get(step, step)
 
 
 def _label(label):
@@ -405,6 +540,7 @@ def _compare(runs):
                 cells.append(None)
                 continue
             ai, mk, err, n = [], [], [], 0
+            pnl, bets = 0.0, 0     # 23.10 (Alex): деньги по правилу score_rows — $1 на вариант, где ИИ выше цены на EDGE
             for a in _jsonl(f):
                 d = days.get(a["date"])
                 if not d:
@@ -417,7 +553,14 @@ def _compare(runs):
                     mk.append(pr.get(d["win"], 0) / sm)
                 if a.get("ok") and dl._num(a.get("expected_max")):
                     err.append(abs(float(a["expected_max"]) - d["actual_max"]))
-            cells.append({"ai": round(100 * sum(ai) / len(ai)) if ai else None,
+                for b, p_ai in (a["probs"].items() if a.get("ok") and sm else ()):
+                    p = pr.get(b)
+                    if p is None or not 0.05 <= p <= 0.95 or p_ai - p < dl.EDGE:
+                        continue
+                    buy = min(p + 0.01, 0.999)
+                    bets += 1
+                    pnl += (1 / (buy + 0.05 * buy * (1 - buy)) - 1) if b == d["win"] else -1
+            cells.append({"ai": round(100 * sum(ai) / len(ai)) if ai else None, "pnl": round(pnl, 2), "bets": bets,
                           "mkt": round(100 * sum(mk) / len(mk)) if mk else None,
                           "err": round(sum(err) / len(err), 1) if err else None, "n": n})
         rows.append({"run": run, "model": st.get("model") or "", "months": f"{st.get('learn')} → {st.get('test')}",
@@ -425,7 +568,15 @@ def _compare(runs):
     return rows
 
 
+def _started(run):
+    try:
+        return json.loads((dl.OUT / run / "status.json").read_text()).get("started") or 0
+    except (OSError, ValueError):
+        return 0
+
+
 def overview(runs):
+    runs = sorted(runs, key=_started)      # 24.10 (Alex): по дате запуска, раньше — выше
     news = sorted(_jsonl(NEWS), key=lambda x: x.get("t", 0), reverse=True)[:30] if NEWS.exists() else []
     return {"cards": [_run_card(r) for r in runs], "compare": _compare(runs),
             "compare_tags": [TAG_NAME[t] for t in LEARN_TAGS + TEST_TAGS],

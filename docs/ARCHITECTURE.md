@@ -334,7 +334,7 @@ Gemini напрямую в Google при `GEMINI_DIRECT`, отказ → OpenRou
 **Бот-мейкер** — `weather_mm_ws.py` (крон каждый час, 57 мин): живой канал стаканов, заявка переставляется при каждом изменении,
 исполнения — `mm_ws_fills` (`data/db/mm.sqlite3`); расчёт — `weather_mm_settle.py` (`settle_ws`, каждые 2 ч). Кошельки:
 `mm_ws_all` / `mm_ws_sel` / `mm_ws_zone` / `mm_ws_z30` / строгий `mm_ws_zs`; `mm100` (банк $100, `bank100()`, `mm100_state`), `mm100f`
-(`focus_cities()`, FOCUS_N=5, FOCUS_CAP=5); `mm_ws_ml` — только исполнения, где модель `weather_mm_ml.py` (обучение 03:40,
+(`focus_cities()`, FOCUS_N=5, FOCUS_CAP=5; **закрыт 23.10** — порог не прошёл, новых заявок нет); `mm_ws_ml` — только исполнения, где модель `weather_mm_ml.py` (обучение 03:40,
 `data/ml/mm_ws_ml/`) ждёт плюс. Тот же бот пишет свои стаканы раз в 60 с → `data/books/books.sqlite3` `book_snaps` (формат Falcon).
 Расписание сводок — `mm_metar_minutes.json`. Старый опросный бот `weather_mm_paper.py` и не погода остановлены 02.10 (`POLL_OFF`).
 Страница `/mm`, `/mm/<код>`. Долгие скрипты берут замок `jobmark.single_instance`, «жив» — `jobmark.mark_alive`.

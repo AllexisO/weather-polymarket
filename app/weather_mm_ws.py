@@ -377,7 +377,7 @@ def main():
     print(f"перекос из прошлых запусков: {sum(len(v) for v in bot.inv.values())} пар кошелёк-маркет", flush=True)
     bot.cash100 = bank100(db)
     print(f"mm100: свободно ${bot.cash100:.2f} из ${BANK:.0f}", flush=True)
-    bot.focus = focus_cities(db)
+    bot.focus = set()     # 23.10 (Alex): mm100f закрыт — порог 08-21.10 не прошёл (−$25.88); новых заявок нет, открытые досчитает settle
     bot.cash100f = bank100(db, "mm100f", FOCUS_CAP)
     print(f"mm100f: свободно ${bot.cash100f:.2f} из ${BANK:.0f}; города фокуса: {', '.join(sorted(bot.focus)) or 'нет'}", flush=True)
     import weather_mm_ml
