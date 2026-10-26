@@ -44,6 +44,13 @@ DAYS = 14
 # 15.10: obs_fmi выключен, FMI в obs_fast только пишем, DWD запас 0.3 — проигрыши obs_fmi Хельсинки и obs_rt Лакхнау 13.10 разобраны
 # 25.10 ~17:00 UTC: obs_wethr — SPECI с 23.10 не в максимум (проигрыш Денвер 24.10 разобран, журнал 25.10)
 FIXED_FROM = "2026-10-25T17:00:00+00:00"
+# 26.10 (Alex: «проблемы — только если что-то сломалось»): разобранные случаи не показываем повторно, только новые после них
+# замеры против итога — с новых правил Polymarket 23.10 (Лакхнау 13.10, Чикаго 16.10, Кейптаун 18.10 — итог расходился с METAR, разобраны)
+SOURCES_FROM = "2026-10-23"
+# цена покупки против снимка — ml5_no Чикаго 21.10 (46¢ по стакану, 65¢ — последняя сделка) разобран 26.10 (#93)
+STALE_FROM = "2026-10-26T13:00:00+00:00"
+# «да» дешевле 10¢ — правило по цене покупки исправлено 19.10 13:26 UTC (Милан 19.10, 8¢ в 9 кошельках, fixes.py)
+CHEAP_FROM = "2026-10-19T13:26:50+00:00"
 GAMMA = "https://gamma-api.polymarket.com"
 CHECKS = []
 
@@ -128,7 +135,7 @@ def check_sources(c, since, out):
     bad, n = [], Counter()
     for (s, city, d), mv in day_max.items():
         o = out.get((city, d))
-        if o is None:
+        if o is None or d < SOURCES_FROM:
             continue
         n[s] += 1
         if o[1] < mv:   # выигравший вариант по нашим правилам «мёртв»
@@ -136,7 +143,7 @@ def check_sources(c, since, out):
     by_src = Counter(b[0] for b in bad)
     # единичный день (Париж 07.10: METAR 19, итог 18) — внимание; повторяется в городе или > 1% по источнику — проблема
     serious = any(k >= 2 and k / n[s] > 0.01 for s, k in by_src.items()) or len({b[1] for b in bad}) < len(bad) / max(len(by_src), 1)
-    add("Логика", True if not bad else (False if serious else "warn"), f"Замеры по правилам кошельков не «убивают» выигравший вариант ({DAYS} дней)",
+    add("Логика", True if not bad else (False if serious else "warn"), f"Замеры по правилам кошельков не «убивают» выигравший вариант ({DAYS} дней, с {SOURCES_FROM[8:]}.{SOURCES_FROM[5:7]})",
         (f"проверено город-дней по источникам: {', '.join(f'{s} {k}' for s, k in sorted(n.items()))}" if not bad else
          f"по источникам: {', '.join(f'{s} {k} из {n[s]}' for s, k in by_src.most_common())} — "
          + short(f"{s} {ci} {d[8:]}.{d[5:7]}: {mv} при итоге до {o[1]}" for s, ci, d, mv, o in sorted(bad, key=lambda x: x[2]))),
@@ -201,10 +208,10 @@ def check_trades(c, since):
                      (since,)).fetchall()
     import weather_paper as wp
     taker_models = set(wp.WALLETS) - set(wp.YES_BAND)
-    stale = [f"{w} {ci} {d[8:]}.{d[5:7]}: купили по {100 * p:.0f}¢, в снимке {100 * mk:.0f}¢" for w, ci, d, sd, p, mk, *_ in rows
-             if w in taker_models | set(wp.NO_WALLETS) and abs(p - mk) > 0.15]
+    stale = [f"{w} {ci} {d[8:]}.{d[5:7]}: купили по {100 * p:.0f}¢, в снимке {100 * mk:.0f}¢" for w, ci, d, sd, p, mk, pa, ts in rows
+             if w in taker_models | set(wp.NO_WALLETS) and abs(p - mk) > 0.15 and (pa or ts) >= STALE_FROM]
     cheap = [f"{w} {ci} {d[8:]}.{d[5:7]}: «да» по {100 * p:.1f}¢" for w, ci, d, sd, p, mk, pa, ts in rows
-             if w in taker_models and (sd or "yes") == "yes" and p < wp.YES_MIN - 1e-9 and (pa or ts) >= wp.YES_MIN_FROM]
+             if w in taker_models and (sd or "yes") == "yes" and p < wp.YES_MIN - 1e-9 and (pa or ts) >= max(wp.YES_MIN_FROM, CHEAP_FROM)]
     add("Логика", "warn" if stale else True, "Настоящая цена покупки близка к цене снимка (±15 п.п.)",
         short(stale) if stale else f"ставок {len(rows)}", "снимок цены устарел — решение принято по чужой цене" if stale else "")
     add("Логика", "warn" if cheap else True, "Кошельки моделей не покупают «да» дешевле 10¢ (по настоящей цене)",
@@ -229,6 +236,19 @@ def check_llm(c, since):
         short(bad) if bad else f"ставок {len(rows)}", "правило кошелька LLM нарушено — найти, где код его обходит" if bad else "")
     add("Логика", "warn" if nojson else True, "Ответы LLM разбираются (JSON)", f"не разбираются: {nojson}" if nojson else "все",
         "страница /llm и разбор ответа могут спотыкаться" if nojson else "")
+
+
+def check_real_dry(c, since):
+    """26.10 (PRD §4 п.2): настоящие заявки общего банка вхолостую (weather_real_dry) — каждая ли собралась бы и подписалась."""
+    try:
+        rows = c.execute("SELECT wallet, city, local_date, problem FROM real_dry WHERE local_date >= ? AND ok IS NOT NULL", (since,)).fetchall()
+    except sqlite3.Error:
+        rows = []
+    bad = [r for r in rows if r[3]]
+    add("Логика", True if rows and not bad else ("warn" if not rows else False),
+        "Настоящие заявки общего банка собираются (вхолостую, py-clob-client)",
+        short(f"{w} {ci} {d[8:]}.{d[5:7]}: {p}" for w, ci, d, p in bad) if bad else (f"заявок {len(rows)}" if rows else "заявок вхолостую ещё нет"),
+        "заявка не ушла бы на Polymarket — разобрать причину до живых денег" if bad else "")
 
 
 def check_pending(c):
@@ -297,7 +317,7 @@ def main():
     c = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=60)
     out = outcomes(c, since)
     for fn, args in ((check_obs_losses, (c, since)), (check_sources, (c, since, out)), (check_station, (c, since, out)),
-                     (check_maker, (c,)), (check_trades, (c, since)), (check_llm, (c, since)), (check_pending, (c,))):
+                     (check_maker, (c,)), (check_trades, (c, since)), (check_llm, (c, since)), (check_pending, (c,)), (check_real_dry, (c, since))):
         with item_guard(fn.__name__):
             fn(*args)
     c.close()

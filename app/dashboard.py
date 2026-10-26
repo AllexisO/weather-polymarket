@@ -3387,6 +3387,15 @@ def real_page_data(conn):
                           "note": f"из них не купили — не хватило стакана: {p['nofill']}" if p["rebuy"] else None}] + \
                         ([{"label": "Самая большая ставка", "value": f"${p['max_stake']:.2f}",
                            "note": f"не купили — меньше 5 долей в стакане: {p['nofill']}"}] if c.get("frac") else [])
+            # 26.10 (PRD §4 п.2): те же ставки настоящими заявками Polymarket вхолостую — weather_real_dry.py
+            if not c.get("frac") and table_exists(conn, "real_dry"):
+                rd = conn.execute("SELECT COUNT(*), COALESCE(SUM(ok = 1), 0), COALESCE(SUM(ok = 0), 0) FROM real_dry WHERE local_date >= ?",
+                                  (c["since"],)).fetchone()
+                last = conn.execute("SELECT wallet, city, problem FROM real_dry WHERE ok = 0 ORDER BY built_at DESC LIMIT 1").fetchone()
+                c["rows"].append({"label": "Настоящие заявки вхолостую", "value": f"{rd[1]} из {rd[1] + rd[2]}" if rd[0] else "ещё нет",
+                                  "tone": "neg" if rd[2] else ("pos" if rd[1] else ""),
+                                  "note": (f"собраны и подписаны, не отправлялись; не ушли бы: {rd[2]}"
+                                           + (f" (последняя: {last[0]} {last[1]} — {last[2]})" if last else "")) if rd[0] else None})
             c["paper"] = [_real_paper(conn, w, c["since"], c["until"]) for w in c["wallets"]]
             ok_n, ok_roi = p["n"] >= c["need_n"], p["roi"] is not None and p["roi"] >= c["need_roi"]
             c["status"] = "pass" if ok_n and ok_roi else ("wait" if not ok_n else "bad")

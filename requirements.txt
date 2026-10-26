@@ -7,3 +7,5 @@ lightgbm==4.5.0
 websocket-client==1.8.0
 # 2026-09-30: 10-минутные замеры KNMI (Амстердам) — файлы HDF5/NetCDF4 (weather_fastobs.py)
 h5py==3.12.1
+# 2026-10-26: настоящие заявки Polymarket вхолостую (weather_real_dry.py) — официальный клиент, только сборка и подпись
+py-clob-client==0.34.6

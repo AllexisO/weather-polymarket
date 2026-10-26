@@ -148,6 +148,7 @@ flowchart LR
 | `ml_skill` | `weather_ml_skill.py` | «насколько модель права» |
 | `ml_preds_wf`, `ml_preds_q`, `ml_preds_var_*` | исследования | прогнозы на истории (проверка «обучил на прошлом — проверил на будущем») |
 | `paper_trades` | `weather_paper.py`, `weather_copy*.py` | ставки всех кошельков: покупка, пропуск с причиной, итог |
+| `real_dry` | `weather_real_dry.py` (каждые 2 ч, :25) | ставки общего банка настоящими заявками Polymarket вхолостую: py-clob-client собирает FAK-заявку (доля, шаг цены, neg_risk, минимум долей) и подписывает одноразовым пустым ключом, не отправляет; `ok`/`problem` — ушла бы или нет (проверка логики, /real) |
 | `paper_obs_trades`, `metar_seen*` | `weather_obs_live.py` | кошельки `obs` и `obs_fmi` (колонка `wallet`) |
 
 ### Служебные

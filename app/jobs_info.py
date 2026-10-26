@@ -14,6 +14,7 @@ JOBS = [
     ("weather_ml_fast", "Быстрый снимок обучаемых моделей (08:00)", "weather_ml_fast.py", ":02 и :32", 45, "weather_ml_fast.log"),
     ("weather_poly_resolve", "Итоги маркетов", "weather_poly_resolve.py", "каждые 2 ч, :05", 160, "weather_poly_resolve.log"),
     ("weather_paper", "Ставки и расчёт кошельков", "weather_paper.py", "каждые 2 ч, :10", 160, "weather_paper.log"),
+    ("weather_real_dry", "Настоящие заявки вхолостую (общий банк: собрать и подписать заявку Polymarket, не отправлять)", "weather_real_dry.py", "каждые 2 ч, :25", 160, "weather_real_dry.log"),
     ("weather_obs_live", "Кошелёк по живым замерам", "weather_obs_live.py", "каждые 2 мин", 10, "weather_obs_live.log"),
     ("weather_copy_live", "Слушатель сделок (повтор за секунды)", "weather_copy_live.py", "всегда (copier)", 5, None),
     ("weather_copy", "Повтор за сильными трейдерами (запасной опрос)", "weather_copy.py", "каждые 5 мин", 15, "weather_copy.log"),
