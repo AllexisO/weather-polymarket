@@ -39,6 +39,8 @@ SERVICES = [
         {"name": "wethr.net", "site": "https://wethr.net", "what": "поток замеров США быстрее NOAA (~48 с) — кошелёк obs_wethr",
          "apis": ["wethr.net REST + поток событий (SSE)"], "mode": "live", "key": "WETHR_API_KEY", "price": "$24.99/мес — см. подписки",
          "scripts": "weather_obs_wethr"},
+        {"name": "atis.info", "site": "https://atis.info", "what": "текстовый ATIS аэропортов США (зеркало FAA D-ATIS) — сводка в среднем на 75 с раньше NOAA; кошелёк obs_atis",
+         "apis": ["atis.info/api/<ICAO>"], "mode": "live", "key": None, "price": "бесплатно", "scripts": "weather_obs_atis"},
         {"name": "Synoptic Data", "site": "https://synopticdata.com", "what": "5-минутные замеры аэропортов США — кошелёк obs_fast",
          "apis": ["api.synopticdata.com/v2/stations/latest"], "mode": "live", "key": "SYNOPTIC_TOKEN, SYNOPTIC_KEY", "price": "выключен 12.10 (решение Alex)",
          "scripts": "weather_fastobs"},

@@ -278,6 +278,70 @@ for want in ("your last 3 forecasts", "Your mean |error| 1.0°F", "mean (forecas
         bad.append(f"счёт Gemma: нет «{want}» в {t!r}")
 print(f"   счёт Gemma — расхождений {len(bad) - n8}")
 
+# ---------- 9. подсказка v5 вместо опоры (25.10, DIARY_HINT=v5) — своим кодом из файла честной v5 ----------
+
+n9 = len(bad)
+V5RUN = "atlanta_v5"
+wf_p = dl.ROOT / "data" / "research" / "v5_wf_atlanta.json"
+if (dl.OUT / V5RUN / "v5.json").exists() and wf_p.exists():
+    wf = json.loads(wf_p.read_text())
+    hint = json.loads((dl.OUT / V5RUN / "v5.json").read_text())
+    vdays, vmeta = [], {}
+    for p_ in sorted((dl.OUT / V5RUN).glob("data_20??-??.json")):
+        m_ = json.loads(p_.read_text())
+        for d_ in m_["days"]:
+            vdays.append((dict(R.features(m_, d_), date=d_["date"]), d_))
+    R.HINT, R.WHO = "v5", "model"
+    for i, (x, d_) in enumerate(vdays):
+        dd = x["date"]
+        h = hint.get(dd)
+        if not h:
+            bad.append(f"v5: нет дня {dd}")
+            continue
+        if not h["trained_to"] < dd:   # честность: v5 этого дня учена только на днях до него
+            bad.append(f"v5 {dd}: обучена до {h['trained_to']}")
+        same(h["expected"], round(wf[dd]["qs_c"][6] * 1.8 + 32, 1), f"v5 {dd}: ожидаемый максимум")
+        if abs(sum(h["probs"].values()) - 1) > 0.01 or set(h["probs"]) != set(d_["buckets"]):
+            bad.append(f"v5 {dd}: шансы не по вариантам дня или сумма {sum(h['probs'].values())}")
+        # прошлое: счёт v5 только по дням раньше dd; будущие строки таблицы не должны ничего менять
+        e = [hint[r["date"]]["expected"] - r["actual"] for r, _ in vdays[:i]]
+        a1, t1 = R.v5_text(V5RUN, [r for r, _ in vdays[:i]], dd)
+        a2, t2 = R.v5_text(V5RUN, [r for r, _ in vdays], dd)
+        same(a1, h["expected"], f"v5 {dd}: значение подсказки")
+        if t1 != t2:
+            bad.append(f"v5 {dd}: подсказка видит дни после {dd}")
+        if e:
+            want = (f"record on {len(e)} past days of the table: mean |error| {sum(abs(v) for v in e) / len(e):.1f}°F, "
+                    f"mean (forecast − actual) {sum(e) / len(e):+.1f}°F; last {min(7, len(e))} days: mean (forecast − actual) "
+                    f"{sum(e[-7:]) / len(e[-7:]):+.1f}°F")
+            if want not in t1:
+                bad.append(f"v5 {dd}: нет «{want}» в {t1!r}")
+        line = R.v5_day_line(V5RUN, dict(x, win=d_["win"]))
+        want = (f"forecast for this day was {h['expected']:.1f}°F (chance of the winning bucket {h['probs'][d_['win']]:.0%}), "
+                f"actual {x['actual']:.0f}°F: error {h['expected'] - x['actual']:+.1f}°F")
+        if want not in line:
+            bad.append(f"v5 {dd}: учёба — нет «{want}» в {line!r}")
+    # утренний запрос: подсказка v5 вместо опоры, слова «program» в счёте нет
+    got = {}
+    real_ask, dl.ask = dl.ask, lambda prompt, *a, **k: got.setdefault("p", prompt) and {}
+    try:
+        x, d_ = vdays[45]
+        R.ask_forecast(V5RUN, json.loads(sorted((dl.OUT / V5RUN).glob("data_*.json"))[-1].read_text()), d_,
+                       [r for r, _ in vdays[:45]], "test", "test", record=[{"expected": 90, "anchor": 91, "actual": 92}])
+    finally:
+        dl.ask = real_ask
+    pr = got.get("p", "")
+    for want in ("MODEL FORECAST (our LightGBM model v5", "start from the MODEL FORECAST", f"{hint[x['date']]['expected']:.1f}°F",
+                 "your forecast / model / actual", "closer than the model"):
+        if want not in pr:
+            bad.append(f"v5: в утреннем запросе нет «{want}»")
+    if "PROGRAM FORECAST" in pr:
+        bad.append("v5: в утреннем запросе осталась опора программы")
+    R.HINT, R.WHO = "anchor", "program"
+    print(f"9. подсказка v5: {len(vdays)} дней — расхождений {len(bad) - n9}")
+else:
+    print("9. подсказка v5: нет файлов atlanta_v5 — пропущено")
+
 print(f"\nпример ответа инструмента: {R.test_condition('t08 >= 78', rows[:31])}")
 if bad:
     print("\nРАСХОЖДЕНИЯ:\n" + "\n".join(bad[:30]))

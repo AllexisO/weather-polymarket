@@ -38,6 +38,7 @@ JOBS = [
     ("weather_ml_day_train", "Дневная модель — обучение и экзамен", "weather_ml_day.py --train", "05:45", 26 * 60, "weather_ml_day_train.log"),
     ("weather_llm_hour", "LLM-прогноз каждый час (кошельки llm_gem, llm_ds и смесь llm_mix, OpenRouter, 5 городов США)", "weather_llm_hour.py", "каждый час в :56 (первый час дня — в :05)", 75, "weather_llm_hour.log"),
     ("weather_obs_wethr", "Живые замеры — wethr (кошелёк obs_wethr, платный поток wethr.net, 5 городов США)", "weather_obs_wethr.py", "каждый час с :07, 57 мин", 75, "weather_obs_wethr.log"),
+    ("weather_obs_atis", "Живые замеры — ATIS (кошелёк obs_atis, atis.info, 11 городов США; до проверки — вхолостую)", "weather_obs_atis.py", "каждый час в :48, 15 мин", 75, "weather_obs_atis.log"),
     ("weather_mm_ml", "Обучение бота-мейкера с моделью (кошелёк mm_ws_ml)", "weather_mm_ml.py --train", "каждый день 03:40", 1560, "weather_mm_ml.log"),
     # weather_obs_rt — выключен 15.10 (решение Alex): порог PRD §9 п.7 не прошёл; модуль остаётся — его функции берёт weather_obs_wethr
     ("weather_netatmo", "Частные станции Netatmo у аэропортов (сбор для проверки)", "weather_netatmo.py", "каждые 5 мин", 20, "weather_netatmo.log"),

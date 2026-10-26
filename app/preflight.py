@@ -79,7 +79,7 @@ def run_checks():
 
     # 2в. у каждого кошелька есть полное описание логики (wallet_docs.py, страница кошелька)
     from wallet_docs import WALLET_DOCS
-    nodoc = sorted((set(wallets) | {"copy", "obs", "obs_fmi", "obs_fast", "obs_rt", "obs_wethr", "llm_gem", "llm_ds", "llm_mix", "llm_cal", "llm_agy", "llm_agy_bet", "llm_agy_nomem", "ml_day", "ml_day_fav"}) - set(WALLET_DOCS))
+    nodoc = sorted((set(wallets) | {"copy", "obs", "obs_fmi", "obs_fast", "obs_rt", "obs_wethr", "obs_atis", "llm_gem", "llm_ds", "llm_mix", "llm_cal", "llm_agy", "llm_agy_bet", "llm_agy_nomem", "ml_day", "ml_day_fav", "ml_day_nohigh"}) - set(WALLET_DOCS))
     res.append((not nodoc, "у каждого кошелька есть описание логики", ", ".join(nodoc) or f"{len(WALLET_DOCS)} описаний"))
 
     # 2г. 03.10: группа каждого кошелька есть в списке групп /paper — иначе кошелёк молча не виден на странице
@@ -163,6 +163,7 @@ def run_checks():
         t("доп. города не входят в 48 городов ставок моделей", set(EXTRA_OBS_CITIES) & set(OBS_CITIES), set())
         import weather_ml_day as md
         t("ml_day_fav: полоса «да»", md.FAV_BAND, (0.50, 0.95))
+        t("ml_day_nohigh: часы и полоса цены «да»", (md.NOHIGH_HOURS, md.NOHIGH_BAND), ((12, 14), (0.05, 0.25)))
         import weather_mm_ml as mml   # 15.10: mm_ws_ml не покупает «да» на вариант, уже убитый сводкой, даже при прогнозе > 0
         from datetime import datetime as _dt, timezone as _tz
         ts15 = _dt(2026, 10, 15, 14, 0, tzinfo=_tz.utc).timestamp()   # 15:00 по Лондону, день маркета

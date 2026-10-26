@@ -137,6 +137,18 @@ def _resp(c):
         return {}
 
 
+def _accepted(city):
+    """Дневник 2: сколько правил программа приняла в книгу на каждом шаге — по версиям книги в history/ (новый номер правила
+    или новое условие у старого номера против предыдущей версии). → {шаг: число}, шаг как в имени файла (study_p1_12)."""
+    out, prev = {}, {}
+    for f in sorted((dl.OUT / city / "history").glob("*.md")):
+        cur = dict(re.findall(r"^R(\d+)\. (IF .*?) THEN", f.read_text(), re.M))
+        step = f.stem.split("_", 2)[-1]
+        out[step] = out.get(step, 0) + sum(1 for i, c in cur.items() if prev.get(i) != c)
+        prev = cur
+    return out
+
+
 def _day_grid(city, st, s, calls, now_call, n_days):
     """24.10 (Alex: «живой прогресс каждого дня»): клетка на день этапа — готов / идёт сейчас (что делает, с какого
     времени) / ждёт / не нужен (разбор только дней с промахом); у готовой — коротко итог и подробности по нажатию."""
@@ -162,6 +174,7 @@ def _day_grid(city, st, s, calls, now_call, n_days):
             ans.setdefault(a["date"], []).append(a)
     review_calls = {c.get("label"): c for c in calls if c.get("step") == f"walk_review_{month}"} if key == "walk" else {}
     need_review = None
+    accepted = _accepted(city) if key.startswith("study") and walk else {}
     if key.startswith("review_"):
         f = dl.exam_file(city, learn, key[7:])
         ex = _jsonl(f) if f.exists() else []
@@ -178,12 +191,16 @@ def _day_grid(city, st, s, calls, now_call, n_days):
             if c:
                 r = _resp(c)
                 ls = [str(x) for x in (r.get("lessons") or [])][:dl.LESSONS_MAX]
+                short = f"{len(ls)} ур."
                 if not ls and ("add" in r or "edit" in r):     # дневник 2: книга правил
                     ls = [str(x) for x in r.get("add") or []] + [f"правка R{e.get('id')}: {e.get('rule')}" for e in r.get("edit") or []
                                                                   if isinstance(e, dict)]
                     if r.get("check"):
                         cell["detail"].append(("Таблица", str(r["check"])))
-                cell.update(state="done", short=f"{len(ls)} ур.", detail=cell["detail"] + [("Уроки", x) for x in ls] +
+                    # 25.10 (Alex: «не понимаю, что такое 1 ур.»): Gemma предлагает правила, в книгу их берёт программа
+                    s["rules"] = True       # подпись над клетками — «предложила → принято»
+                    short = f"{len(ls)} → {accepted.get(f'study_p{key[5:]}_{date[8:]}', 0)}"
+                cell.update(state="done", short=short, detail=cell["detail"] + [("Уроки", x) for x in ls] +
                             [("Подвели", str(x)) for x in (r.get("misleading") or [])] + [("Время", f"{c.get('seconds', 0):.0f} с")])
             elif need_review is not None and date not in need_review:
                 cell.update(state="skip", short="не нужен")

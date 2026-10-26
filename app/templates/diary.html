@@ -192,7 +192,7 @@
         </div>
         {% if s.days %}
         <details class="days" data-k="{{ s.key }}"{% if s.state == 'cur' %} open{% endif %}>
-          <summary>по дням{% if s.key == 'walk' %} · прогноз / было, ставка $2{% elif s.key.startswith('study') or s.key.startswith('review_') %} · сколько уроков записала{% else %} · шанс верного варианта{% endif %}</summary>
+          <summary>по дням{% if s.key == 'walk' %} · прогноз / было, ставка $2{% elif s.rules %} · правил предложила → принято в книгу{% elif s.key.startswith('study') or s.key.startswith('review_') %} · сколько уроков записала{% else %} · шанс верного варианта{% endif %}</summary>
           <div class="dcells">
             {% for d in s.days %}
             <button type="button" class="dc {{ d.state }}" data-d="{{ s.key }}-{{ d.date }}"{% if not d.detail %} disabled{% endif %}>

@@ -24,6 +24,12 @@
 Проверка до первой ставки (15.10): маркеты и итог — как у ml_day; дневная модель поднимает уровни до максимума с утра — на всех
 1164 прошлых решениях (390 город-дней, 9 дней) выигравший вариант ни разу не получил шанс 0.
 
+Кошелёк ml_day_nohigh (25.10, решение Alex «делаем всё по порядку»; правило Argon): «нет» на вариант выше уже достигнутого
+максимума — в 12/14 ч (первый с сигналом), лучший покупатель «да» 5-25¢, смесь(«да») ≤ его цена − 3 п.п.; из нескольких — с
+наибольшим перевесом; «нет» по живому стакану не дороже 1 − смесь − 3 п.п. Проверка на прошлом (data/research/_ml_day_no_high_1025.py,
+06-23.10, порог записан до подсчёта): 43 ставки, +5.9% с комиссией, плюс в обеих половинах, z +0.99 при пороге +1.0 — не прошло на
+волосок, поэтому правило без изменений проверяется на новых днях. Порог (до первой ставки): ≥ 50 закрытых, ≥ +3%, z ≥ +1.0.
+
 Запуск:
   python weather_ml_day.py --train   — обучение на всей истории (крон ночью, после weather_ml_train), модели в data/ml/day_s*/
   python weather_ml_day.py           — решения в 10/12/14 местного (крон каждый час в :05)
@@ -55,6 +61,9 @@ DB_PATH = Path(os.environ.get("POLY_LAB_DB", Path(__file__).parent.parent / "dat
 ML_DIR = DB_PATH.parent.parent / "ml"
 WALLET = "ml_day"
 WALLET_FAV = "ml_day_fav"
+WALLET_NOHIGH = "ml_day_nohigh"
+NOHIGH_HOURS = (12, 14)
+NOHIGH_BAND = (0.05, 0.25)   # цена лучшего покупателя «да»
 FAV_BAND = (0.50, 0.95)  # как YES_BAND["fav"] в weather_paper
 FAV_OVER = 0.01          # «да» не дороже цены + 1¢ (как fav)
 HOURS = (10, 12, 14)
@@ -64,6 +73,7 @@ EDGE = 0.03
 MIN_PRICE, MAX_PRICE = 0.03, 0.95
 STAKE = 2.0
 OBS_DELAY_MIN = 10      # замер доступен через ~10 мин после времени замера (как у утренних моделей)
+STALE_MIN = 120         # 25.10: последняя сводка старше — данные устарели, решения в этот час нет
 DAY_FEATS = ["hour", "day_max_vs_fc", "day_now_vs_fc", "day_dt2h", "day_nobs",
              "h_mkt_mean_vs_fc", "h_mkt_std", "h_mkt_top_p", "day_max_vs_hmkt"]
 EXAM_DAYS = 14          # 09.10: ночной экзамен — как у утренних моделей, последние 14 дней как незнакомые
@@ -284,7 +294,7 @@ def decide(row, f, mk, unit):
     return model, blend
 
 
-def bet(conn, city, day, now, mk, blend, wallet=WALLET):
+def bet(conn, city, day, now, mk, blend, wallet=WALLET, day_max_c=None, hour=None):
     """Лучший перевес смеси ≥ EDGE над ценой продавца; покупка по живому стакану. Не исполнилось — запись nofill (в этот день
     больше не пробуем, как в проверке). ml_day_fav — только «да» 50-95¢, смесь выше цены, не дороже min(смесь, цена + 1¢)."""
     from polyexec import simulate_buy, trading_stopped
@@ -292,6 +302,13 @@ def bet(conn, city, day, now, mk, blend, wallet=WALLET):
     best = None
     for b in mk:
         q = blend[b["label"]]
+        if wallet == WALLET_NOHIGH:     # вариант целиком выше максимума с утра (границы маркета — в его единицах)
+            unit = OBS_CITIES[city]["unit"]
+            mx = day_max_c * 9 / 5 + 32 if unit == "fahrenheit" else day_max_c
+            if (hour in NOHIGH_HOURS and b["lo"] > mx and NOHIGH_BAND[0] <= b["bid"] <= NOHIGH_BAND[1] and q <= b["bid"] - EDGE
+                    and (best is None or b["bid"] - q > best[0])):
+                best = (b["bid"] - q, "no", 1 - b["bid"], 1 - q, b)
+            continue
         if wallet == WALLET_FAV:
             if FAV_BAND[0] <= b["ask"] <= FAV_BAND[1] and q > b["ask"] and (best is None or q - b["ask"] > best[0]):
                 best = (q - b["ask"], "yes", b["ask"], q, b)
@@ -378,6 +395,11 @@ def run(dry=False):
             obs = sorted((o[0], o[1]) for o in (_metar_obs(m) for m in ms if m.get("obsTime") and m.get("temp") is not None
                                                 and routine_only(m, city, cfg, d)))
             known = [o for o in obs if o[0].astimezone(tz).date().isoformat() == d and o[0] + timedelta(minutes=OBS_DELAY_MIN) <= now]
+            # 25.10 (проверка до первой ставки ml_day_nohigh): 23.10 в 20:06 UTC aviationweather отдал Денвер и Мехико только до
+            # ~11 UTC — «максимум с утра» упал до ночного (Денвер 23.3 → 17.8°C), шансы считались по нему. Свежесть — до решения.
+            if known and now - known[-1][0] > timedelta(minutes=STALE_MIN):
+                print(f"{city}: последняя сводка {known[-1][0]:%H:%M} UTC — старше {STALE_MIN} мин, данные устарели — без решения")
+                continue
             f = day_feats(known, row["fc_mean"], lt.hour, {(b["lo"], b["hi"]): b["price"] for b in mk}, unit)
             if f is None:
                 print(f"{city}: нет замеров с утра — без решения")
@@ -394,9 +416,9 @@ def run(dry=False):
                           json.dumps({b["label"]: b["price"] for b in mk})))
             conn.commit()
             res = None
-            for w in (WALLET, WALLET_FAV):
+            for w in (WALLET, WALLET_FAV, WALLET_NOHIGH):
                 if not conn.execute("SELECT 1 FROM paper_trades WHERE wallet = ? AND city = ? AND local_date = ?", (w, city, d)).fetchone():
-                    r = bet(conn, city, d, now, mk, blend, w)
+                    r = bet(conn, city, d, now, mk, blend, w, f["day_max_c"], lt.hour)
                     if r:
                         res = (res + "; " if res else "") + f"{w}: {r}"
             top = max(blend, key=blend.get)

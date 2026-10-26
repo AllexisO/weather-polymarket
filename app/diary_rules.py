@@ -16,6 +16,7 @@
 """
 import json
 import math
+import os
 import re
 import statistics
 import time
@@ -479,8 +480,49 @@ def anchor_text(rows, x):
     return out + "."
 
 
+# 25.10 (идея Alex «пусть учится вместе с LightGBM», вариант «v5 вместо опоры»): DIARY_HINT=v5 — вместо прогноза программы
+# Gemma видит прогноз v5 (ожидаемый максимум и шансы вариантов) из файла прогона v5.json: честная v5, каждую неделю обученная
+# только на днях до неё (data/research/_v5_wf_atlanta.py → _v5_hint_file.py). Счёт v5 — только по законченным дням до сегодня.
+# Проверка без Gemma (RESEARCH_JOURNAL 25.10): logloss v5 лучше рынка в августе и сентябре, максимум в сентябре хуже опоры.
+HINT = os.environ.get("DIARY_HINT", "anchor")
+WHO = "model" if HINT == "v5" else "program"
+
+
+def v5_load(run):
+    p = dl.OUT / run / "v5.json"
+    return json.loads(p.read_text()) if p.exists() else {}
+
+
+def v5_text(run, rows, d):
+    """Прогноз v5 на день d + её точность на законченных днях таблицы до d: (°F или None, текст)."""
+    h = v5_load(run)
+    v = h.get(d)
+    if not v:
+        return None, "MODEL FORECAST: not available for this day."
+    errs = [h[r["date"]]["expected"] - r["actual"] for r in rows
+            if r.get("diff") is not None and r.get("date", "9") < d and r["date"] in h]
+    out = (f"MODEL FORECAST (our LightGBM model v5, trained only on days before this one; it starts from the market prices at "
+           f"08:00 and corrects them with the weather data): expected max {v['expected']:.1f}°F; its chances: "
+           + ", ".join(f"{b} {p:.0%}" for b, p in v["probs"].items() if p >= 0.005))
+    if errs:
+        out += (f". Its record on {len(errs)} past days of the table: mean |error| {statistics.mean(abs(e) for e in errs):.1f}°F, "
+                f"mean (forecast − actual) {statistics.mean(errs):+.1f}°F; last {min(7, len(errs))} days: mean (forecast − actual) "
+                f"{statistics.mean(errs[-7:]):+.1f}°F")
+    return v["expected"], out + "."
+
+
+def v5_day_line(run, x):
+    """Учёба (день показан с итогом): что v5 давала на этот день и насколько ошиблась. Без DIARY_HINT=v5 — пусто."""
+    v = v5_load(run).get(x.get("date")) if HINT == "v5" else None
+    if not v or x.get("actual") is None:
+        return ""
+    e = v["expected"] - x["actual"]
+    return (f"MODEL v5 forecast for this day was {v['expected']:.1f}°F (chance of the winning bucket "
+            f"{v['probs'].get(x.get('win'), 0):.0%}), actual {x['actual']:.0f}°F: error {e:+.1f}°F. ")
+
+
 def record_text(rec):
-    """Счёт Gemma: rec — её прошлые прогнозы [{expected, anchor, actual}] (последние 10)."""
+    """Счёт Gemma: rec — её прошлые прогнозы [{expected, anchor, actual}] (последние 10); anchor — опора или v5 (WHO)."""
     rec = [dict(r, expected=_num(r.get("expected"))) for r in rec]
     rec = [r for r in rec if r["expected"] is not None and r.get("actual") is not None][-10:]
     if not rec:
@@ -491,12 +533,12 @@ def record_text(rec):
                  abs(r["expected"] - r["actual"]) < abs(r["anchor"] - r["actual"]))
     same = sum(1 for r in rec if r.get("anchor") is not None and
                abs(r["expected"] - r["actual"]) == abs(r["anchor"] - r["actual"]))
-    lines = [f"YOUR RECORD (computed by code, your last {len(rec)} forecasts, oldest first; your forecast / program / actual): "
+    lines = [f"YOUR RECORD (computed by code, your last {len(rec)} forecasts, oldest first; your forecast / {WHO} / actual): "
              + "; ".join(f"{r['expected']:.1f} / {r['anchor']:.1f} / {r['actual']:.0f}" if r.get("anchor") is not None
                          else f"{r['expected']:.1f} / - / {r['actual']:.0f}" for r in rec)]
     lines.append(f"Your mean |error| {statistics.mean(abs(e) for e in you):.1f}°F, mean (forecast − actual) {statistics.mean(you):+.1f}°F"
-                 + (f"; program's mean |error| {statistics.mean(abs(e) for e in prog):.1f}°F, mean {statistics.mean(prog):+.1f}°F; "
-                    f"you were closer than the program on {closer} of {len(prog)} days" + (f", equal on {same}" if same else "")
+                 + (f"; {WHO}'s mean |error| {statistics.mean(abs(e) for e in prog):.1f}°F, mean {statistics.mean(prog):+.1f}°F; "
+                    f"you were closer than the {WHO} on {closer} of {len(prog)} days" + (f", equal on {same}" if same else "")
                     if prog else ""))
     return "\n".join(lines)
 
@@ -531,6 +573,11 @@ EXAM_TASK = ("TASK: it is now 08:00 on the market day. Forecast the highest temp
              "correct it); say that reason in factors. Keep the uncertainty the program measured above. Answer with JSON only:\n"
              '{"expected_max": <°F number>, "probs": {<every bucket label>: <probability>}, "rules_used": [<rule numbers>], '
              '"factors": "<one sentence>"}\nProbabilities must cover every bucket and sum to 1. Buckets: ')
+EXAM_TASK_V5 = (EXAM_TASK.replace("start from the PROGRAM FORECAST (it already includes med and every table condition that holds "
+                                  "today)", "start from the MODEL FORECAST (its expected max and its chances)")
+                .replace("Keep the uncertainty the program measured above.",
+                         "Its chances are the starting point for your probabilities."))
+assert EXAM_TASK_V5 != EXAM_TASK and "PROGRAM" not in EXAM_TASK_V5
 CHANGE_TASK = ("Now improve the rule book for future days, using the WHOLE table. You may: add up to " + str(ADD_MAX) +
                " new conditions worth testing (the program accepts a rule only if the table supports it: held on at least "
                + str(MIN_DAYS) + " days, not on almost all days, and diff on those days differs from other days by at least "
@@ -560,9 +607,13 @@ def ask_forecast(run, meta, day, rows, step, label, until=None, record=None):
     x_today = {k: v for k, v in x.items() if k not in ("actual", "diff")}
     until = until or dl.moment_ts(day, 0, 8, meta["tz"])
     data = dl.day_text(meta, day, until=until)
-    a = anchor(rows, x_today)[0]
-    extra = anchor_text(rows, x_today) + ("\n\n" + record_text(record) if record is not None else "")
-    r = dl.ask(prompt(run, rows, data, EXAM_TASK + ", ".join(day["buckets"]), today=x_today, extra=extra), step, run,
+    if HINT == "v5":
+        a, extra = v5_text(run, rows, day["date"])
+    else:
+        a, extra = anchor(rows, x_today)[0], anchor_text(rows, x_today)
+    extra += ("\n\n" + record_text(record) if record is not None else "")
+    task = EXAM_TASK_V5 if HINT == "v5" else EXAM_TASK
+    r = dl.ask(prompt(run, rows, data, task + ", ".join(day["buckets"]), today=x_today, extra=extra), step, run,
                label=label, tool=tool_for(rows, x_today)) or {}
     return r, answer_probs(r, day["buckets"]), a
 
@@ -581,8 +632,9 @@ def study(run, month, n, k, last):
     rows_all = [dict(features(meta, d), date=d["date"]) for d in days]
     for i, day in enumerate(days):
         rows = rows_all[:i + 1] if k == 1 else rows_all
-        head = score_day(run, rows_all[i], f"study_p{k}_{day['date'][8:]}") if k == 1 else \
-            "Second pass over the same month: the table is complete."
+        head = v5_day_line(run, dict(rows_all[i], win=day["win"])) + (
+            score_day(run, rows_all[i], f"study_p{k}_{day['date'][8:]}") if k == 1 else
+            "Second pass over the same month: the table is complete.")
         r = ask_changes(run, meta, day, rows, f"study_{month}_p{k}", day["date"], head, last)
         last = apply_changes(run, r, rows, f"study_p{k}_{day['date'][8:]}")
         dl.say(run, f"study {day['date']}: {str(r.get('check', ''))[:200]}")
@@ -626,11 +678,11 @@ def walk(run, learn, test, n=None):
         ok_e = e_ is not None
         head = (f"Your answer at 08:00 was: expected max {r.get('expected_max')}, rules used {r.get('rules_used')}, "
                 f"factors: {r.get('factors')}. "
-                + (f"Program forecast was {anc:.1f}°F, actual {day['actual_max']:.0f}°F: your error "
-                   f"{abs(e_ - day['actual_max']):.1f}°F, program's {abs(anc - day['actual_max']):.1f}°F → "
+                + (f"{WHO.capitalize()} forecast was {anc:.1f}°F, actual {day['actual_max']:.0f}°F: your error "
+                   f"{abs(e_ - day['actual_max']):.1f}°F, {WHO}'s {abs(anc - day['actual_max']):.1f}°F → "
                    + ("you were closer. " if abs(e_ - day['actual_max']) < abs(anc - day['actual_max'])
                       else "same. " if abs(e_ - day['actual_max']) == abs(anc - day['actual_max'])
-                      else "the program was closer. ") if ok_e and anc is not None else "")
+                      else f"the {WHO} was closer. ") if ok_e and anc is not None else "")
                 + (f"You bet ${STAKE:.0f} on {bet['bucket']} at {bet['price'] * 100:.0f}¢ and "
                    f"{'WON' if bet['pnl'] > 0 else 'LOST'} {abs(bet['pnl']):.2f}$. " if bet else "No bet (no 10-point edge). ")
                 + score_day(run, x, f"walk_{day['date']}"))
@@ -642,7 +694,8 @@ def walk(run, learn, test, n=None):
                "why": rv.get("check")}
         with f.open("a") as fh:
             fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
-        dl.say(run, f"walk {day['date']}: max {rec['expected_max']}, опора {anc:.1f} (было {day['actual_max']:.0f}) "
+        dl.say(run, f"walk {day['date']}: max {rec['expected_max']}, {'v5' if HINT == 'v5' else 'опора'} "
+                    f"{anc if anc is None else round(anc, 1)} (было {day['actual_max']:.0f}) "
                     f"p(верный {day['win']})={probs.get(day['win'], 0):.2f}; правила {r.get('rules_used')}; "
                     + (f"ставка {bet['bucket']} по {bet['price'] * 100:.0f}¢ → {bet['pnl']:+.2f}$" if bet else "без ставки")
                     + f"; итого {total:+.2f}$")
@@ -688,6 +741,8 @@ def past_rows(run, city, upto):
 def predict(run, day_s=None, dry=False):
     """Утро дня маркета: данные дня как в прогонах (build_day), книга правил, Gemma → шансы → одна ставка $2 по настоящему
     стакану (polyexec.simulate_buy: задержка, комиссия, минимум 5 долей). Пока бумажная — в live_bets.jsonl; кошелёк — решение Alex."""
+    if HINT == "v5":
+        raise SystemExit("DIARY_HINT=v5 — только для прогонов на прошлом: живой v5 в predict нет")
     import weather_llm_hour as lh
     from polyexec import simulate_buy
     city = dl.city_of(run)

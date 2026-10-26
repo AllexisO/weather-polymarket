@@ -27,7 +27,7 @@ from zoneinfo import ZoneInfo
 import requests
 
 from weather_cities import OBS_CITIES
-from weather_obs_live import cash, ensure_schema
+from weather_obs_live import ROUTINE_FROM, cash, ensure_schema
 from weather_obs_rt import FRESH_SEC, Books, Markets, buy_dead, check_watch
 from weather_obs_rt import value as value_exact
 
@@ -94,6 +94,8 @@ def seed(now, stations=None):
             if not x.get("report_type") or x.get("temperature") is None:   # без типа — 5-минутные замеры (HF), не сводки
                 continue
             t = ts(x["observation_time"])
+            if "SPECI" in str(x["report_type"]).upper() and t.astimezone(ZoneInfo(cfg["tz"])).date().isoformat() >= ROUTINE_FROM:
+                continue   # 25.10: с 23.10 SPECI в итог Polymarket не идёт — и в максимум дня тоже
             if now.timestamp() - t.timestamp() < FRESH_SEC:
                 fresh.append((icao, t, float(x["temperature"])))
                 continue
@@ -318,6 +320,16 @@ def main():
                         fast.commit()
                     except sqlite3.OperationalError:
                         fast.rollback()
+                    continue
+                # 25.10: с 23.10 SPECI в итог Polymarket не идёт. 24.10 Денвер: SPECI 06:25Z 60°F → купили «нет» на 58-59°F по 61¢,
+                # итог 58-59 — проигрыш $3.05. SPECI — только в metar_seen_src (замер скорости), не в максимум и не в ставку.
+                if x.get("product") == "ASOS-SPECI" and t.astimezone(ZoneInfo(OBS_CITIES[ICAO_CITY[icao]]["tz"])).date().isoformat() >= ROUTINE_FROM:
+                    try:
+                        conn.execute("INSERT OR IGNORE INTO metar_seen_src (icao, obs_time_utc, source, first_seen_utc, temp_c) VALUES (?, ?, ?, ?, ?)",
+                                     (icao, t.isoformat(), "wethr_rt_speci", datetime.now(timezone.utc).isoformat(), float(temp)))
+                        conn.commit()
+                    except sqlite3.OperationalError:
+                        conn.rollback()
                     continue
                 handle(icao, t, float(temp), "wethr_rt")
         except (requests.RequestException, ValueError) as e:

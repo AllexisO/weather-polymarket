@@ -42,7 +42,8 @@ MM_DB = DB_PATH.parent / "mm.sqlite3"
 DAYS = 14
 # последнее исправление правил замеров (аудит 11.10: целые °C, Гонконг) — проигрыши до него уже разобраны; исправил снова — сдвинь
 # 15.10: obs_fmi выключен, FMI в obs_fast только пишем, DWD запас 0.3 — проигрыши obs_fmi Хельсинки и obs_rt Лакхнау 13.10 разобраны
-FIXED_FROM = "2026-10-15T12:00:00+00:00"
+# 25.10 ~17:00 UTC: obs_wethr — SPECI с 23.10 не в максимум (проигрыш Денвер 24.10 разобран, журнал 25.10)
+FIXED_FROM = "2026-10-25T17:00:00+00:00"
 GAMMA = "https://gamma-api.polymarket.com"
 CHECKS = []
 
@@ -106,13 +107,23 @@ def check_sources(c, since, out):
             day_max[(s, city, d)] = max(day_max[(s, city, d)], mv)
         f.close()
     icao = {cfg["icao"]: city for city, cfg in OBS_CITIES.items() if cfg.get("icao")}
+    # 26.10: с ROUTINE_FROM итог — только плановые сводки (как routine_only у кошельков); SPECI здесь давала ложные «проблемы»
+    # (Денвер 24.10 00:25, Сан-Франциско 25.10 22:26 — 22.8°C при плановой 21.7°C). Метки METAR/SPECI нет — по минуте сводки.
+    from weather_obs_live import ROUTINE_FROM
+    try:
+        routine_min = json.loads((DB_PATH.parent / "mm_metar_minutes.json").read_text())
+    except (OSError, ValueError):
+        routine_min = {}
     for ic, t, s, v in c.execute("SELECT icao, obs_time_utc, source, temp_c FROM metar_seen_src WHERE obs_time_utc >= ? AND temp_c IS NOT NULL",
                                  (since,)):
         city = icao.get(ic)
         if not city:
             continue
         cfg = OBS_CITIES[city]
-        d = datetime.fromisoformat(t).astimezone(ZoneInfo(cfg["tz"])).date().isoformat()
+        t = datetime.fromisoformat(t)
+        d = t.astimezone(ZoneInfo(cfg["tz"])).date().isoformat()
+        if d >= ROUTINE_FROM and routine_min.get(city) and t.minute not in routine_min[city]:
+            continue
         day_max[(s, city, d)] = max(day_max[(s, city, d)], metar_v(v, cfg))
     bad, n = [], Counter()
     for (s, city, d), mv in day_max.items():
