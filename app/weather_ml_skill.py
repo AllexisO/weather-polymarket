@@ -49,6 +49,9 @@ MODELS = {
     # 2026-09-29 (страница «Модели», просьба Alex): v5 «от рынка» и 6 ансамблей — тоже только живые дни
     "ml5": (None, None, "ml5_model_p", None),
     "ml5_cal": (None, None, "ml5c_model_p", None),
+    # 27-28.10: v5 с 31 листом и её смесь с рынком
+    "ml5_31": (None, None, "ml531_model_p", None),
+    "ml5_31_cal": (None, None, "ml531c_model_p", None),
     "ens": (None, None, "ens_model_p", None),
     "main": (None, None, "model_p", None),
     "emos": (None, None, "emos_model_p", None),
@@ -63,7 +66,7 @@ def center_c(probs, unit):
     return (m - 32) * 5 / 9 if unit == "fahrenheit" else m
 
 
-MIN_EDGE = {"ml3_cal": 0.03, "ml4_cal": 0.03, "ml4e_cal": 0.03, "ml5_cal": 0.03, "ens": 0.03}
+MIN_EDGE = {"ml3_cal": 0.03, "ml4_cal": 0.03, "ml4e_cal": 0.03, "ml5_cal": 0.03, "ml5_31_cal": 0.03, "ens": 0.03}
 
 
 def row(key, city, date, source, unit, model, market, win_lo, min_shift, fill=None):

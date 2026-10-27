@@ -72,7 +72,7 @@ def _exam(conn, dfm):
             "err_market": float(np.mean(err_mkt)) if err_mkt else None}
 
 
-EXAM_VERSIONS = [("ml", "v1"), ("ml2", "v2"), ("ml3", "v3"), ("ml4", "v4"), ("ml4e", "v4e"), ("ml5", "v5")]
+EXAM_VERSIONS = [("ml", "v1"), ("ml2", "v2"), ("ml3", "v3"), ("ml4", "v4"), ("ml4e", "v4e"), ("ml5", "v5"), ("ml5_31", "v5_31")]
 
 
 def _exam_all(conn, dfm):
@@ -110,6 +110,7 @@ def _exam_all(conn, dfm):
         "ml4": quant(f3, tr["fc_mean"], te["fc_mean"], [V4_EXTRA]),
         "ml4e": quant(f3, tr["fc_mean"], te["fc_mean"], seeds(V4E_SEEDS, V4_EXTRA)),
         "ml5": quant(f3, b5_tr, b5_te, seeds(V5_SEEDS)),
+        "ml5_31": quant(f3, b5_tr, b5_te, seeds(V5_SEEDS, V4_EXTRA)),   # 28.10: v5 с 31 листом
     }
     # v1: одно число + разброс по городу (честный, по кросс-валидации внутри обучения) — как в рабочем обучении
     saved = ml.FEATURES
@@ -160,7 +161,7 @@ def version_detail(timing, rows1, rows_m, feat1, feat_m, sigmas, sig_glob):
     """30.09 (просьба Alex: «видеть, как училась каждая модель»): по каждой версии — что учит, настройки, сколько моделей,
     сколько длилось, данные и на что смотрит больше всего (важность признаков медианы её собственных моделей, среднее по зёрнам)."""
     import lightgbm as lgb
-    from weather_ml_live import ML_DIR, V4E_SEEDS, V5_SEEDS
+    from weather_ml_live import ML_DIR, V4E_SEEDS, V5_SEEDS, V531_PREFIX
     base = f"{mq.Q_PARAMS['num_leaves']} листьев, шаг {mq.Q_PARAMS['learning_rate']}, {mq.Q_ROUNDS} деревьев, мин. {mq.Q_PARAMS['min_data_in_leaf']} дней в листе"
     spec = {
         "ml": ("поправку к среднему 16 моделей — одно число; разброс — постоянный по городу", f"регрессия, {ml.PARAMS['num_leaves']} листьев, {ml.N_ROUNDS} деревьев",
@@ -172,6 +173,9 @@ def version_detail(timing, rows1, rows_m, feat1, feat_m, sigmas, sig_glob):
                  base.replace(f"{mq.Q_PARAMS['num_leaves']} листьев", "31 лист"), 39, rows_m, feat_m, [ML_DIR / f"q_mkt31_s{s}" / "q50.txt" for s in V4E_SEEDS]),
         "ml5": ("поправку к ожидаемому максимуму по ценам рынка (не к среднему 16 моделей), три обучения с зёрнами "
                 + ", ".join(map(str, V5_SEEDS)), base, 39, rows_m, feat_m, [ML_DIR / f"q_fm_s{s}" / "q50.txt" for s in V5_SEEDS]),
+        "ml5_31": ("то же, что v5 (поправку к ожидаемому максимуму по ценам рынка), три обучения с зёрнами " + ", ".join(map(str, V5_SEEDS)),
+                   base.replace(f"{mq.Q_PARAMS['num_leaves']} листьев", "31 лист"), 39, rows_m, feat_m,
+                   [ML_DIR / f"{V531_PREFIX}_s{s}" / "q50.txt" for s in V5_SEEDS]),
     }
     out = {}
     for k, (what, params, n_models, rows, feats, files) in spec.items():
@@ -250,6 +254,8 @@ def report(conn, started, df1, dfm, sigmas, qmodels_mkt):
              "note": "с 27.09: три обучения с разными зёрнами, прогноз — среднее; на проверке точнее одного обучения везде"},
             {"key": "ml5", "name": "v5 — «от рынка», среднее 3 обучений", "rows": len(dfm), "features": len(ml.FEATURES),
              "note": "с 29.09: учит поправку к ожидаемому максимуму по ценам рынка, а не к среднему 16 моделей"},
+            {"key": "ml5_31", "name": "v5_31 — v5 с крупными деревьями (31 лист)", "rows": len(dfm), "features": len(ml.FEATURES),
+             "note": "с 27.10: на проверке по месяцам 05-10.2026 точнее v5 во всех 6 (1.1931 против 1.1989)"},
         ],
         "exam": exam,
         "exam_all": exam_all,
