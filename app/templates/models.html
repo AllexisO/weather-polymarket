@@ -43,6 +43,9 @@
   .top { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 16px 24px; margin-bottom: 26px; }
   .top h1 { margin: 0; font-size: 26px; font-weight: 700; letter-spacing: -.02em; text-wrap: balance; }
   .top p { margin: 6px 0 0; color: var(--bk-muted); font-size: 14px; max-width: 760px; }
+  .off-h { font-size: 16px; font-weight: 600; color: var(--bk-neg); }
+  .off-pane { background: repeating-linear-gradient(135deg, rgba(244, 167, 127, .07) 0 10px, transparent 10px 20px), var(--bk-card);
+    border-color: rgba(244, 167, 127, .35); }
   .back { display: inline-block; font-size: 13.5px; text-decoration: none; margin-bottom: 8px; }
   .picker { display: flex; flex-direction: column; gap: 6px; min-width: 260px; }
   .picker label { font-size: 12.5px; color: var(--bk-muted); }
@@ -253,10 +256,10 @@
 {% set ch = m.charts %}
 <div class="top">
   <div>
-    <a class="back" href="/models">← Все модели</a>
+    <a class="back" href="{{ '/failed' if m.failed else '/models' }}">← {{ 'Не прошли' if m.failed else 'Все модели' }}</a>
     <div class="hero-h"><span class="badge">{{ m.badge }}</span>
       <div><h1>{{ m.name }}</h1>
-        <div style="margin-top: 6px;"><span class="tag{{ ' main' if m.status == 'главная' else '' }}">{{ m.status }}</span></div></div></div>
+        <div style="margin-top: 6px;">{% if m.failed %}<span class="off-h">{{ m.failed.off }}</span>{% else %}<span class="tag{{ ' main' if m.status == 'главная' else '' }}">{{ m.status }}</span>{% endif %}</div></div></div>
     <p>{{ m.short }}</p>
   </div>
   <form class="picker" method="get" action="/models" onsubmit="return false;">
@@ -267,6 +270,15 @@
   </form>
 </div>
 
+{% if m.failed %}
+{# 27.10 (Alex): выключенная модель — сверху почему; ниже вся её история как была #}
+<section class="sec">
+  <div class="pane off-pane">
+    <h2 style="margin: 0 0 10px;">Почему выключена</h2>
+    {% for p in m.failed.why %}<p>{{ p }}</p>{% endfor %}
+  </div>
+</section>
+{% endif %}
 <section class="sec">
   <div class="facts">
     <div><span>Как учится</span><b>{{ 'каждую ночь в 05:20' if m.kind == 'ml' else 'не обучается — формула' }}</b></div>

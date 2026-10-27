@@ -120,6 +120,7 @@ PAPER_WALLETS = {
     "ml5": "v5 «от рынка» — сама модель",
     "ml5_cal30": "v5 смесь — не дешевле 30¢",
     "ml5_25": "v5 — не дешевле 25¢",
+    "ml5_31": "v5 с 31 листом",
     "ml5_no": "v5 «от рынка» — ставки «против»",
     "no_cheap5": "Против лотерейных билетов (v5)", "no_mid5": "Против средних вариантов (v5)", "no_big5": "Против сильно переоценённых (v5)",
     "ml_day": "Дневная модель (10/12/14 ч)",
@@ -200,6 +201,8 @@ WALLET_INFO = {
                   "Двойник ml3_cal30 (с 20.10): то же правило «да» от 30¢, перевес от 3 п.п., но на смеси v5 с рынком"),
     "ml5_25": ("v5 «от рынка»", "v5 — не дешевле 25¢",
                "Правило ml5 (перевес от 10 п.п.), но лучший вариант дешевле 25¢ — пропуск (с 26.10): по сделкам плюс v5 — в ставках от 25¢"),
+    "ml5_31": ("v5 «от рынка»", "v5 с 31 листом",
+               "Правило ml5 (перевес от 10 п.п.), но шанс — v5, обученная с 31 листом вместо 15 (с 27.10): на 05-10.2026 точнее v5 во всех 6 месяцах"),
     "ml5_no": ("v5 «от рынка»", "v5 «от рынка» — ставки «против»",
                "Двойник ml3_no (с 21.10): «нет» на вариант, который v5 считает переоценённым (перевес от 10 п.п.)"),
     "no_cheap5": ("Правила без модели (перекосы рынка)", "Против лотерейных билетов (v5)",
@@ -250,12 +253,163 @@ WALLET_INFO = {
                 "С 15.10 не ставит: максимум FMI за день в 15 из 75 дней «убивал» вариант, который выиграл"),
 }
 # 14.10 (решение Alex): выключенные кошельки — история и страница остаются, в подписи дата
-HIDDEN_VERSIONS = {"ml"}  # 14.10: версии модели без кошельков — не показываем на /training
-RETIRED = {**{w: "2026-10-14" for w in ("main", "main_mk", "emos", "emos_mk", "mm", "mm_mk", "ml", "ml_shift")}, "ens": "2026-10-14", "obs_rt": "2026-10-15"}  # как weather_paper.RETIRED (сверяет preflight.py)
+HIDDEN_VERSIONS = {"ml", "ml2"}  # 14.10: версии модели без кошельков — не показываем на /training (27.10: и v2)
+RETIRED = {**{w: "2026-10-14" for w in ("main", "main_mk", "emos", "emos_mk", "mm", "mm_mk", "ml", "ml_shift")}, "ens": "2026-10-14", "obs_rt": "2026-10-15", "obs_fmi": "2026-10-15", "techno": "2026-10-27", "ml2": "2026-10-27"}  # как weather_paper.RETIRED (сверяет preflight.py)
 for _w, _d in RETIRED.items():
     if _w in WALLET_INFO:
         _g, _n, _t = WALLET_INFO[_w]
         WALLET_INFO[_w] = (_g, f"{_n} (выключен {_d[8:10]}.{_d[5:7]})", _t)
+# 27.10 (просьба Alex): страница «Не прошли» (/failed) — кошельки, не прошедшие порог и выключенные; со страницы /paper они уходят.
+# Вместо «Итог по дням» — почему не прошёл, почему выключен и таблица по неделям (_failed_weeks).
+FAILED_KINDS = ("Кошельки", "Модели", "LLM", "Бот-мейкер")   # 27.10 (Alex): разделы страницы — кошельки отдельно, модели отдельно, LLM отдельно
+FAILED = {
+    "techno": {
+        "kind": "Кошельки",
+        "rule": "Правило бота technosheen: «да» за 8-30¢ на одном из 4 самых дорогих вариантов, если смесь модели и рынка не ниже "
+                "цены. На истории его сделок: +10.7%. Выбрано, уже зная хороший итог, — поэтому судили только новые ставки.",
+        "threshold": "Порог (записан до проверки): ставки с 07.10 — не меньше 30 закрытых и доходность не ниже +5%, решение 20.10.",
+        "failed": "20.10: 81 ставка, −22.8% — не прошёл.",
+        "off": "Выключен 27.10 (решение Alex). За все 152 закрытые ставки выиграли 27 — ровно столько, сколько обещали цены рынка "
+               "(≈ 27): перевеса над рынком нет, минус — это комиссия. Хорошее начало — везение: 01-04.10 выиграли 8 ставок при "
+               "ожидании 4, а дешёвый выигрыш возвращает ставку в 4-10 раз, поэтому 4 лишних выигрыша дали +99% за неделю.",
+        "model": "Модель под ним — смесь v3 с рынком: работает дальше, на ней ставят ml3_cal и его двойники. Выключено только правило.",
+    },
+    "ml2": {
+        "kind": "Кошельки",
+        "rule": "Модель v2 — та же LightGBM, что v3, но не видит цену рынка: только погодные прогнозы и замеры. Держали для "
+                "сравнения — помогает ли модели мнение рынка. Ответ получен: помогает, на этом построены v5 и смеси с рынком.",
+        "threshold": "Отдельного порога не было — модель для сравнения. Её кошелёк ml2 за всё время (25.09-27.10, с досрочной продажей): "
+                     "418 ставок, −3.3%; на 26.10 с правилом «да» не дешевле 10¢ (с 03.10) — 279 ставок, +2.4%: 78 выигрышей при "
+                     "ожидании рынка ≈ 70, от везения не отличить.",
+        "failed": "Своего плюса нет: с 06.10 ставки, которые делал и общий банк, — 78, +43.2%; ставки только v2 — 170, −19.2% "
+                  "(33 выигрыша при ожидании 38.6).",
+        "off": "Выключена 27.10 (решение Alex): где v2 зарабатывает, мы уже ставим через общий банк, а её собственное мнение без "
+               "рынка теряет. Открытые 8 ставок проданы по стакану в тот же час: −$3.58.",
+        "model": "Модель ни для кого не опора — v3, v4, v5 учатся отдельно. Внутри ночного обучения v2 ещё считается (13 с, как v1 "
+                 "с 14.10) — на страницах её нет.",
+    },
+}
+
+
+# 27.10 (решение Alex: «моя цель — заработать, а не видеть, что это работает в идеальном мире»): бот-мейкер выключен целиком
+_MM_IDEAL = ("Идеальный мир: денег без предела (оборот в сотни раз больше $100) и наша заявка первая в очереди — вживую так не "
+             "будет. С настоящими $100 тот же бот проиграл дважды (mm100, mm100f).")
+MM_FAILED_WHY = {
+    "mm100": "Строго как вживую, банк $100. Порог 14.10 (больше $101 и плюс обе недели) не прошёл: −12.5%. Деньги застревают "
+             "в ставках без пары — одна сторона превращается в лотерею.",
+    "mm100f": "Банк $100 в 5 самых оживлённых городах. Порог 21.10 (плюс обе недели 08-21.10) не прошёл: +$0.56 и −$26.44, итог −$25.88.",
+    "mm_ws_zs": "Исполнение строгое, но денег без предела — с $100 не повторить: строгий бот с $100 (mm100) проиграл.",
+    "mm_ws_ml": _MM_IDEAL + " Проверка 30.10 сравнивала бы модель с тем же идеальным миром — денег она не показала бы.",
+    "mm_all": "Старый бот с опросом раз в 30 с — остановлен 02.10 (заменён ботом на живом потоке).",
+    "mm_sel": "Старый бот с опросом раз в 30 с — остановлен 02.10 (заменён ботом на живом потоке).",
+    "mm_pol": "Не погодные маркеты (политика и прочее) — остановлен 02.10.",
+    "mm_own": "Не погодные маркеты, свой выбор — остановлен 02.10.",
+}
+
+
+def _models_failed():
+    from models_info import MODELS as MODEL_INFO
+    return [{"key": k, "name": MODEL_INFO[k]["name"], "badge": MODEL_INFO[k]["badge"], "short": MODEL_INFO[k]["short"], "off": v["off"]}
+            for k, v in FAILED_MODELS.items() if k in MODEL_INFO]
+
+
+def _mm_failed():
+    """Карточки бота-мейкера для «Не прошли»: итог по закрытым маркетам и почему выключен."""
+    if not MM_DB.exists():
+        return []
+    conn = sqlite3.connect(f"file:{MM_DB}?mode=ro", uri=True, timeout=10)
+    conn.row_factory = sqlite3.Row
+    try:
+        out = []
+        for w in MM_WALLETS:
+            c = _mm_card(conn, w)
+            c["name"] = c["name"].split(" — закрыт")[0]
+            c["why"] = MM_FAILED_WHY.get(w, _MM_IDEAL)
+            c["off"] = "Выключен 02.10" if w in MM_OFF else ("Выключен 23.10" if w == "mm100f" else "Выключен 27.10")
+            out.append(c)
+        return out
+    finally:
+        conn.close()
+
+
+# 27.10 (Alex: «в Модели должна быть сама модель — вся её история»): выключенные модели; карточка на /failed ведёт на её
+# страницу /models/<ключ> (обучение, экзамены, точность), там сверху — когда и почему выключена
+FAILED_MODELS = {
+    "v1": {"off": "Выключена 14.10", "why": [
+        "Первая обучаемая модель: одно число (ожидаемый максимум) и одинаковый разброс по городу.",
+        "Её кошельки ml (−27.7%, 222 ставки) и ml_shift (−17.6%, 88) — хуже цены рынка. Выключены 14.10 (решение Alex); "
+        "её место заняли v3 и v5 — распределение из 13 уровней и цена рынка. Внутри ночного обучения ещё считается (6 с)."]},
+    "ens": {"off": "Выключена 14.10", "why": [
+        "Шанс варианта — доля 212 вариантов 6 ансамблей в его границах, смесь с рынком.",
+        "Порог 12.10 не прошёл: 6 ансамблей против 3 — 0.009 при нужных 0.015; смесь с рынком хуже рынка на 0.082. Кошелёк ens "
+        "−9.5% (171). Выключена 14.10; сбор ансамблей идёт дальше — для проверки признаком в v3 (заметка #76, 10.01)."]},
+    "emos": {"off": "Выключена 14.10", "why": [
+        "Поправка среднего и разброса ансамбля GFS+ICON по истории города.",
+        "Кошельки emos (−27.9%, 159) и emos_mk (−30.1%, 135) — хуже цены рынка. Выключена 14.10 (решение Alex)."]},
+    "mm": {"off": "Выключена 14.10", "why": [
+        "Взвешенное среднее 16 погодных моделей с весами по их точности в городе за 45 дней.",
+        "Как самостоятельный прогноз — хуже цены рынка: кошельки mm (−11.1%, 320) и mm_mk (−17.4%, 321). Выключена 14.10 (решение Alex).",
+        "Её расчёт остаётся: сдвиг микса от среднего прогнозов — самый важный признак v3 и v4 (16-21% важности) и второй у v5 (14.5%)."]},
+    "main": {"off": "Выключена 14.10", "why": [
+        "Первая модель проекта: ансамбли GFS и ICON со сдвигом на среднюю ошибку по городу.",
+        "Кошельки main (−31.5%, 115) и main_mk (−49.0%, 67) — хуже цены рынка. Выключена 14.10 (решение Alex)."]},
+    "v2": {"off": "Выключена 27.10", "why": [
+        "Модель для сравнения: та же LightGBM, что v3, но без цены рынка — только погодные прогнозы и замеры. Вживую с 25.09.",
+        "Вопрос, ради которого её держали, решён: мнение рынка модели помогает — на этом построены v5 и смеси с рынком.",
+        "Её кошелёк ml2 за всё время — 418 ставок, −3.3%. С 06.10 ставки, которые делал и общий банк, — +43.2% (78), "
+        "только её собственные — −19.2% (170): своего плюса у модели нет.",
+        "Выключена 27.10 (решение Alex) вместе с кошельком ml2. Ни одна модель на неё не опирается. Внутри ночного обучения "
+        "ещё считается (13 с, как v1 с 14.10), но на страницах её нет."]},
+}
+
+
+# 27.10 (просьба Alex): на «Не прошли» — и всё, что выключили раньше (14-15.10, docs/PRD.md §10, wallet_docs._RETIRED_WHY)
+_OFF_1410 = ("Выключен 14.10 (решение Alex): проверка на истории показала, что модель хуже цены рынка, живые ставки это "
+             "подтвердили. Его место заняли v3, v5 и ml_day.")
+for _k, _model, _extra in (
+        ("main", "GFS+ICON", ""), ("main_mk", "GFS+ICON", " Двойник с заявкой-мейкером (ждёт продавца по своей цене)."),
+        ("emos", "EMOS", ""), ("emos_mk", "EMOS", " Двойник с заявкой-мейкером."),
+        ("mm", "Микс 16 моделей", ""), ("mm_mk", "Микс 16 моделей", " Двойник с заявкой-мейкером."),
+        ("ml", "v1", ""), ("ml_shift", "v1", " Ставил только в дни, когда центр v1 отличался от рынка на 0.5°C и больше.")):
+    FAILED[_k] = {"kind": "Кошельки", "threshold": f"Отдельного порога не было: кошелёк проверял вживую модель «{_model}».{_extra}",
+                  "off": _OFF_1410}
+FAILED["ens"] = {"kind": "Кошельки", "threshold": "Порог (записан до проверки, PRD §9 п.3): 6 ансамблей лучше 3 на 0.015 и смесь "
+                 "с рынком лучше рынка на 0.015 логошибки. 12.10: 0.009 — не прошёл; смесь 6 ансамблей с рынком хуже рынка на 0.082.",
+                 "off": "Выключен 14.10 (решение Alex). Добавка ансамблей к смеси v3 её портит (10.10). Сбор ансамблей продолжается — "
+                        "чтобы через 2-3 месяца проверить их признаком внутри v3 (заметка #76, 10.01)."}
+FAILED["obs_rt"] = {"kind": "Кошельки", "threshold": "Порог PRD §9 п.7: за 14 дней ≥ 40 исполненных ставок и задержка «замер → ставка» "
+                    "≤ 3 мин. Исполнено 5, итог −20% (Лакхнау 13.10 — исправленная сводка), задержка 10 мин — не прошёл.",
+                    "off": "Выключен 15.10 (решение Alex). В 80% из 2927 попыток дешёвого «нет» не было вообще — рынок знал раньше "
+                           "сводки; где было — боты брали его в ту же секунду. Сводки METAR и так пишет weather_obs_live."}
+FAILED["obs_fmi"] = {"kind": "Кошельки", "threshold": "Отдельного порога не было: проверка вживую, даёт ли 10-минутный замер FMI "
+                     "в Хельсинки фору перед METAR.",
+                     "off": "Ставки выключены 15.10 (проверка проекта): 13.10 FMI показал 9.0°C, а METAR весь день 8 — «нет» на 8 "
+                            "за 75¢ проиграл. FMI усредняет иначе, чем METAR, по которому решает Polymarket: в 15 из 75 прошлых дней "
+                            "максимум FMI «убивал» вариант, который выиграл."}
+
+
+def _failed_weeks(rows):
+    """Закрытые ставки по неделям (пн-вс по дню маркета): ставок, сколько выигрышей обещал рынок (сумма цен купленных долей),
+    сколько выиграли, сколько потеряли на проигранных и итог."""
+    weeks = {}
+    for r in rows:
+        if r["status"] not in ("won", "lost") or r["price"] is None:
+            continue
+        d = date.fromisoformat(r["local_date"])
+        mon = d - timedelta(days=d.weekday())
+        w = weeks.setdefault(mon, {"from": mon, "n": 0, "exp": 0.0, "won": 0, "lost_usd": 0.0, "pnl": 0.0, "first": d, "last": d})
+        w["n"] += 1
+        w["exp"] += r["price"]
+        w["won"] += r["status"] == "won"
+        w["lost_usd"] += -_pnl(r) if r["status"] == "lost" else 0.0
+        w["pnl"] += _pnl(r)
+        w["first"], w["last"] = min(w["first"], d), max(w["last"], d)
+    out = [weeks[k] for k in sorted(weeks)]
+    for w in out:
+        w["label"] = f"{w['first']:%d.%m}–{w['last']:%d.%m}"
+    tot = {"label": "Всего", "n": sum(w["n"] for w in out), "exp": sum(w["exp"] for w in out), "won": sum(w["won"] for w in out),
+           "lost_usd": sum(w["lost_usd"] for w in out), "pnl": sum(w["pnl"] for w in out)}
+    return out, tot
 # кошельки по живым замерам (paper_obs_trades, колонка wallet) — weather_obs_live.py
 OBS_WALLETS = ("obs", "obs_fmi", "obs_fast", "obs_rt", "obs_wethr", "obs_atis")
 # 2026-09-25: страница кошелька в стиле банковского приложения — города по-русски,
@@ -275,7 +429,7 @@ CITY_RU = {
     "wuhan": "Ухань", "zhengzhou": "Чжэнчжоу", "hong_kong": "Гонконг", "taipei": "Тайбэй",
 }
 WALLET_BADGE = {"ml3": "v3", "ml2": "v2", "ml": "v1", "ml_shift": "v1+", "mm": "MX", "emos": "EM", "main": "GI",
-                "mm_mk": "MX", "emos_mk": "EM", "main_mk": "GI", "ml3_mk": "v3", "ml3_cal": "v3+", "ml3_z": "v3Z", "ml3_no": "v3−", "ml3_cal_k": "v3$", "ml4": "v4", "ml4_cal": "v4+", "ml4e": "v4³", "ml4e_cal": "v4³+", "ens": "EN", "ml3_cal15": "v3+¢", "ml3_cal30": "v3+30", "no_cheap": "НЕТ", "fav": "ФАВ", "no_mid": "НЕТ½", "no_big": "НЕТ+", "techno": "ДА¢", "ml3_conf": "v3+У", "ml5_cal": "v5+", "ml5": "v5", "ml5_cal30": "v5+30", "ml5_25": "v5·25", "ml5_no": "v5−", "no_cheap5": "НЕТ5", "no_mid5": "НЕТ½5", "no_big5": "НЕТ+5", "ml_day": "ДН", "ml_day_fav": "ДН★", "ml_day_nohigh": "ДН↓", "ml3_city": "v3+Г", "copy": "CP", "obs": "OB", "obs_fmi": "FI", "obs_fast": "OB+", "obs_rt": "OB⚡", "obs_wethr": "OBW", "llm_gem": "LG", "llm_ds": "LD"}
+                "mm_mk": "MX", "emos_mk": "EM", "main_mk": "GI", "ml3_mk": "v3", "ml3_cal": "v3+", "ml3_z": "v3Z", "ml3_no": "v3−", "ml3_cal_k": "v3$", "ml4": "v4", "ml4_cal": "v4+", "ml4e": "v4³", "ml4e_cal": "v4³+", "ens": "EN", "ml3_cal15": "v3+¢", "ml3_cal30": "v3+30", "no_cheap": "НЕТ", "fav": "ФАВ", "no_mid": "НЕТ½", "no_big": "НЕТ+", "techno": "ДА¢", "ml3_conf": "v3+У", "ml5_cal": "v5+", "ml5": "v5", "ml5_cal30": "v5+30", "ml5_25": "v5·25", "ml5_31": "v5³¹", "ml5_no": "v5−", "no_cheap5": "НЕТ5", "no_mid5": "НЕТ½5", "no_big5": "НЕТ+5", "ml_day": "ДН", "ml_day_fav": "ДН★", "ml_day_nohigh": "ДН↓", "ml3_city": "v3+Г", "copy": "CP", "obs": "OB", "obs_fmi": "FI", "obs_fast": "OB+", "obs_rt": "OB⚡", "obs_wethr": "OBW", "llm_gem": "LG", "llm_ds": "LD"}
 # 14.10 (просьба Alex): группы — по модели, к которой относится кошелёк (MODEL_GROUP ниже)
 WALLET_GROUPS = ["v3 — варианты главной модели", "v5 «от рынка»", "Дневная модель", "v4", "v2", "Правила без модели (перекосы рынка)",
                  "Повтор за сильными трейдерами", "Живые замеры"]
@@ -1381,6 +1535,16 @@ def llm_page(request: Request, w: str = "llm_gem", city: str = "chicago", d: str
 
 @app.get("/paper", response_class=HTMLResponse)
 def paper(request: Request, w: str = ""):
+    return _paper(request, w)
+
+
+@app.get("/failed", response_class=HTMLResponse)
+def failed(request: Request, w: str = ""):
+    """27.10 (просьба Alex): «Не прошли» — те же карточки кошельков, только выключенные из FAILED."""
+    return _paper(request, w, failed_page=True)
+
+
+def _paper(request, w, failed_page=False):
     """Три таблицы (просьба Alex, 2026-09-23): ждём результата / результаты
     с объяснением / почему не ставили. Ставка после результата уходит из
     "ждём" в "результаты"; сам город продолжает торговаться дальше."""
@@ -1391,11 +1555,12 @@ def paper(request: Request, w: str = ""):
         outcomes = {(r["city"], r["local_date"]): (r["win_lo"], r["win_hi"])
                     for r in conn.execute("SELECT city, local_date, win_lo, win_hi FROM weather_poly_outcomes")}
     has_reason = False
+    trades_by = {}
     if table_exists(conn, "paper_trades"):
         rows = conn.execute("SELECT * FROM paper_trades ORDER BY local_date DESC, city").fetchall()
         has_reason = "reason" in rows[0].keys() if rows else False
         for key, label in PAPER_WALLETS.items():
-            wr = [r for r in rows if r["wallet"] == key]
+            wr = trades_by[key] = [r for r in rows if r["wallet"] == key]
             card = _wallet_card(label, wr, nofill=sum(r["status"] == "nofill" for r in wr),
                                 skipped=sum(r["status"] == "skip" for r in wr))
             card["key"] = key
@@ -1445,6 +1610,7 @@ def paper(request: Request, w: str = ""):
         label = WALLET_INFO[okey][1]
         src = {"obs_fmi": "10-мин замер FMI", "obs_fast": "быстрый замер в минуту сводки", "obs_rt": "свежая сводка METAR", "obs_wethr": "свежая сводка METAR (wethr)", "obs_atis": "свежая сводка METAR (ATIS)"}.get(okey, "станция")
         card = _wallet_card(label, obs, nofill=sum(r["status"] == "nofill" for r in obs))
+        trades_by[okey] = obs
         card["key"] = okey
         wallets.append(card)
         for r in obs:
@@ -1496,14 +1662,20 @@ def paper(request: Request, w: str = ""):
     for c in wallets:
         info = WALLET_INFO.get(c["key"], ("Другое", c["label"], ""))
         c["group"], c["name"], c["desc"] = info
+        if c["key"] in FAILED:   # 27.10 (Alex): на «Не прошли» выключенность видна по фону карточки — без «(выключен …)» в названии
+            c["name"] = c["name"].split(" (выключен ")[0].split(" (ставки остановлены")[0]
+            c["off"] = f"Выключен {RETIRED[c['key']][8:10]}.{RETIRED[c['key']][5:7]}" if c["key"] in RETIRED else None
         c["badge"] = WALLET_BADGE.get(c["key"], c["key"][:2].upper())
         c["winrate"] = round(100 * c["won"] / c["n"]) if c["n"] else None
     for lst in (waiting, results, skips):
         for t in lst:
             t["city_ru"] = CITY_RU.get(t["city"], t["city"].replace("_", " ").title())
-    main = next((c for c in wallets if c["key"] == MAIN_WALLET), None)
+    main = None if failed_page else next((c for c in wallets if c["key"] == MAIN_WALLET), None)
     # 14.10 (просьба Alex): выключенные кошельки в списке не показываем; их страница открывается по ссылке /paper?w=…
     groups = [(g, [c for c in wallets if c["group"] == g and c["key"] not in RETIRED]) for g in WALLET_GROUPS]
+    if failed_page:
+        groups = [(k, [c for c in wallets if FAILED.get(c["key"], {}).get("kind") == k]) for k in FAILED_KINDS]
+        groups = [(g, cs) for g, cs in groups if cs]
     groups = [(g, cs) for g, cs in groups if cs]
     # 2026-09-25 (просьба Alex — переделать страницу целиком): страница всегда
     # про ОДИН кошелёк (по умолчанию главный), остальные — сравнение внизу.
@@ -1520,7 +1692,7 @@ def paper(request: Request, w: str = ""):
         c["skill"] = sk["tot"] if sk else None
         c["vs_mkt"] = 100 * (c["paid"] / c["cost"] - 1) if c.get("cost") else None
         c["luck"] = luck(c["pnl"], c.get("sd"))
-    sel = w if any(c["key"] == w for c in wallets) else None
+    sel = w if any(c["key"] == w for c in wallets) and (not failed_page or w in FAILED) else None
     cur = next((c for c in wallets if c["key"] == sel), None)
     pick = lambda lst: [t for t in lst if t.get("wkey") == sel]
     my_waiting = pick(waiting)
@@ -1536,7 +1708,10 @@ def paper(request: Request, w: str = ""):
          "chart": balance_chart(settle_events.get(sel, []), cur["start"] if cur else PAPER_START_BALANCE), "goal": goal,
          "waiting": my_waiting, "results": pick(results), "skips": pick(skips)[:150],
          "start": cur["start"] if cur else PAPER_START_BALANCE, "doc": WALLET_DOCS.get(sel) if sel else None,
-         "week": week_bars(settled_by_wallet.get(sel, [])) if sel else None},
+         "week": week_bars(settled_by_wallet.get(sel, [])) if sel and sel not in FAILED else None,
+         "failed": FAILED.get(sel), "fweeks": _failed_weeks(trades_by.get(sel, [])) if sel in FAILED else None,
+         "page": "/failed" if failed_page else "/paper", "mm_failed": _mm_failed() if failed_page and not sel else [],
+         "models_failed": _models_failed() if failed_page and not sel else []},
     )
 
 
@@ -2078,6 +2253,7 @@ def model_page(request: Request, key: str):
     if last_imp:
         top = max(i["pct"] for i in last_imp) or 1
         m["importance"] = [{"ru": feature_ru(i["name"]), "pct": i["pct"], "bar": round(100 * i["pct"] / top)} for i in last_imp]
+    m["failed"] = FAILED_MODELS.get(key)
     others = [{"key": k, "name": v["name"], "badge": v["badge"]} for k, v in MODEL_INFO.items()]
     alerts = active_alerts(conn)
     conn.close()
@@ -3185,6 +3361,14 @@ REAL_CANDIDATES = [
      "what": "То же, что выше, но ставка растёт вместе со счётом: 2% от всех денег (свободные + в открытых ставках), не меньше 5 долей; каждая покупка — по стакану Polymarket в момент ставки (5 лучших цен). За 27.09-23.10 так вышло бы +$184 против +$168 у ставки ~$2, но свободных денег в худший момент оставалось $0.15; ставки 4-10% — хуже или банкротство.",
      "rule": "ставки на дни 24.10-20.11: ≥ 150 закрытых и доходность на вложенное ≥ +5%; сравнение с банком выше — по итогу в $", "since": "2026-10-24",
      "until": "2026-11-20", "need_n": 150, "need_roi": 5.0, "then": "живые $100 со ставкой 2% от счёта — если итог лучше, чем у ставки ~$2"},
+    # 27.10 (Alex «давай делай»): тот же банк + докупка по живому стакану (weather_pool_refill.py). Порог записан до результатов.
+    # Проверка 05-26.10 по стаканам mm_ws: докупка ≥ 10¢ за 6 ч +26% на вложенное (цель $10; половины +1% / +47%); первая покупка +5.8%.
+    {"key": "pool_refill", "name": "Общие $100 на 5 кошельков + докупка, когда цена вернулась", "wallets": ["fav", "ml5_cal", "ml5", "ml4e_cal", "ml_day"],
+     "decide": "2026-11-18", "refill": True,
+     "what": "То же, что первый банк, плюс каждые 30 минут в течение 6 часов после ставки смотрим настоящий стакан Polymarket и докупаем ту же долю, если она снова стоит не дороже первой покупки — пока докупка не дойдёт до суммы первой ставки; дешевле 10¢ не докупаем (вариант уже почти проиграл). Купленное нами считаем вынутым из стакана, комиссия 0.05·p·(1−p) всегда, меньше 5 долей не покупаем, денег на счёте нет — не докупаем. На прошлых днях 05-26.10 докупка (не дешевле 10¢) дала +26% на вложенное, первая покупка +5.8%; но по половинам 05-15.10 +1%, 16-27.10 +47%.",
+     "rule": "ставки на дни 28.10-17.11: ≥ 100 закрытых докупок, докупка ≥ +10% на вложенное и итог банка в $ выше, чем у первого банка за те же дни",
+     "since": "2026-10-28", "until": "2026-11-17", "need_refill": 100, "need_roi": 10.0,
+     "then": "докупка в живом банке $100 (сначала §4 п.2-4 в docs/PRD.md)"},
     {"key": "mm", "name": "Бот-мейкер, счёт $100", "wallets": ["mm100"], "decide": "2026-10-14",
      "what": "Ставит заявки на дешёвую сторону и зарабатывает на склейке «да» + «нет». Строго как вживую: банк $100, 5 долей, только гарантированные исполнения.",
      "rule": "на счёте больше $101 к 14.10 и плюс в обе недели (02-08.10 и 09-13.10)", "since": "2026-10-02",
@@ -3275,16 +3459,28 @@ def _pool_rebuy(r, taken, spend=None):
             "payout": sh * fp if r["status"] in ("won", "lost", "void") else None}
 
 
-def _real_pool(conn, wallets, since, until, bank=100.0, frac=None):
+def _real_pool(conn, wallets, since, until, bank=100.0, frac=None, refill=False):
     """Общий банк как один настоящий счёт: ставки кошельков по времени; нет свободных денег — пропуск; деньги возвращаются
     в settled_at (когда Polymarket закрыл маркет); повторная покупка той же доли — по стакану без уже купленного (_pool_rebuy).
-    frac — ставка = доля счёта (свободные + в открытых ставках), каждая покупка по стакану."""
+    frac — ставка = доля счёта (свободные + в открытых ставках), каждая покупка по стакану.
+    refill — плюс докупки по живому стакану (pool_refill, weather_pool_refill.py): только если сама ставка куплена, итог — её."""
     ts = lambda s: datetime.fromisoformat(s).timestamp() if s else None
     q = ",".join("?" * len(wallets))
     rs = conn.execute(f"""SELECT * FROM paper_trades WHERE wallet IN ({q}) AND local_date BETWEEN ? AND ?
                           AND status IN ('won', 'lost', 'void', 'open', 'resting')""", (*wallets, since, until)).fetchall()
-    rs = sorted((dict(r) for r in rs), key=lambda r: ts(r["placed_at"] or r["snapshot_ts"]))
+    rs = [dict(r) for r in rs]
+    if refill and table_exists(conn, "pool_refill"):
+        par = {r["id"]: r for r in rs}
+        for x in conn.execute("SELECT * FROM pool_refill").fetchall():
+            pr = par.get(x["paper_id"])
+            if pr is None:
+                continue
+            fp = (pr["payout"] or 0) / pr["shares"] if pr["shares"] else 0.0
+            rs.append({**pr, "refill_of": pr["id"], "id": None, "placed_at": x["placed_at"], "shares": x["shares"], "stake": x["stake"],
+                       "fee": x["fee"], "price": x["price"], "payout": x["shares"] * fp if pr["status"] in ("won", "lost", "void") else None})
+    rs = sorted(rs, key=lambda r: ts(r["placed_at"] or r["snapshot_ts"]))
     cash, back, took, skip, low, held, rebuy, nofill, busy = bank, [], [], 0, bank, {}, 0, 0, 0.0
+    taken_ids, refills = set(), []
     for r in rs:
         r["fee"] = r["fee"] or 0.0
         t = ts(r["placed_at"] or r["snapshot_ts"])
@@ -3293,8 +3489,12 @@ def _real_pool(conn, wallets, since, until, bank=100.0, frac=None):
             _, pay, c0 = back.pop(0)
             cash, busy = cash + pay, busy - c0
         key = (r["city"], r["local_date"], r["bucket_lo"], r["bucket_hi"], r["side"] or "yes")
-        rebuy += key in held
-        if key in held or frac:
+        if r.get("refill_of"):
+            if r["refill_of"] not in taken_ids or r["stake"] + r["fee"] > cash:
+                continue
+        else:
+            rebuy += key in held
+        if not r.get("refill_of") and (key in held or frac):
             r = _pool_rebuy(r, held.get(key, 0.0), frac * (cash + busy) if frac else None)
             if r is None:
                 nofill += 1
@@ -3306,6 +3506,10 @@ def _real_pool(conn, wallets, since, until, bank=100.0, frac=None):
         cash, busy = cash - cost, busy + cost
         low = min(low, cash)
         took.append(r)
+        if r.get("refill_of"):
+            refills.append(r)
+        else:
+            taken_ids.add(r["id"])
         held[key] = held.get(key, 0.0) + r["shares"]
         if r["status"] in ("won", "lost", "void"):
             back.append((ts(r["settled_at"]) or t, r["payout"] or 0, cost))
@@ -3315,7 +3519,10 @@ def _real_pool(conn, wallets, since, until, bank=100.0, frac=None):
     op = [r for r in took if r["status"] in ("open", "resting")]
     return {"n": len(st), "pnl": pnl, "roi": 100 * pnl / cost if cost else None, "cash": cash, "low": low, "skip": skip,
             "open": len(op), "open_cost": sum(r["stake"] + r["fee"] for r in op), "rebuy": rebuy, "nofill": nofill,
-            "max_stake": max((r["stake"] + r["fee"] for r in took), default=0.0)}
+            "max_stake": max((r["stake"] + r["fee"] for r in took), default=0.0),
+            "refill_n": sum(r["status"] in ("won", "lost", "void") for r in refills), "refill_open": sum(r["status"] not in ("won", "lost", "void") for r in refills),
+            "refill_pnl": sum(_pnl(r) for r in refills if r["status"] in ("won", "lost", "void")),
+            "refill_cost": sum(r["stake"] + r["fee"] for r in refills if r["status"] in ("won", "lost", "void"))}
 
 
 def real_page_data(conn):
@@ -3374,6 +3581,29 @@ def real_page_data(conn):
                 c["status"] = "pass" if ok else ("wait" if not tot[1] or not w2[1] else "bad")
                 c["status_text"] = "проходит" if ok else ("ждём закрытых маркетов" if not tot[1] else
                                                          f"счёт ${bal:.2f}; нужен итог > 0 и плюс в обе недели")
+        elif c["key"] == "pool_refill":
+            p = _real_pool(conn, c["wallets"], c["since"], c["until"], refill=True)
+            base = _real_pool(conn, c["wallets"], c["since"], c["until"])
+            tn = lambda v: "pos" if v > 0.005 else ("neg" if v < -0.005 else "")
+            rr = 100 * p["refill_pnl"] / p["refill_cost"] if p["refill_cost"] else None
+            c["rows"] = [{"label": "Свободно на счёте", "value": f"${p['cash']:.2f}", "tone": tn(p["cash"] + p["open_cost"] - 100),
+                          "note": f"ещё ${p['open_cost']:.2f} в {p['open']} открытых ставках" if p["open"] else None},
+                         {"label": "Закрытые ставки вместе с докупками", "value": money_str(p["pnl"]) if p["n"] else "ещё нет", "tone": tn(p["pnl"]),
+                          "note": f"{p['n']} шт., доходность {p['roi']:+.1f}% на вложенное" if p["n"] else None},
+                         {"label": "Из них докупки", "value": money_str(p["refill_pnl"]) if p["refill_n"] else "ещё нет", "tone": tn(p["refill_pnl"]),
+                          "note": (f"{p['refill_n']} закрытых, доходность {rr:+.1f}%" if p["refill_n"] else "") +
+                                  (f"; открытых {p['refill_open']}" if p["refill_open"] else "") or None},
+                         {"label": "Первый банк за те же дни", "value": money_str(base["pnl"]) if base["n"] else "ещё нет", "tone": tn(base["pnl"]),
+                          "note": f"{base['n']} закрытых" if base["n"] else None}]
+            ok_n, ok_roi = p["refill_n"] >= c["need_refill"], rr is not None and rr >= c["need_roi"]
+            ok_vs = p["n"] > 0 and p["pnl"] > base["pnl"]
+            c["status"] = "pass" if ok_n and ok_roi and ok_vs else ("wait" if not ok_n else "bad")
+            c["status_text"] = "проходит" if c["status"] == "pass" else "; ".join(
+                ([f"ещё {c['need_refill'] - p['refill_n']} закрытых докупок"] if not ok_n else []) +
+                ([f"докупка {rr:+.1f}% → нужно ≥ +10%" if rr is not None else "докупка ≥ +10%"] if not ok_roi else []) +
+                (["итог выше первого банка"] if not ok_vs else []))
+            c["progress"] = min(100, round(100 * p["refill_n"] / c["need_refill"]))
+            c["paper"] = []
         elif c["key"] in ("pool", "pool2"):
             p = _real_pool(conn, c["wallets"], c["since"], c["until"], frac=c.get("frac"))
             tn = lambda v: "pos" if v > 0.005 else ("neg" if v < -0.005 else "")

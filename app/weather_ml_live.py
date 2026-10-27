@@ -94,6 +94,12 @@ def train_and_save():
             timing["ml5"] = time.time() - t0
         except Exception as e:
             print(f"версия 5 (от рынка): ошибка обучения — {e}", file=sys.stderr)
+        t0 = time.time()
+        try:  # 27.10: v5 с 31 листом (кошелёк ml5_31) — своя ошибка не ломает остальное
+            train_v5(dfm, V4_EXTRA, V531_PREFIX)
+            timing["ml5_31"] = time.time() - t0
+        except Exception as e:
+            print(f"версия 5 с 31 листом: ошибка обучения — {e}", file=sys.stderr)
         # 2026-09-26: подробный отчёт + экзамен для страницы /training
         import weather_ml_report
         rep = weather_ml_report.report(conn, started, df, dfm, sig, qm)
@@ -179,6 +185,10 @@ def train_v4e(dfm):
 # все 8 недель, почти вровень с рынком 1.178); деньги смеси в сентябре по сделкам хуже (+$39 против +$124).
 # Кошелёк ml5_cal; главное — следить за отставанием от рынка (weather_week_review.py).
 V5_SEEDS = (11, 22, 33)
+# 27.10 (Alex «давай», идея Argon): v5 с 31 листом (V4_EXTRA) — папки q_fm31_s*, кошелёк ml5_31. train_v5 учился на 15 листьях
+# (Q_PARAMS), хотя у v4 31 лист был лучше. Проверка (data/research/_v5x_argon_1027.py, 05-10.2026 по месяцам, 3 зерна, 8 285
+# город-дней): logloss 1.1931 против 1.1989 у v5 (+0.0057), лучше во всех 6 месяцах; признаки «от рынка» и форма рынка — нет.
+V531_PREFIX = "q_fm31"
 
 
 def v5_base(fc_mean, mkt_mean_vs_fc):
@@ -186,29 +196,30 @@ def v5_base(fc_mean, mkt_mean_vs_fc):
     return fc_mean + (0.0 if mkt_mean_vs_fc is None or mkt_mean_vs_fc != mkt_mean_vs_fc else mkt_mean_vs_fc)
 
 
-def train_v5(dfm):
+def train_v5(dfm, extra=None, prefix="q_fm"):
     import lightgbm as lgb_
     import weather_ml_q as mq
     base = dfm["fc_mean"] + (dfm["mkt_mean_vs_fc"].fillna(0.0) if "mkt_mean_vs_fc" in dfm else 0.0)
     X, y = dfm[ml.FEATURES], dfm["actual_c"] - base
     for seed in V5_SEEDS:
-        out = ML_DIR / f"q_fm_s{seed}"
+        out = ML_DIR / f"{prefix}_s{seed}"
         out.mkdir(parents=True, exist_ok=True)
         ex = {"seed": seed, "bagging_seed": seed, "feature_fraction_seed": seed}
         for q in mq.QUANTILES:
-            m = lgb_.train({**mq.Q_PARAMS, **ex, "alpha": q}, lgb_.Dataset(X, y, categorical_feature=["city_id"]), mq.Q_ROUNDS)
+            m = lgb_.train({**mq.Q_PARAMS, **(extra or {}), **ex, "alpha": q}, lgb_.Dataset(X, y, categorical_feature=["city_id"]), mq.Q_ROUNDS)
             m.save_model(str(out / f"q{int(round(q * 100)):02d}.txt"))
         (out / "features.json").write_text(json.dumps(ml.FEATURES))
-    print(f"версия 5 (от рынка, среднее {len(V5_SEEDS)} обучений): обучено {len(V5_SEEDS)} × {len(mq.QUANTILES)} уровней")
+    print(f"версия 5 (от рынка{', ' + str(extra) if extra else ''}, среднее {len(V5_SEEDS)} обучений): "
+          f"обучено {len(V5_SEEDS)} × {len(mq.QUANTILES)} уровней → {prefix}")
 
 
-def _load_q_fm():
-    if "q_fm" not in _cache:
+def _load_q_fm(prefix="q_fm"):
+    if prefix not in _cache:
         import weather_ml_q as mq
-        _cache["q_fm"] = [({q: lgb.Booster(model_file=str(ML_DIR / f"q_fm_s{s}" / f"q{int(round(q * 100)):02d}.txt"))
-                            for q in mq.QUANTILES}, json.loads((ML_DIR / f"q_fm_s{s}" / "features.json").read_text()))
+        _cache[prefix] = [({q: lgb.Booster(model_file=str(ML_DIR / f"{prefix}_s{s}" / f"q{int(round(q * 100)):02d}.txt"))
+                            for q in mq.QUANTILES}, json.loads((ML_DIR / f"{prefix}_s{s}" / "features.json").read_text()))
                           for s in V5_SEEDS]
-    return _cache["q_fm"]
+    return _cache[prefix]
 
 
 def _load_q_mkt31e():
@@ -329,8 +340,10 @@ def bucket_probs(conn, city, cfg, buckets, metars):
         qs = np.mean([mq.predict_q(m, pd.DataFrame([row4]).reindex(columns=f), [row["fc_mean"]])[0]
                       for m, f in _load_q_mkt31e()], axis=0)
         v4e = [mq.bucket_prob(list(qs), unit, b["lo"], b["hi"]) for b in buckets]
-    v5 = None
-    if all((ML_DIR / f"q_fm_s{s}" / "features.json").exists() for s in V5_SEEDS):
+    v5 = v531 = None
+    for prefix in ("q_fm", V531_PREFIX):
+        if not all((ML_DIR / f"{prefix}_s{s}" / "features.json").exists() for s in V5_SEEDS):
+            continue
         try:  # отдельный трек: ошибка v5 не ломает v1-v4e
             import weather_ml_q as mq
             prices = {(b["lo"], b["hi"]): b["market_p"] for b in buckets}
@@ -338,14 +351,30 @@ def bucket_probs(conn, city, cfg, buckets, metars):
             row5 = {**row, **mf}
             b5 = v5_base(row["fc_mean"], mf.get("mkt_mean_vs_fc"))
             qs = np.mean([mq.predict_q(m, pd.DataFrame([row5]).reindex(columns=f), [b5])[0]
-                          for m, f in _load_q_fm()], axis=0)
-            v5 = [mq.bucket_prob(list(qs), unit, b["lo"], b["hi"]) for b in buckets]
+                          for m, f in _load_q_fm(prefix)], axis=0)
+            probs = [mq.bucket_prob(list(qs), unit, b["lo"], b["hi"]) for b in buckets]
+            if prefix == "q_fm":
+                v5 = probs
+            else:
+                v531 = probs
         except Exception as e:
-            print(f"{city}: ошибка v5 — {e}", file=sys.stderr)
-    return v1, mu_c * k + off, v2, v3, v4, v4e, v5
+            print(f"{city}: ошибка v5 ({prefix}) — {e}", file=sys.stderr)
+    return v1, mu_c * k + off, v2, v3, v4, v4e, v5, v531
 
 
 if __name__ == "__main__":
+    if "--train-v531" in sys.argv:
+        # 27.10: только v5 с 31 листом (кошелёк ml5_31) — разовый запуск при вводе
+        _conn = sqlite3.connect(DB_PATH, timeout=60)
+        _conn.row_factory = sqlite3.Row
+        ml.USE_MKT = True
+        _dfm = ml.build(_conn)
+        _dfm = _dfm[_dfm["actual_c"].notna()]
+        ml.FEATURES = ml.features(_dfm)
+        _conn.close()
+        train_v5(_dfm, V4_EXTRA, V531_PREFIX)
+        ml.USE_MKT = False
+        sys.exit()
     if "--train-v5" in sys.argv:
         # только v5 (не трогая рабочие v1-v4e) — разовый запуск при вводе v5
         _conn = sqlite3.connect(DB_PATH, timeout=60)

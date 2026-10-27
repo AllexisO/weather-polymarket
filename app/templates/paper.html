@@ -225,6 +225,11 @@
     color: var(--bk-text); text-decoration: none; }
   .bk a.wal:hover { border-color: rgba(255, 213, 138, .6); color: var(--bk-text); }
   .bk a.wal.sel { border-color: var(--bk-accent); box-shadow: inset 0 0 0 1px var(--bk-accent); }
+  /* 27.10 (Alex): выключенный кошелёк («Не прошли») — штриховка персиковым (цвет «потеряли/сбой») и рамка */
+  .off-h { display: block; margin-top: 4px; font-size: 13px; font-weight: 600; color: var(--bk-neg); }
+  h1 .off-h { font-size: 16px; margin-top: 6px; }
+  .bk a.wal.off { background: repeating-linear-gradient(135deg, rgba(244, 167, 127, .07) 0 10px, transparent 10px 20px), var(--bk-card);
+    box-shadow: inset 0 0 0 1px rgba(244, 167, 127, .35); }
   .wal-top { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
   .wal-name { font-weight: 600; font-size: 13px; line-height: 1.3; }
   .wal-bal { font-family: var(--bk-num); font-weight: 600; font-size: 14px; white-space: nowrap; }
@@ -468,14 +473,15 @@
 </style>
 
 <div class="bk">
+  {% if cur or page != '/failed' %}{# 27.10 (Alex): на списке «Не прошли» — без заголовка и подписи, только разделы #}
   <div class="top">
     <div>
-      {% if cur %}<a class="back" href="/paper">← Все кошельки</a>{% endif %}
+      {% if cur %}<a class="back" href="{{ page }}">← {{ 'Не прошли' if page == '/failed' else 'Все кошельки' }}</a>{% endif %}
       {% set nw = wallets | length %}
-      <h1>{{ cur.name if cur else 'Кошельки' }}{% if not cur %} <span class="h1-cnt num">{{ nw }} {{ 'кошелёк' if nw % 10 == 1 and nw % 100 != 11 else ('кошелька' if nw % 10 in [2, 3, 4] and nw % 100 not in [12, 13, 14] else 'кошельков') }}</span>{% endif %}</h1>
+      <h1>{{ cur.name if cur else 'Кошельки' }}{% if cur and cur.off %}<span class="off-h">{{ cur.off }}</span>{% endif %}{% if not cur %} <span class="h1-cnt num">{{ nw }} {{ 'кошелёк' if nw % 10 == 1 and nw % 100 != 11 else ('кошелька' if nw % 10 in [2, 3, 4] and nw % 100 not in [12, 13, 14] else 'кошельков') }}</span>{% endif %}</h1>
       <p>{% if cur %}{{ cur.desc }}{% else %}Виртуальные деньги: $100 на кошелёк, ставка $2. Покупка — по живым ценам Polymarket, с комиссией. Нажмите на кошелёк, чтобы увидеть всё о нём.{% endif %}</p>
     </div>
-    {% if cur %}
+    {% if cur and page != '/failed' %}
     <form class="picker" method="get" action="/paper">
       <label for="w">Другой кошелёк</label>
       <select id="w" name="w" onchange="this.form.submit()">
@@ -489,6 +495,7 @@
     </form>
     {% endif %}
   </div>
+  {% endif %}
 
   {% if alerts %}
   <div class="alerts" role="alert">
@@ -496,7 +503,7 @@
     <ul>{% for a in alerts %}<li>{{ a.msg }} <span>(с {{ a.since }})</span></li>{% endfor %}</ul>
   </div>
   {% endif %}
-  {% if fresh %}
+  {% if fresh and page != '/failed' %}
   {# 2026-09-27 (просьба Alex): «когда обновлялись данные» — отдельным блоком, ячейками #}
   <section class="fresh" aria-labelledby="s-fresh">
     <div class="fresh-h"><h2 id="s-fresh">Когда обновлялись данные</h2><a href="/status">здоровье системы →</a></div>
@@ -547,6 +554,37 @@
     </div>
   </section>
 
+  <!-- 1а'. Не прошли (27.10, просьба Alex): вместо «Итог по дням» — почему не прошёл, почему выключен, итог по неделям -->
+  {% if failed %}
+  <section class="sec" aria-labelledby="s-failed">
+    <div class="sec-head"><h2 id="s-failed">Почему не прошёл и почему выключен</h2></div>
+    <div class="pane">
+      {% if failed.rule %}<p>{{ failed.rule }}</p>{% endif %}
+      <p>{{ failed.threshold }}{% if failed.failed %} <b>{{ failed.failed }}</b>{% endif %}</p>
+      <p>{{ failed.off }}</p>
+      {% if failed.model %}<p>{{ failed.model }}</p>{% endif %}
+      {% if fweeks %}
+      <table class="bets">
+        <thead><tr><th>Неделя</th><th class="r">Ставок</th><th class="r">Рынок обещал выигрышей</th><th class="r">Выиграли</th><th class="r">Проиграли</th><th class="r">Итог</th></tr></thead>
+        <tbody>
+          {% for r in fweeks[0] + [fweeks[1]] %}
+          <tr{% if loop.last %} style="font-weight: 600;"{% endif %}>
+            <td data-l="Неделя">{{ r.label }}</td>
+            <td class="r num" data-l="Ставок">{{ r.n }}</td>
+            <td class="r num" data-l="Рынок обещал выигрышей">≈ {{ '%.0f' | format(r.exp) }}</td>
+            <td class="r num" data-l="Выиграли">{{ r.won }}</td>
+            <td class="r num neg" data-l="Проиграли">−${{ '%.2f' | format(r.lost_usd) }}</td>
+            <td class="r num {{ 'pos' if r.pnl > 0.005 else ('neg' if r.pnl < -0.005 else '') }}" data-l="Итог">{{ money(r.pnl) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <p class="foot">«Рынок обещал» — сумма цен купленных долей: цена доли ≈ шанс по мнению рынка. «Проиграли» — деньги, сгоревшие в неугаданных ставках (с комиссией); «Итог» — всё вместе. Только закрытые ставки, неделя — по дню маркета.</p>
+      {% endif %}
+    </div>
+  </section>
+  {% endif %}
+
   <!-- 1а. Итог по дням (2026-09-27, просьба Alex, по макету Payoneer) -->
   {% if week %}
   <section class="sec" aria-labelledby="s-week">
@@ -565,7 +603,8 @@
   {% endif %}
 
 
-  <!-- 2. Открытые ставки -->
+  <!-- 2. Открытые ставки (27.10, Alex: у выключенного кошелька — не показываем) -->
+  {% if not (cur and cur.off) %}
   <section class="sec" aria-labelledby="s-open">
     <div class="sec-head">
       <h2 id="s-open">Открытые ставки</h2>
@@ -617,6 +656,7 @@
       {% endif %}
     </div>
   </section>
+  {% endif %}
 
   <!-- 3. История -->
   <section class="sec" aria-labelledby="s-hist">
@@ -778,8 +818,8 @@
   <div class="grp"><h2 id="grp-{{ loop.index }}">{{ g }}</h2><span class="cnt num">{{ n }} {{ 'кошелёк' if n % 10 == 1 and n % 100 != 11 else ('кошелька' if n % 10 in [2, 3, 4] and n % 100 not in [12, 13, 14] else 'кошельков') }}</span></div>
   <div class="wal-grid">
     {% for c in cs %}
-    <a class="wal" href="?w={{ c.key }}">
-      <div class="wal-top"><span class="wal-id"><span class="wal-name">{{ c.name | replace('—', '-') }}</span><code class="wal-code">{{ c.key }}</code></span><span class="wal-bal">{{ cash_big(c.balance) }}{{ move(c.move) }}</span></div>
+    <a class="wal{{ ' off' if page == '/failed' else '' }}" href="?w={{ c.key }}">
+      <div class="wal-top"><span class="wal-id"><span class="wal-name">{{ c.name | replace('—', '-') }}</span>{% if c.off %}<span class="off-h">{{ c.off }}</span>{% endif %}<code class="wal-code">{{ c.key }}</code></span><span class="wal-bal">{{ cash_big(c.balance) }}{{ move(c.move) }}</span></div>
       <div class="wb-chart">{# 2026-09-28 (Alex): график с итогом — отдельным блоком #}
       <div class="wal-mid">
         {% if c.spark %}<span class="spk"><svg class="spark" viewBox="0 0 {{ c.spark.w }} {{ c.spark.h }}" preserveAspectRatio="none" aria-hidden="true"><line vector-effect="non-scaling-stroke" x1="0" x2="{{ c.spark.w }}" y1="{{ c.spark.base }}" y2="{{ c.spark.base }}"/><path pathLength="1" class="{{ 'up' if c.spark.up else 'down' }}" d="{{ c.spark.path }}"/></svg><i class="spk-dot {{ 'up' if c.spark.up else 'down' }}" style="left: {{ 100 * c.spark.end[0] / c.spark.w }}%; top: {{ 100 * c.spark.end[1] / c.spark.h }}%" aria-hidden="true"></i></span>
@@ -816,6 +856,36 @@
   </div>
   </section>
   {% endfor %}
+  {% if models_failed %}
+  {# 27.10 (Alex): модели — отдельно от кошельков; карточка ведёт на страницу модели со всей её историей #}
+  <section class="grp-box" aria-labelledby="grp-models">
+  <div class="grp"><h2 id="grp-models">Модели</h2></div>
+  <div class="wal-grid">
+    {% for c in models_failed %}
+    <a class="wal off" href="/models/{{ c.key }}">
+      <div class="wal-top"><span class="wal-id"><span class="wal-name">{{ c.name }}</span><span class="off-h">{{ c.off }}</span><code class="wal-code">{{ c.badge }}</code></span></div>
+      <p class="wal-meta">{{ c.short }}</p>
+    </a>
+    {% endfor %}
+  </div>
+  </section>
+  {% endif %}
+  {% if mm_failed %}
+  {# 27.10 (решение Alex): бот-мейкер выключен целиком — карточки ведут на его страницы /mm/<кошелёк> #}
+  <section class="grp-box{{ ' first' if not groups else '' }}" aria-labelledby="grp-mm">
+  <div class="grp"><h2 id="grp-mm">Бот-мейкер</h2></div>
+  <div class="wal-grid">
+    {% for c in mm_failed %}
+    <a class="wal off" href="/mm/{{ c.key }}">
+      <div class="wal-top"><span class="wal-id"><span class="wal-name">{{ c.name }}</span><span class="off-h">{{ c.off }}</span><code class="wal-code">{{ c.key }}</code></span><span class="wal-pnl num {{ 'pos' if c.pnl > 0.005 else ('neg' if c.pnl < -0.005 else '') }}">{{ money(c.pnl) }}</span></div>
+      <p class="wal-meta">{% if c.spent %}потрачено <b>${{ '{:,.0f}'.format(c.spent).replace(',', ' ') }}</b> · маркетов <b>{{ c.m }}</b>{% if c.roi is not none %} · <b class="{{ 'pos' if c.roi > 0 else 'neg' }}">{{ '%+.1f' | format(c.roi) }}%</b>{% endif %}{% else %}закрытых маркетов нет{% endif %}</p>
+      <p class="wal-meta">{{ c.why }}</p>
+    </a>
+    {% endfor %}
+  </div>
+  </section>
+  {% endif %}
+  {% if page != '/failed' %}
   <section class="sec" style="margin-top: 36px;">
     <details class="fold">
       <summary>Как это работает</summary>
@@ -830,6 +900,7 @@
       </div>
     </details>
   </section>
+  {% endif %}
   {% endif %}
 </div>
 

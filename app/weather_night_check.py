@@ -330,9 +330,14 @@ def _ro(path):
     return sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=30) if Path(path).exists() else None
 
 
+BOTS_OFF = True   # 27.10 (решение Alex): бот-мейкер выключен целиком — его проверки не нужны
+
+
 def check_bots(c, now):
     """2026-09-30 (просьба Alex: «проверка, которая работает каждый день»): то, что проверялось руками 30.09 — боты-мейкеры
     работают, заявки не двоятся и не пересекаются, расчёт не отстаёт, списки не погодных маркетов свежие."""
+    if BOTS_OFF:
+        return
     mm = _ro(DB_PATH.parent / "mm.sqlite3")
     if mm is None:
         add("Боты-мейкеры", "warn", "База ботов не найдена", "data/db/mm.sqlite3")

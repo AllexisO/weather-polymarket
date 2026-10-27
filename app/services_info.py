@@ -16,9 +16,9 @@ SERVICES = [
         {"name": "Polymarket — сделки и трейдеры", "site": "https://polymarket.com", "what": "все сделки погоды с кошельками, сделки трейдеров для повтора",
          "apis": ["data-api.polymarket.com/trades, /activity"], "mode": "live", "key": None, "price": "бесплатно",
          "scripts": "weather_trades_history, weather_copy, weather_mm_settle"},
-        {"name": "Polymarket — живой поток", "site": "https://polymarket.com", "what": "стаканы и сделки в реальном времени: бот-мейкер, гонка после замера, свои стаканы, повтор за секунды",
+        {"name": "Polymarket — живой поток", "site": "https://polymarket.com", "what": "стаканы и сделки в реальном времени: гонка после замера, свои стаканы, повтор за секунды",
          "apis": ["wss ws-subscriptions-clob …/ws/market", "wss ws-live-data (сделки)"], "mode": "live", "key": None, "price": "бесплатно",
-         "scripts": "weather_mm_ws, weather_obs_rt, weather_copy_live"},
+         "scripts": "weather_obs_rt, weather_copy_live"},
     ]),
     ("Прогнозы погоды", [
         {"name": "Open-Meteo", "site": "https://open-meteo.com", "what": "прогнозы ~16 моделей, ансамбли, прошлые прогнозы для обучения",

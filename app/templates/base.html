@@ -336,8 +336,8 @@
      <div class="side-block">
       {{ navlink('/paper', 'кошельки', 'wallet', path == '/paper', nc.wallets) }}
       {{ navlink('/real', 'реальные деньги', 'target', path == '/real') }}
+      {{ navlink('/failed', 'не прошли', 'close', path == '/failed') }}
       {{ navlink('/models', 'модели', 'bar-chart', path.startswith('/models')) }}
-      {{ navlink('/mm', 'бот-мейкер', 'results', path == '/mm') }}
       {{ navlink('/llm', 'LLM', 'message', path == '/llm') }}
       {{ navlink('/skill', 'скилл', 'message', path == '/skill') }}
       {{ navlink('/diary', 'дневник ИИ', 'notes', path == '/diary') }}

@@ -15,6 +15,7 @@ JOBS = [
     ("weather_poly_resolve", "Итоги маркетов", "weather_poly_resolve.py", "каждые 2 ч, :05", 160, "weather_poly_resolve.log"),
     ("weather_paper", "Ставки и расчёт кошельков", "weather_paper.py", "каждые 2 ч, :10", 160, "weather_paper.log"),
     ("weather_real_dry", "Настоящие заявки вхолостую (общий банк: собрать и подписать заявку Polymarket, не отправлять)", "weather_real_dry.py", "каждые 2 ч, :25", 160, "weather_real_dry.log"),
+    ("weather_pool_refill", "Докупка общего банка по живому стакану (двойник pool_refill: та же доля не дороже первой покупки, 6 ч)", "weather_pool_refill.py", "каждые 30 мин, :12 и :42", 45, "weather_pool_refill.log"),
     ("weather_obs_live", "Кошелёк по живым замерам", "weather_obs_live.py", "каждые 2 мин", 10, "weather_obs_live.log"),
     ("weather_copy_live", "Слушатель сделок (повтор за секунды)", "weather_copy_live.py", "всегда (copier)", 5, None),
     ("weather_copy", "Повтор за сильными трейдерами (запасной опрос)", "weather_copy.py", "каждые 5 мин", 15, "weather_copy.log"),
@@ -40,12 +41,11 @@ JOBS = [
     ("weather_llm_hour", "LLM-прогноз каждый час (кошельки llm_gem, llm_ds и смесь llm_mix, OpenRouter, 5 городов США)", "weather_llm_hour.py", "каждый час в :56 (первый час дня — в :05)", 75, "weather_llm_hour.log"),
     ("weather_obs_wethr", "Живые замеры — wethr (кошелёк obs_wethr, платный поток wethr.net, 5 городов США)", "weather_obs_wethr.py", "каждый час с :07, 57 мин", 75, "weather_obs_wethr.log"),
     ("weather_obs_atis", "Живые замеры — ATIS (кошелёк obs_atis, atis.info, 11 городов США; до проверки — вхолостую)", "weather_obs_atis.py", "каждый час в :48, 15 мин", 75, "weather_obs_atis.log"),
-    ("weather_mm_ml", "Обучение бота-мейкера с моделью (кошелёк mm_ws_ml)", "weather_mm_ml.py --train", "каждый день 03:40", 1560, "weather_mm_ml.log"),
+    # weather_mm_ml, weather_mm_ws — выключены 27.10 (решение Alex): бот-мейкер целиком на «Не прошли»; mm_settle досчитывает до 30.10
     # weather_obs_rt — выключен 15.10 (решение Alex): порог PRD §9 п.7 не прошёл; модуль остаётся — его функции берёт weather_obs_wethr
     ("weather_netatmo", "Частные станции Netatmo у аэропортов (сбор для проверки)", "weather_netatmo.py", "каждые 5 мин", 20, "weather_netatmo.log"),
     # 02.10: weather_mm_paper (старый бот-мейкер, опрос раз в 30 с) отключён решением Alex — в кроне закомментирован
-    ("weather_mm_ws", "Бот-мейкер на живом потоке", "weather_mm_ws.py", "каждый час, 57 мин", 75, "weather_mm_ws.log"),
-    ("weather_mm_settle", "Бот-мейкер: расчёт исполнений", "weather_mm_settle.py", "каждые 2 ч, :25", 160, "weather_mm_settle.log"),
+    ("weather_mm_settle", "Бот-мейкер: расчёт исполнений (бот выключен 27.10, досчитывает до 30.10)", "weather_mm_settle.py", "каждые 2 ч, :25", 160, "weather_mm_settle.log"),
 ]
 
 # имя файла скрипта -> key (у ночного обучения они разные)

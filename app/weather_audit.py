@@ -59,6 +59,9 @@ def _same(a, b):
     return abs(a - b) < 1e-6
 
 
+from wallet_close import EARLY_CLOSE   # noqa: E402
+
+
 def check_wallets(c, out, now):
     rows = [dict(r) for r in c.execute("SELECT * FROM paper_trades")]
     taker = set(wp.WALLETS) | set(wp.NO_WALLETS)
@@ -121,6 +124,8 @@ def check_wallets(c, out, now):
                     v.append(f"{tag}: заявка висит после полудня")
         for r in closed:
             tag = f"{r['city']} {r['local_date']}"
+            if EARLY_CLOSE in (r.get("reason") or ""):   # 27.10: продана досрочно (wallet_close.py) — выплата по стакану, не по итогу
+                continue
             if r["status"] == "void":
                 if abs((r["payout"] or 0) - 0.5 * (r["shares"] or 0)) > 0.02:
                     v.append(f"{tag}: при отмене выплата ${r['payout'] or 0:.2f}")

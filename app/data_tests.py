@@ -37,7 +37,8 @@ def settled_bets(c):
     bad, n = [], 0
     for w, city, d, lo, hi, side, st, sh, pay in c.execute(
             "SELECT wallet, city, local_date, bucket_lo, bucket_hi, COALESCE(side, 'yes'), status, shares, payout FROM paper_trades "
-            "WHERE status IN ('won', 'lost')"):
+            # 27.10: проданные досрочно (wallet_close.py, метка EARLY_CLOSE) — выплата по стакану, не по итогу
+            "WHERE status IN ('won', 'lost') AND COALESCE(reason, '') NOT LIKE '%закрыта досрочно%'"):
         o = out.get((city, d))
         if o is None:   # итог пишет weather_poly_resolve раз в 2 ч, расчёт — по закрытому маркету раньше
             continue
