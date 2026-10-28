@@ -138,6 +138,7 @@ flowchart LR
 | `weather_poly_outcomes` | `weather_poly_resolve.py` (+ `weather_obs_live.py`, `weather_price_history.py`) | **итог** Polymarket: какой вариант выиграл (с 15.10 и доп. города Гонконг/Тайбэй — последние 10 дней) |
 | `poly_trades`, `poly_trades_days`, `poly_trade_wallets`, `poly_market_final` | `weather_trades_history.py` | настоящие сделки — по ним проверяется преимущество |
 | `price_history`, `price_history_days` | `weather_price_history.py` | история цен (последние сделки, могут быть протухшими) |
+| `fresh_hres_live` | `weather_fresh_live.py` (каждый час, :47, окно 07-14 местного) | свежий прогон ECMWF HRES к 08:00 (тот же выбор прогона, что `weather_fresh_fc.py`): `fresh` дня d и `stale` дня d+1, `fetched_utc` — когда получили (позже 08:00 — к решению не успел бы); ~48 запросов Open-Meteo в сутки; для проверки v7 с подвижным k на ноябре (журнал 28.10), ставок нет |
 | `sharp_wallets` | `weather_sharp_rank.py` | 30 сильных трейдеров для кошелька `copy` |
 
 ### Модели и результаты
@@ -212,8 +213,14 @@ $100 на кошелёк (`ml`, `mm_mk`, `mm` — $300, `copy` — $1000, `ml3` 
 | `ml4` / `ml4_cal`, `ml4e` / `ml4e_cal` | v4 и v4e; и их смеси с рынком, порог 3 п.п. |
 | **`ml5`** / `ml5_cal` | **главная с 20.10**: v5 «от рынка» (`train_v5`); чистая (правила ml3) и смесь 35/65 |
 | `no_cheap5` / `no_mid5` / `no_big5` / `ml5_cal30` | с 20.10 10:00: двойники `no_cheap` / `no_mid` / `no_big` / `ml3_cal30` — то же правило на смеси v5 (`ml5c_model_p`) |
-| `ml5_31` | с 27.10 21:00: правило `ml5`, шанс — v5 с 31 листом (`V531_PREFIX`, папки `q_fm31_s*`, колонка `ml531_model_p` в `snapshots` и `snapshots_fast`) |
-| `ml5_31_cal` | с 28.10 21:00: правило `ml5_cal` (смесь 35/65 с рынком, перевес от 3 п.п.), смесь на v5 с 31 листом (колонка `ml531c_model_p` в `snapshots` и `snapshots_fast`) |
+| `ml5_31` | с 27.10 20:00: правило `ml5`, шанс — v5 с 31 листом (`V531_PREFIX`, папки `q_fm31_s*`, колонка `ml531_model_p` в `snapshots` и `snapshots_fast`) |
+| `ml5_cal_sz` | с 29.10 20:00: правило `ml5_cal`, ставка $1 / $2 / $3 по сдвигу центра v5 (`ml5_model_p`, `center_c`) от центра рынка ≤ 0.18 / 0.18-0.36 / > 0.36°C (`STAKE_BY_SHIFT`) |
+| `ml5_cal_ask` | с 29.10 20:00: правило `ml5_cal`, но вариант — наибольший перевес смеси над лучшей ценой продажи из снимка (`best_ask`) + комиссия 0.05·p(1−p); цена продажи 10-95¢; потолок покупки — `ask_limit(смесь − 3 п.п.)` (`PICK_ASK`) |
+| `ml5_31_cal` | с 28.10 20:00: правило `ml5_cal` (смесь 35/65 с рынком, перевес от 3 п.п.), смесь на v5 с 31 листом (колонка `ml531c_model_p` в `snapshots` и `snapshots_fast`) |
+| `ml5_31_mk` | с 28.10 20:00: правило `ml5_31_cal`, но рынок в смеси поправлен по перекосу (`blend_with_market_cal`: logit p′ = 0.066 + 1.061·logit p), колонка `ml531m_model_p` в `snapshots` и `snapshots_fast` |
+| `ml5_p1` | с 29.10 20:00: правило `ml5_31_cal`, шанс — В2 = 0.25·`ml531c` + 0.75·П1 (вес постоянный, решение Alex 28.10) (`weather_p1.py`: LightGBM binary на вариант, 9 признаков, модели `data/ml/p1_s{11,22,33}.txt`, обучены 28.10 на 05-10, без ночного переобучения); колонки `p1_model_p`, `v2b_model_p` в `snapshots` и `snapshots_fast` |
+| `ml5_p1o` | с 29.10 20:00: как `ml5_p1`, но П1 с 10-м признаком «середина варианта − замер obs_t к 08:00» (модели `data/ml/p1o_s*.txt`); колонки `p1o_model_p`, `v2o_model_p` |
+| `ml5_p1o_no` | с 29.10 20:00: «нет» на шансах `v2o_model_p` (NO_WALLETS): цена «да» 15-65¢ (`NO_BAND`), перевес «нет» ≥ 5 п.п., без потолка «цена + 1¢» (`NO_BAND_NOCAP`) |
 | `ml5_25` | с 26.10 03:30: правило `ml5` (чистая v5, перевес от 10 п.п.), но лучший вариант дешевле 25¢ — пропуск (`MIN_PRICE_BY_WALLET`) |
 | `ml5_no` | с 21.10 17:00: двойник `ml3_no` — «нет» при перевесе ≥ 10 п.п. на чистой v5 (`ml5_model_p`) |
 | `ml3_cal` | смесь v3 с рынком, порог 3 п.п.; `ml3_cal15` / `ml3_cal30` — не дешевле 15¢ / «да» от 30¢; `ml3_cal_k` — Келли ×0.25 |

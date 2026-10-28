@@ -198,8 +198,10 @@ def fetch_polymarket_buckets(poly_slug, dt_local):
         # (outcomePrices — середина/последняя сделка). Нужна виртуальному
         # портфелю (weather_paper.py), чтобы не покупать дешевле, чем дал бы рынок.
         best_ask = m.get("bestAsk")
+        best_bid = m.get("bestBid")  # 28.10: лучший покупатель «да» — цена «нет» = 1 − bid (проверка «нет» на ml5_p1o)
         buckets.append({"lo": rng[0], "hi": rng[1], "market_p": yes_price, "question": m["question"],
-                        "best_ask": float(best_ask) if best_ask not in (None, "") else None})
+                        "best_ask": float(best_ask) if best_ask not in (None, "") else None,
+                        "best_bid": float(best_bid) if best_bid not in (None, "") else None})
     return {"event_vol": events[0].get("volume", 0), "buckets": buckets}
 
 
@@ -307,6 +309,18 @@ def ensure_schema(conn):
         # 28.10: смесь v5 с 31 листом и рынка 35/65 — кошелёк ml5_31_cal
         for c in ("ml531c_model_p", "ml531c_edge"):
             conn.execute(f"ALTER TABLE snapshots ADD COLUMN {c} REAL")
+    if "ml531m_model_p" not in cols:
+        # 28.10: смесь v5_31 с рынком, поправленным по перекосу цены (weather_ml_live.blend_with_market_cal) — кошелёк ml5_31_mk
+        for c in ("ml531m_model_p", "ml531m_edge"):
+            conn.execute(f"ALTER TABLE snapshots ADD COLUMN {c} REAL")
+    if "p1o_model_p" not in cols:
+        # 28.10: П1 с признаком замера к 08:00 и её В2 — кошелёк ml5_p1o
+        for c in ("p1o_model_p", "v2o_model_p", "v2o_edge"):
+            conn.execute(f"ALTER TABLE snapshots ADD COLUMN {c} REAL")
+    if "p1_model_p" not in cols:
+        # 28.10: П1 «поправка к рынку» (weather_p1.py) и В2 = (1 − w)·ml531c + w·П1 — кошелёк ml5_p1
+        for c in ("p1_model_p", "v2b_model_p", "v2b_edge"):
+            conn.execute(f"ALTER TABLE snapshots ADD COLUMN {c} REAL")
     if "ml3c_model_p" not in cols:
         # 2026-09-26: смесь главной модели с рынком (weather_ml_live.ML3_BLEND_W) — кошелёк ml3_cal
         conn.execute("ALTER TABLE snapshots ADD COLUMN ml3c_model_p REAL")
@@ -396,13 +410,13 @@ def run():
                 print(f"{city}: ошибка запроса (микс моделей) — {e}", file=sys.stderr)
 
             ml_probs = ml2_probs = ml3_probs = ml3c_probs = ml4_probs = ml4c_probs = ml4e_probs = ml4ec_probs = None
-            ml5_probs = ml5c_probs = ml531_probs = ml531c_probs = None
+            ml5_probs = ml5c_probs = ml531_probs = ml531c_probs = ml531m_probs = p1_probs = v2b_probs = p1o_probs = v2o_probs = None
             try:
                 from weather_ml_live import bucket_probs as ml_bucket_probs
                 ml_res = ml_bucket_probs(conn, city, cfg, market["buckets"],
                                          metars_by_icao.get(OBS_CITIES[city]["icao"], []))
                 if ml_res is not None:
-                    ml_probs, ml_mu, ml2_probs, ml3_probs, ml4_probs, ml4e_probs, ml5_probs, ml531_probs = ml_res
+                    ml_probs, ml_mu, ml2_probs, ml3_probs, ml4_probs, ml4e_probs, ml5_probs, ml531_probs, p1_probs, p1o_probs = ml_res
                     ml3c_probs = ml4c_probs = None
                     from weather_ml_live import blend_with_market
                     if ml3_probs:
@@ -415,6 +429,13 @@ def run():
                         ml5c_probs = blend_with_market(ml5_probs, [b["market_p"] for b in market["buckets"]])
                     if ml531_probs:
                         ml531c_probs = blend_with_market(ml531_probs, [b["market_p"] for b in market["buckets"]])
+                        from weather_ml_live import blend_with_market_cal
+                        ml531m_probs = blend_with_market_cal(ml531_probs, [b["market_p"] for b in market["buckets"]])
+                    from weather_p1 import blend_v2
+                    if p1_probs and ml531c_probs:
+                        v2b_probs = blend_v2(ml531c_probs, p1_probs)
+                    if p1o_probs and ml531c_probs:
+                        v2o_probs = blend_v2(ml531c_probs, p1o_probs)
                     print(f"{city}: обучаемая модель — прогноз максимума {ml_mu:.1f}")
             except Exception as e:  # отдельный трек: его ошибка не должна ломать снимок
                 print(f"{city}: ошибка обучаемой модели — {e}", file=sys.stderr)
@@ -508,6 +529,14 @@ def run():
                         (ml531_probs[i_b] - b["market_p"]) if ml531_probs else None,
                         ml531c_probs[i_b] if ml531c_probs else None,
                         (ml531c_probs[i_b] - b["market_p"]) if ml531c_probs else None,
+                        ml531m_probs[i_b] if ml531m_probs else None,
+                        (ml531m_probs[i_b] - b["market_p"]) if ml531m_probs else None,
+                        p1_probs[i_b] if p1_probs else None,
+                        v2b_probs[i_b] if v2b_probs else None,
+                        (v2b_probs[i_b] - b["market_p"]) if v2b_probs else None,
+                        p1o_probs[i_b] if p1o_probs else None,
+                        v2o_probs[i_b] if v2o_probs else None,
+                        (v2o_probs[i_b] - b["market_p"]) if v2o_probs else None,
                     )
                 )
             conn.executemany(
@@ -516,8 +545,8 @@ def run():
                 (ts_utc, city, local_date, local_hour, unit, bucket_lo, bucket_hi, market_p, model_p, edge, event_vol, ensemble_n,
                  wn2_model_p, wn2_edge, wn2_ensemble_n, emos_model_p, emos_edge, best_ask, mm_model_p, mm_edge, ml_model_p, ml_edge, ml2_model_p, ml2_edge, ml3_model_p, ml3_edge, ml3c_model_p, ml3c_edge, ml4_model_p, ml4_edge, ml4c_model_p, ml4c_edge,
                  ml4e_model_p, ml4e_edge, ml4ec_model_p, ml4ec_edge, ens_model_p, ens_edge,
-                 ml5_model_p, ml5_edge, ml5c_model_p, ml5c_edge, ml531_model_p, ml531_edge, ml531c_model_p, ml531c_edge)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 ml5_model_p, ml5_edge, ml5c_model_p, ml5c_edge, ml531_model_p, ml531_edge, ml531c_model_p, ml531c_edge, ml531m_model_p, ml531m_edge, p1_model_p, v2b_model_p, v2b_edge, p1o_model_p, v2o_model_p, v2o_edge)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 rows,
             )

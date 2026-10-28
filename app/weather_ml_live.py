@@ -19,6 +19,7 @@
 """
 
 import json
+import math
 import time
 import os
 import sqlite3
@@ -130,6 +131,30 @@ ML3_BLEND_W = 0.35
 def blend_with_market(model_probs, market_prices, w=ML3_BLEND_W):
     tot = sum(market_prices) or 1.0
     mix = [w * p + (1 - w) * m / tot for p, m in zip(model_probs, market_prices)]
+    s = sum(mix) or 1.0
+    return [x / s for x in mix]
+
+
+# 28.10: поправка цены рынка (слой 4 v7, journal 28.10): logit p′ = a + b·logit p, p — доля цены от суммы, затем нормировка.
+# a, b подобраны на 05-08 по logloss (3¢ → 2.6%, 50¢ → 51.6%, 70¢ → 72.4% — фавориты чуть недооценены, дешёвые переоценены).
+# Вне подбора смесь v5_31 с поправленным рынком лучше смеси с сырым: logloss 09 −0.0038, 10 −0.0023; деньги 09 +$14, 10 +$8.5
+# (price_history), настоящие стаканы 05-26.10 +$98.73 против +$83.55. Кошелёк ml5_31_mk.
+MKT_CAL_A, MKT_CAL_B = 0.066, 1.061
+
+
+def market_calibrated(market_prices):
+    tot = sum(market_prices) or 1.0
+    pc = []
+    for m in market_prices:
+        x = min(max(m / tot, 1e-3), 1 - 1e-3)
+        pc.append(1 / (1 + math.exp(-(MKT_CAL_A + MKT_CAL_B * math.log(x / (1 - x))))))
+    s = sum(pc) or 1.0
+    return [x / s for x in pc]
+
+
+def blend_with_market_cal(model_probs, market_prices, w=ML3_BLEND_W):
+    pc = market_calibrated(market_prices)
+    mix = [w * p + (1 - w) * m for p, m in zip(model_probs, pc)]
     s = sum(mix) or 1.0
     return [x / s for x in mix]
 
@@ -340,7 +365,7 @@ def bucket_probs(conn, city, cfg, buckets, metars):
         qs = np.mean([mq.predict_q(m, pd.DataFrame([row4]).reindex(columns=f), [row["fc_mean"]])[0]
                       for m, f in _load_q_mkt31e()], axis=0)
         v4e = [mq.bucket_prob(list(qs), unit, b["lo"], b["hi"]) for b in buckets]
-    v5 = v531 = None
+    v5 = v531 = p1 = p1o = None
     for prefix in ("q_fm", V531_PREFIX):
         if not all((ML_DIR / f"{prefix}_s{s}" / "features.json").exists() for s in V5_SEEDS):
             continue
@@ -357,9 +382,19 @@ def bucket_probs(conn, city, cfg, buckets, metars):
                 v5 = probs
             else:
                 v531 = probs
+                try:  # 28.10: П1 «поправка к рынку» (weather_p1.py, кошелёк ml5_p1) — на медиане v5_31; её ошибка не ломает v5_31
+                    import weather_p1
+                    pr1 = weather_p1.predict(prices, unit, float(np.median(qs)), mf.get("mkt_std"), mf.get("mkt_top_p"), row["fc_std"])
+                    p1 = [pr1[(b["lo"], b["hi"])] for b in buckets] if pr1 else None
+                    # 28.10: вариант «o» (+ середина варианта − замер obs_t к 08:00) — кошелёк ml5_p1o
+                    pr1o = weather_p1.predict(prices, unit, float(np.median(qs)), mf.get("mkt_std"), mf.get("mkt_top_p"), row["fc_std"],
+                                              row.get("obs_t"), "o")
+                    p1o = [pr1o[(b["lo"], b["hi"])] for b in buckets] if pr1o else None
+                except Exception as e:
+                    print(f"{city}: ошибка П1 — {e}", file=sys.stderr)
         except Exception as e:
             print(f"{city}: ошибка v5 ({prefix}) — {e}", file=sys.stderr)
-    return v1, mu_c * k + off, v2, v3, v4, v4e, v5, v531
+    return v1, mu_c * k + off, v2, v3, v4, v4e, v5, v531, p1, p1o
 
 
 if __name__ == "__main__":

@@ -16,6 +16,7 @@ JOBS = [
     ("weather_paper", "Ставки и расчёт кошельков", "weather_paper.py", "каждые 2 ч, :10", 160, "weather_paper.log"),
     ("weather_real_dry", "Настоящие заявки вхолостую (общий банк: собрать и подписать заявку Polymarket, не отправлять)", "weather_real_dry.py", "каждые 2 ч, :25", 160, "weather_real_dry.log"),
     ("weather_pool_refill", "Докупка общего банка по живому стакану (двойник pool_refill: та же доля не дороже первой покупки, 6 ч)", "weather_pool_refill.py", "каждые 30 мин, :12 и :42", 45, "weather_pool_refill.log"),
+    ("weather_fresh_live", "Свежий прогон ECMWF к 08:00 по каждому городу — запись для проверки v7 с подвижным k (без ставок)", "weather_fresh_live.py", "каждый час, :47", 90, "weather_fresh_live.log"),
     ("weather_obs_live", "Кошелёк по живым замерам", "weather_obs_live.py", "каждые 2 мин", 10, "weather_obs_live.log"),
     ("weather_copy_live", "Слушатель сделок (повтор за секунды)", "weather_copy_live.py", "всегда (copier)", 5, None),
     ("weather_copy", "Повтор за сильными трейдерами (запасной опрос)", "weather_copy.py", "каждые 5 мин", 15, "weather_copy.log"),

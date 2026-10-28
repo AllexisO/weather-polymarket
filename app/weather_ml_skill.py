@@ -52,6 +52,9 @@ MODELS = {
     # 27-28.10: v5 с 31 листом и её смесь с рынком
     "ml5_31": (None, None, "ml531_model_p", None),
     "ml5_31_cal": (None, None, "ml531c_model_p", None),
+    "ml5_31_mk": (None, None, "ml531m_model_p", None),  # 28.10: смесь с поправленным рынком
+    "ml5_p1": (None, None, "v2b_model_p", None),  # 28.10: В2 / П1 Argon
+    "ml5_p1o": (None, None, "v2o_model_p", None),  # 28.10: В2 на П1 с утренним замером
     "ens": (None, None, "ens_model_p", None),
     "main": (None, None, "model_p", None),
     "emos": (None, None, "emos_model_p", None),
@@ -66,7 +69,7 @@ def center_c(probs, unit):
     return (m - 32) * 5 / 9 if unit == "fahrenheit" else m
 
 
-MIN_EDGE = {"ml3_cal": 0.03, "ml4_cal": 0.03, "ml4e_cal": 0.03, "ml5_cal": 0.03, "ml5_31_cal": 0.03, "ens": 0.03}
+MIN_EDGE = {"ml3_cal": 0.03, "ml4_cal": 0.03, "ml4e_cal": 0.03, "ml5_cal": 0.03, "ml5_31_cal": 0.03, "ml5_31_mk": 0.03, "ml5_p1": 0.03, "ml5_p1o": 0.03, "ens": 0.03}
 
 
 def row(key, city, date, source, unit, model, market, win_lo, min_shift, fill=None):

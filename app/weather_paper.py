@@ -32,6 +32,7 @@ weather_edge.py и weather_poly_resolve.py.
 
 from jobmark import item_guard
 import json
+import math
 import os
 import sqlite3
 from datetime import datetime, timezone
@@ -147,7 +148,27 @@ WALLETS = {"main": "model_p", "emos": "emos_model_p", "mm": "mm_model_p",
            # 28.10 (Alex «делай двойника», вопрос Argon): правило ml5_cal (смесь 35/65 с рынком, перевес от 3 п.п.), смесь на v5 с 31 листом.
            # Проверка data/research/_v5x_blend_1028.py (05-10.2026): logloss смеси лучше смеси v5 во все 6 месяцев (+0.002…+0.004)
            # и лучше рынка во все 6; деньги правила ml5_cal (верхняя оценка) не хуже в 5 из 6
-           "ml5_31_cal": "ml531c_model_p"}
+           "ml5_31_cal": "ml531c_model_p",
+           # 28.10 (Alex «делай двойника»): правило ml5_cal, но вариант выбирается по перевесу над НАСТОЯЩЕЙ ценой продажи
+           # с комиссией (PICK_ASK), а не над средней ценой. Проверка data/research/_v5x_pick_by_ask_1028.py (стаканы mm_ws 05-26.10):
+           # 64 ставки +$77 (+60.1%) против 101 +$34 (+16.9%) у правила ml5_cal, лучше в 96% перемешиваний город-дней
+           "ml5_cal_ask": "ml5c_model_p",
+           # 28.10 (Alex «давай»): правило ml5_cal, ставка по спору о центре (STAKE_BY_SHIFT): $1 / $2 / $3 при сдвиге центра v5 от
+           # рынка ≤ 0.18 / 0.18-0.36 / > 0.36°C. Проверка data/research/_v5x_patterns_1028.py: чем больше сдвиг, тем больше доход —
+           # 09-10 −9 / +20 / +35%, стакан 05-26.10 −20 / +11 / +45%, живой ml5 −5 / +20 / +72%, живой ml5_cal +14 / +18 / +140%
+           "ml5_cal_sz": "ml5c_model_p",
+           # 28.10 (Alex «запускай»): правило ml5_31_cal, но в смеси рынок с поправкой перекоса цены (weather_ml_live.blend_with_market_cal:
+           # logit p′ = 0.066 + 1.061·logit p). Одна правка к ml5_31_cal. Проверка data/research/_v7_why2_l4_1028.py (вне подбора):
+           # 09 +$14.2, 10 +$8.5 к ml5_31_cal (price_history), стаканы mm_ws 05-26.10 154 ставки +$98.73 (+32.1%) против 126 +$83.55 (+33.2%)
+           "ml5_31_mk": "ml531m_model_p",
+           # 28.10 (Alex «сделай оба»): В2 Argon — 0.25·смесь ml5_31_cal + 0.75·П1 «поправка к рынку» (weather_p1.py; вес 0.75 постоянно —
+           # решение Alex 28.10 до первой ставки, вместо min(1, дни/180)). Правило ml5_31_cal (перевес от 3 п.п.). Проверка
+           # data/research/_argon3/4/5_1028.py: logloss лучше ml5_31_cal во всех 06-10; стаканы 05-26.10 при весе 0.75 — 429 ставок +$119.61 (+13.9%)
+           # против 126 +$83.55 (+33.2%)
+           "ml5_p1": "v2b_model_p",
+           # 28.10 (Alex «да»): ml5_p1 + 10-й признак П1 — середина варианта − замер к 08:00 (weather_p1 вариант «o»). Одна правка к ml5_p1.
+           # Проверка _argon5_1028.py: лучше П1 S+ во всех 06-10 (−0.0061…−0.0009); В2 на нём — стаканы 476 ставок +$153.57 против 478 +$111.77 (при весе 0.85; при живом весе 0.75 — +$120.48 против +$119.61)
+           "ml5_p1o": "v2o_model_p"}
 # отбор городов: насколько смесь давала правильному ответу больше рынка (ml_skill, модель source) за прошлые look дней
 # до понедельника недели решения; ставим в лучшей доле share городов (нужно ≥ min_days дней истории)
 CITY_PICK = {"ml3_city": {"source": "ml3_cal", "look": 45, "share": 0.5, "min_days": 15}}
@@ -180,7 +201,7 @@ def city_pick(conn, wallet, local_date):
     return keep, score, n
 # у этих кошельков решение — по первому снимку, где у модели ЕСТЬ оценка
 # (обучаемая модель считает только с 08:00 местного, нужны утренние замеры)
-NEEDS_FIELD = {"ml5", "ml", "ml2", "ml3", "ml_shift", "ml3_mk", "ml3_cal", "ml3_no", "ml3_cal_k", "ml4", "ml4_cal", "ml4e", "ml4e_cal", "ens", "ml3_cal15", "no_cheap", "fav", "ml3_city", "no_mid", "no_big", "ml3_conf", "ml5_cal", "ml3_cal30", "techno", "ml3_z", "no_cheap5", "no_mid5", "no_big5", "ml5_cal30", "ml5_no", "ml5_25", "ml5_31", "ml5_31_cal"}
+NEEDS_FIELD = {"ml5", "ml", "ml2", "ml3", "ml_shift", "ml3_mk", "ml3_cal", "ml3_no", "ml3_cal_k", "ml4", "ml4_cal", "ml4e", "ml4e_cal", "ens", "ml3_cal15", "no_cheap", "fav", "ml3_city", "no_mid", "no_big", "ml3_conf", "ml5_cal", "ml3_cal30", "techno", "ml3_z", "no_cheap5", "no_mid5", "no_big5", "ml5_cal30", "ml5_no", "ml5_25", "ml5_31", "ml5_31_cal", "ml5_cal_ask", "ml5_cal_sz", "ml5_31_mk", "ml5_p1", "ml5_p1o", "ml5_p1o_no"}
 # 2026-09-25: у v1 разброс постоянный (~1°C), и когда её центр совпадает с
 # рынком, она завышает соседние варианты. На истории (цена первой сделки
 # после решения, $2): такие ставки июль-авг -$100, сентябрь -$82; ставки при
@@ -210,16 +231,31 @@ START_TS = {"ml_shift": SHIFT_START_TS, "ml3_mk": "2026-09-26T12:00:00+00:00", "
             # 27.10 (Alex «давай»): v5 с 31 листом
             "ml5_31": "2026-10-27T18:00:00+00:00",
             # 28.10 (Alex): смесь v5 с 31 листом
-            "ml5_31_cal": "2026-10-28T18:00:00+00:00"}
+            "ml5_31_cal": "2026-10-28T18:00:00+00:00",
+            # 28.10 (Alex): ml5_cal с выбором по цене продажи
+            "ml5_cal_ask": "2026-10-29T18:00:00+00:00",
+            # 28.10 (Alex): ml5_cal со ставкой по спору о центре
+            "ml5_cal_sz": "2026-10-29T18:00:00+00:00",
+            # 28.10 (Alex «запускай»): ml5_31_cal с поправленным рынком — старт одновременно с ml5_31_cal (одни и те же дни)
+            "ml5_31_mk": "2026-10-28T18:00:00+00:00",
+            # 28.10 (Alex «сделай оба»): В2 / П1 Argon
+            "ml5_p1": "2026-10-29T18:00:00+00:00",
+            # 28.10 (Alex «да»): П1 с признаком замера — старт одновременно с ml5_p1 (одни и те же дни)
+            "ml5_p1o": "2026-10-29T18:00:00+00:00",
+            # 28.10 (Alex «делай оба»): «нет» на ml5_p1o
+            "ml5_p1o_no": "2026-10-29T18:00:00+00:00"}
 # свой минимальный перевес: у смеси с рынком перевес меньше, но честный — порог 3 п.п.
 # (на июле-августе +$499 на 1411 ставок по цене A; сентябрь по реальным сделкам +$85 на 177)
 EDGE_BY_WALLET = {"ml3_cal": 0.03, "ml3_cal_k": 0.03, "ml4_cal": 0.03, "ml4e_cal": 0.03, "ens": 0.03, "ml3_cal15": 0.03, "no_cheap": 0.0, "fav": 0.0, "ml3_city": 0.03, "no_mid": 0.03, "no_big": 0.08, "ml3_conf": 0.03, "ml5_cal": 0.03, "ml3_cal30": 0.03, "techno": 0.0, "ml3_z": 0.03,
                   "no_cheap5": 0.0, "no_mid5": 0.03, "no_big5": 0.08, "ml5_cal30": 0.03,
-                  "ml5_31_cal": 0.03}
+                  "ml5_31_cal": 0.03, "ml5_cal_ask": 0.03, "ml5_cal_sz": 0.03, "ml5_31_mk": 0.03, "ml5_p1": 0.03, "ml5_p1o": 0.03, "ml5_p1o_no": 0.05}
 # ставка по перевесу: доля Келли f = (шанс − цена) / (1 − цена), берём ×0.25 от $100, в пределах $0.5-$10.
 # Проверка (смесь, 3 п.п.): июль-авг по реальным сделкам как у $2 (−31% против −30% от вложенного),
 # сентябрь +$107 против +$89 при меньших вложениях. Слабый плюс — отдельный кошелёк для живой проверки.
 STAKE_BY_EDGE = {"ml3_cal_k": (0.25, 100.0, 0.5, 10.0)}  # множитель, банк, мин, макс
+# 28.10: ставка по сдвигу центра модели (поле шансов, °C) от центра рынка — [(до сдвига °C, ставка $), ...], дальше — последняя.
+# Меньше 5 долей не бывает: на дешёвых вариантах $1 поднимается до цены 5 долей (как у всех кошельков)
+STAKE_BY_SHIFT = {"ml5_cal_sz": ("ml5_model_p", [(0.18, 1.0), (0.36, 2.0), (99.0, 3.0)])}
 # 2026-09-26: ставки «против» — покупка доли «нет» на вариант, который главная модель считает
 # переоценённым (перевес ≥10 п.п.). Проверка: июль-авг по реальным сделкам +$48 (137 ставок),
 # сентябрь +$68 (337 ставок, +10% от вложенного) — почти независимо от ставок «да».
@@ -240,18 +276,39 @@ NO_WALLETS = {"ml3_no": "ml3_model_p",
               "no_cheap5": "ml5c_model_p", "no_mid5": "ml5c_model_p", "no_big5": "ml5c_model_p",
               # 21.10 (решение Alex «про ml3_no можно сделать под v5»): правило ml3_no (перевес ≥ 10 п.п., чистая модель без смеси),
               # шанс — v5 «от рынка». ml3_no −3.6% на 380 закрытых (27.09-21.10); пара покажет, лучше ли v5 на «нет»
-              "ml5_no": "ml5_model_p"}
+              "ml5_no": "ml5_model_p",
+              # 28.10 (Alex «делай оба», идея Argon): «нет» на шансах ml5_p1o (В2 на П1 с утренним замером): цена «да» 15-65¢ (NO_BAND),
+              # перевес «нет» ≥ 5 п.п. (EDGE_BY_WALLET), «нет» не дороже шанса «нет» − 5 п.п.; без потолка «цена + 1¢» (NO_BAND_NOCAP) —
+              # в проверке «нет» покупалось по лучшему покупателю «да» (в среднем на 1.8¢ дороже цены). Проверка _argon7_1028.py:
+              # 08-09 861 ставка +$201.50 (+7.1%, z 3.09), стаканы 05-26.10 223 +$73.09 (+10.1%, z 2.17), по глубине стакана +$72.84
+              "ml5_p1o_no": "v2o_model_p"}
 NO_BAND = {"no_cheap": (0.05, 0.15), "no_mid": (0.30, 0.55), "no_big": (0.25, 0.80),
-           "no_cheap5": (0.05, 0.15), "no_mid5": (0.30, 0.55), "no_big5": (0.25, 0.80)}  # цена «да» варианта: только эта полоса
+           "no_cheap5": (0.05, 0.15), "no_mid5": (0.30, 0.55), "no_big5": (0.25, 0.80),
+           "ml5_p1o_no": (0.15, 0.65)}  # цена «да» варианта: только эта полоса
+NO_BAND_NOCAP = {"ml5_p1o_no"}         # 28.10: полоса без потолка «цена + 1¢» — потолок только «шанс − перевес»
 NO_BAND_OVER = 0.01                    # «нет» (и «да» у YES_BAND) покупаем не дороже цены рынка + 1¢
 CONF_SKIP = {"ml3_conf": 0.60}          # фаворит (доля от суммы цен) не ниже этого — рынок уверен, ставки нет
 YES_BAND = {"fav": (0.50, 0.95), "techno": (0.08, 0.3001)}  # цена «да» варианта для кошельков «да» с полосой
 TOP_RANK = {"techno": 4}                # выбор только среди N самых дорогих вариантов (по цене рынка)
 PICK_RATIO = {"techno"}                 # из подходящих — наибольшее отношение смесь / цена (а не разница)
+# 28.10: выбор по перевесу над лучшей ценой продажи из снимка (best_ask) с комиссией PICK_ASK_FEE·p(1−p) — всегда, как после 31.10;
+# «дешевле 10¢» и потолок — тоже по цене продажи; покупка — по живому стакану не дороже цены, при которой с комиссией остаётся перевес
+PICK_ASK = {"ml5_cal_ask"}
+PICK_ASK_FEE = 0.05
+
+
+def ask_fee(a):
+    return PICK_ASK_FEE * a * (1 - a)
+
+
+def ask_limit(cap):
+    """Наибольшая цена продажи a, при которой a + комиссия ≤ cap: корень 0.05·a² − 1.05·a + cap = 0."""
+    k = PICK_ASK_FEE
+    return max(0.0, ((1 + k) - math.sqrt((1 + k) ** 2 - 4 * k * cap)) / (2 * k))
 # 2026-09-26: кошельки обучаемых моделей берут и быстрые снимки (weather_ml_fast.py, таблица
 # snapshots_fast — решение в 08:00-08:30 местного вместо 08:00-10:00). Выбирается САМЫЙ РАННИЙ
 # снимок дня из обеих таблиц; нет быстрого — как раньше, по обычному.
-FAST_WALLETS = {"ml5", "ml", "ml2", "ml3", "ml_shift", "ml3_mk", "ml3_cal", "ml3_no", "ml3_cal_k", "ml4", "ml4_cal", "ml4e", "ml4e_cal", "ml3_cal15", "no_cheap", "fav", "ml3_city", "no_mid", "no_big", "ml3_conf", "ml5_cal", "ml3_cal30", "techno", "ml3_z", "no_cheap5", "no_mid5", "no_big5", "ml5_cal30", "ml5_no", "ml5_25", "ml5_31", "ml5_31_cal"}
+FAST_WALLETS = {"ml5", "ml", "ml2", "ml3", "ml_shift", "ml3_mk", "ml3_cal", "ml3_no", "ml3_cal_k", "ml4", "ml4_cal", "ml4e", "ml4e_cal", "ml3_cal15", "no_cheap", "fav", "ml3_city", "no_mid", "no_big", "ml3_conf", "ml5_cal", "ml3_cal30", "techno", "ml3_z", "no_cheap5", "no_mid5", "no_big5", "ml5_cal30", "ml5_no", "ml5_25", "ml5_31", "ml5_31_cal", "ml5_cal_ask", "ml5_cal_sz", "ml5_31_mk", "ml5_p1", "ml5_p1o", "ml5_p1o_no"}
 # 2026-09-24: двойники тех же трёх моделей с теми же сигналами, но
 # покупают СВОЕЙ заявкой (без комиссии, по нижней цене стакана) — чтобы
 # сравнить с покупкой по чужим заявкам на одних и тех же днях.
@@ -577,25 +634,43 @@ def place(conn, now, only=None):
                                         f"центр модели совпадает с рынком (разница {abs(shift):.1f}°C, нужно от "
                                         f"{SHIFT_WALLETS[wallet]:.1f}°C) — в такие дни v1 на истории проигрывала")
                             continue
-                    b = max(buckets, key=(lambda r: r[field] / max(r["market_p"], 1e-6)) if wallet in PICK_RATIO
-                            else (lambda r: r[field] - r["market_p"]))
+                    if wallet in PICK_ASK:
+                        ab = [r for r in buckets if r["best_ask"] is not None and YES_MIN <= r["best_ask"] <= MAX_PRICE]
+                        if not ab:
+                            record_skip(conn, wallet, city, d["local_date"], d["ts"], "skip",
+                                        f"в снимке нет цены продажи {YES_MIN*100:.0f}–{MAX_PRICE*100:.0f}¢ ни у одного варианта")
+                            continue
+                        b = max(ab, key=lambda r: r[field] - r["best_ask"] - ask_fee(r["best_ask"]))
+                    else:
+                        b = max(buckets, key=(lambda r: r[field] / max(r["market_p"], 1e-6)) if wallet in PICK_RATIO
+                                else (lambda r: r[field] - r["market_p"]))
                     label = ("против " if no_side else "") + fmt_bucket(b["bucket_lo"], b["bucket_hi"], b["unit"])
-                    edge = b[field] - b["market_p"]
+                    edge = b[field] - (b["best_ask"] + ask_fee(b["best_ask"]) if wallet in PICK_ASK else b["market_p"])
                     min_edge = EDGE_BY_WALLET.get(wallet, MIN_EDGE)
                     if edge < min_edge:
                         record_skip(conn, wallet, city, d["local_date"], d["ts"], "skip",
                                     f"нет перевеса: лучший вариант {label} — модель {b[field]*100:.0f}%, "
-                                    f"рынок {b['market_p']*100:.0f}%, разница {edge*100:.0f} п.п. (нужно от {min_edge*100:.0f})")
+                                    + (f"цена продажи {b['best_ask']*100:.1f}¢ + комиссия {ask_fee(b['best_ask'])*100:.1f}¢"
+                                       if wallet in PICK_ASK else f"рынок {b['market_p']*100:.0f}%")
+                                    + f", разница {edge*100:.0f} п.п. (нужно от {min_edge*100:.0f})")
                         continue
                     min_price = MIN_PRICE_BY_WALLET.get(wallet, MIN_PRICE)
                     if not no_side and wallet not in YES_BAND:
                         min_price = max(min_price, YES_MIN)
-                    if not (min_price <= b["market_p"] <= MAX_PRICE):
+                    if wallet not in PICK_ASK and not (min_price <= b["market_p"] <= MAX_PRICE):
                         record_skip(conn, wallet, city, d["local_date"], d["ts"], "skip",
                                     f"лучший вариант {label} стоит {cents(b['market_p'])} — вне допустимых "
                                     f"{min_price*100:.0f}–{MAX_PRICE*100:.0f}¢ (слишком дешёвые почти никогда не выигрывают)")
                         continue
                     stake = STAKE
+                    if wallet in STAKE_BY_SHIFT:
+                        sf, tiers = STAKE_BY_SHIFT[wallet]
+                        if any(r[sf] is None for r in buckets):
+                            record_skip(conn, wallet, city, d["local_date"], d["ts"], "skip", f"в снимке нет шансов {sf} для сдвига центра")
+                            continue
+                        unit = buckets[0]["unit"]
+                        sh = abs(center_c(buckets, sf, unit) - center_c(buckets, "market_p", unit))
+                        stake = next(s_ for lim_, s_ in tiers if sh <= lim_)
                     if wallet in STAKE_BY_EDGE:
                         mult, bank, lo_s, hi_s = STAKE_BY_EDGE[wallet]
                         stake = round(max(lo_s, min(hi_s, bank * mult * edge / (1 - b["market_p"]))), 2)
@@ -603,7 +678,9 @@ def place(conn, now, only=None):
                         record_skip(conn, wallet, city, d["local_date"], d["ts"], "skip", f"в кошельке меньше ${stake:.2f}")
                         continue
                     max_price = min(MAX_PRICE, b[field] - min_edge)
-                    if wallet in NO_BAND or wallet in YES_BAND:
+                    if wallet in PICK_ASK:
+                        max_price = min(MAX_PRICE, ask_limit(b[field] - min_edge))
+                    if (wallet in NO_BAND and wallet not in NO_BAND_NOCAP) or wallet in YES_BAND:
                         max_price = min(max_price, b["market_p"] + NO_BAND_OVER)
                     if maker:
                         try:
