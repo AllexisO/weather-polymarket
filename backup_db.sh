@@ -40,6 +40,11 @@ cp data/db/*.json "$OUT/" 2>/dev/null
 if tar -C data -cf - --exclude='research/research.sqlite3*' --exclude='research/bench/c.duckdb' research | zstd -q -T0 -10 -o "$OUT/research.tar.zst" -f; then
   printf '%s\t%s\t%s\t%s\n' "research.tar" "$(du -sb --exclude='research.sqlite3*' --exclude='c.duckdb' data/research | cut -f1)" "$(stat -c %s "$OUT/research.tar.zst")" "ok" >> "$OUT/.files.tsv"
 else status=fail; msg+="research: архив не создан; "; fi
+# 28.10 (полная проверка, Alex «добавь»): обученные модели data/ml (~83 МБ). Утренние модели переобучаются из базы каждую ночь,
+# а П1 (кошельки ml5_p1*) — нет: её модели p1*_s*.txt обучены один раз (weather_p1.py --train на файлах из research)
+if tar -C data -cf - ml | zstd -q -T0 -10 -o "$OUT/ml.tar.zst" -f; then
+  printf '%s\t%s\t%s\t%s\n' "ml.tar" "$(du -sb data/ml | cut -f1)" "$(stat -c %s "$OUT/ml.tar.zst")" "ok" >> "$OUT/.files.tsv"
+else status=fail; msg+="ml: архив не создан; "; fi
 # 02.10 (Alex: «если SSD умрёт, все ключи пропадут»): ключи API — тоже в копию, читать может только владелец
 install -m 600 .env "$OUT/env.backup" || { status=fail; msg+=".env: не скопирован; "; }
 chmod 700 "$OUT" "$DEST"

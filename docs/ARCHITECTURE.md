@@ -133,7 +133,7 @@ flowchart LR
 | `mm_forecasts` | `weather_multimodel.py` | прогнозы 16 погодных моделей |
 | `ml_fcst_vars` | `weather_ml_data.py` | прогнозные условия (облака, ветер и т. п.) |
 | `ens_forecasts` | `weather_ens.py` | ансамбли ECMWF/GEFS/ICON + с 28.09 AIFS/UKMO/GEM (212 вариантов), копятся для проверки (сверка ~28.10) |
-| `station_obs` | `weather_station_obs.py` | METAR по часам |
+| `station_obs` | `weather_station_obs.py` | METAR по часам; `report_type` (с 28.10, сводки с 22.10): 3 — плановая, 4 — SPECI (IEM report_type=3 или плановая минута города из `mm_metar_minutes.json`), NULL — не известно. С 23.10 факт `weather_station_daily` и «максимум с утра» в обучении `ml_day` — без SPECI, как итог Polymarket |
 | `weather_station_daily` | `weather_station_obs.py` | **факт**: максимум за день по станции (°F-города — целые °F, `whole_f()`, с 15.10: десятые из группы T давали 65.5 вместо 65) |
 | `weather_poly_outcomes` | `weather_poly_resolve.py` (+ `weather_obs_live.py`, `weather_price_history.py`) | **итог** Polymarket: какой вариант выиграл (с 15.10 и доп. города Гонконг/Тайбэй — последние 10 дней) |
 | `poly_trades`, `poly_trades_days`, `poly_trade_wallets`, `poly_market_final` | `weather_trades_history.py` | настоящие сделки — по ним проверяется преимущество |
@@ -280,7 +280,7 @@ $100 на кошелёк (`ml`, `mm_mk`, `mm` — $300, `copy` — $1000, `ml3` 
 weather-lab/
 ├── app/                   скрипты, сайт, шаблоны (app/templates), скилл (app/agy_skill/)
 ├── data/
-│   ├── db/                рабочая база + отдельные: notes, mm, fastobs, pws, netatmo
+│   ├── db/                рабочая база + отдельные: notes, mm, fastobs, pws (CWOP)
 │   ├── books/             свои стаканы (books.sqlite3, вне ночной копии)
 │   ├── research/          копия базы и исследования (data/research/*.py, логи)
 │   ├── ml/                файлы моделей
@@ -353,7 +353,6 @@ Gemini напрямую в Google при `GEMINI_DIRECT`, отказ → OpenRou
 Страница `/mm`, `/mm/<код>`. Долгие скрипты берут замок `jobmark.single_instance`, «жив» — `jobmark.mark_alive`.
 
 **Сбор без ставок:**
-- Netatmo — `weather_netatmo.py` (*/5 мин) → `data/db/netatmo.sqlite3`; токен меняется — `data/db/netatmo_token.json`.
 - CWOP — `weather_pws_live.py` (11:00-19:00) → `data/db/pws.sqlite3` `cwop_obs`.
 - Ансамбли — `weather_ens.py` (признак в v3 — проверка 10.01.2027).
 

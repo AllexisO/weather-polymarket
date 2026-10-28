@@ -76,7 +76,7 @@ AFD_CONF = {"low": 0, "medium": 1, "high": 2}
 USE_AFD = False
 # 2026-09-25: пункты 3-4 плана Alex — по умолчанию выключены до проверки
 # (weather_ml_variants.py сравнивает с/без по отдельности).
-USE_NB = False   # соседние METAR-станции (weather_neighbors.py)
+USE_NB = False   # соседние METAR-станции — сбор и данные удалены 28.10 (полная проверка); не включать без нового сбора
 USE_MKT = False  # цена рынка в 08:00 (price_history)
 USE_NBM = False  # 2026-09-26: прогноз NBM (служба погоды США) для станций США — weather_nbm.py, идея 4
 NB_BASE_DAYS = 30

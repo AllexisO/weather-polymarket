@@ -38,6 +38,9 @@ MODEL_COLS = [("model_p", "Основная формула (GFS+ICON)"), ("emos_
 
 
 ZERO_FEE_FROM = datetime(2026, 10, 20, 16, 57, tzinfo=timezone.utc)   # 20.10: погода без комиссии (см. проверку комиссии)
+# 28.10 (полная проверка): объявление Polymarket «Zero fees … Weather … through Oct 31» — ноль верен только до конца 31.10
+# (+12 ч: час-пояс в объявлении не указан). Раньше ноль принимался без конца срока — пропуск комиссии после 31.10 не был бы виден.
+ZERO_FEE_TO = datetime(2026, 11, 1, 12, 0, tzinfo=timezone.utc)
 
 
 def _dt(s):
@@ -106,7 +109,7 @@ def check_wallets(c, out, now):
                 exp = r["shares"] * 0.05 * r["price"] * (1 - r["price"])
                 # 20.10: Polymarket снял комиссию со всех погодных маркетов (feeType zero_fees, rate 0) между 16:56 и 18:11 UTC;
                 # polyexec берёт ставку из маркета — после этого комиссия 0 верна
-                if not r["fee"] and _dt(r["placed_at"] or r["snapshot_ts"]) >= ZERO_FEE_FROM:
+                if not r["fee"] and ZERO_FEE_FROM <= _dt(r["placed_at"] or r["snapshot_ts"]) < ZERO_FEE_TO:
                     exp = 0.0
                 if abs((r["fee"] or 0) - exp) > 0.02 + 0.05 * exp:
                     v.append(f"{tag}: комиссия ${r['fee'] or 0:.3f} вместо ${exp:.3f}")

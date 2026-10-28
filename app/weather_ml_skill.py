@@ -188,11 +188,25 @@ def live(conn, key, field, after, min_shift, win):
     return out
 
 
+# 28.10 (полная проверка, Alex «убери всё, что не нужно»): модели, выключенные 14.10 и 27.10, больше не пересчитываем (~22 мин в сутки
+# уходило в том числе на них) — их прошлые строки переносятся в новую таблицу как есть (страницы «Не прошли» и старых моделей их показывают).
+FROZEN = {"ml2", "ml", "ml_shift", "ens", "main", "emos", "mm"}
+
+
 def main():
     conn = sqlite3.connect(DB_PATH, timeout=60)
     win = {(r[0], r[1]): r[2] for r in conn.execute("SELECT city, local_date, win_lo FROM weather_poly_outcomes")}
     out = []
+    if conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'ml_skill'").fetchone():
+        out += [tuple(r) for r in conn.execute(f"SELECT * FROM ml_skill WHERE model IN ({','.join('?' * len(FROZEN))})", sorted(FROZEN))]
+        print(f"замороженные модели ({', '.join(sorted(FROZEN))}): перенесено строк {len(out)}")
+    snap_cols = {r[1] for r in conn.execute("PRAGMA table_info(snapshots)")}
     for key, (table, kind, field, min_shift) in MODELS.items():
+        if key in FROZEN:
+            continue
+        if field not in snap_cols:   # 28.10: колонки новой модели ещё нет — пропускаем только её, а не весь подсчёт
+            print(f"{key}: в снимках нет колонки {field} — пропускаем")
+            continue
         rows = history(conn, key, table, kind, min_shift, win) if table else []
         rows += live(conn, key, field, max((r[2] for r in rows), default=""), min_shift, win)
         out += rows

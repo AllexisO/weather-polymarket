@@ -421,26 +421,7 @@ def check_fastobs(now):
     fo.close()
 
 
-def check_netatmo(now):
-    """02.10 (проверка всего проекта): частные станции Netatmo — свежие замеры по каждому городу списка, и при суточном
-    пересчёте городов не было сбоев (раньше сбой молча выкидывал город на сутки)."""
-    try:
-        cf = json.loads((DB_PATH.parent / "netatmo_cities.json").read_text())
-    except (OSError, ValueError):
-        add("Частные станции", "warn", "Список городов Netatmo", "файла netatmo_cities.json нет")
-        return
-    failed = cf.get("failed") or []
-    add("Частные станции", "warn" if failed else True, "Список городов Netatmo пересчитан без сбоев",
-        f"{len(cf.get('cities', []))} городов" + (f"; не ответили: {', '.join(failed)} — повтор через час" if failed else ""))
-    db = _ro(DB_PATH.parent / "netatmo.sqlite3")
-    if db is None:
-        return
-    since = (now - timedelta(minutes=30)).isoformat()
-    fresh = {r[0] for r in db.execute("SELECT DISTINCT city FROM pws_obs WHERE first_seen_utc >= ?", (since,))}
-    miss = [c for c in cf.get("cities", []) if c not in fresh]
-    add("Частные станции", "warn" if miss else True, "Замеры Netatmo по всем городам за 30 мин",
-        ", ".join(miss) if miss else "по всем городам есть", "посмотреть data/logs/weather_netatmo.log" if miss else "")
-    db.close()
+# 28.10 (полная проверка, Alex «убери всё, что не нужно»): сбор Netatmo убран — проверки его свежести больше нет.
 
 
 def check_backup(now):
@@ -566,7 +547,7 @@ def main():
     c = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=30)
     extra = {"morning": [(check_night_done, (c, now))], "midday": [(check_decisions, (c, now))]}.get(mode, [])
     for fn, args in extra + [(check_cron, (c, now)), (check_db, (c,)), (check_models, (c, now)), (check_misc, (c, now)),
-                             (check_bots, (c, now)), (check_stuck_bets, (c, now)), (check_logic, (c, now)), (check_inputs, (c, now)), (check_fastobs, (now,)), (check_netatmo, (now,)), (check_backup, (now,))]:
+                             (check_bots, (c, now)), (check_stuck_bets, (c, now)), (check_logic, (c, now)), (check_inputs, (c, now)), (check_fastobs, (now,)), (check_backup, (now,))]:
         with item_guard(fn.__name__):
             fn(*args)
     c.close()

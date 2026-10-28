@@ -26,7 +26,7 @@
 
 Кошелёк ml_day_nohigh (25.10, решение Alex «делаем всё по порядку»; правило Argon): «нет» на вариант выше уже достигнутого
 максимума — в 12/14 ч (первый с сигналом), лучший покупатель «да» 5-25¢, смесь(«да») ≤ его цена − 3 п.п.; из нескольких — с
-наибольшим перевесом; «нет» по живому стакану не дороже 1 − смесь − 3 п.п. Проверка на прошлом (data/research/_ml_day_no_high_1025.py,
+наибольшим перевесом; «нет» по живому стакану не дороже 1 − смесь − 3 п.п. С 28.10 лучший покупатель «да» — из стакана CLOB (clob_best_bid), а не bestBid Gamma, как в проверке Проверка на прошлом (data/research/_ml_day_no_high_1025.py,
 06-23.10, порог записан до подсчёта): 43 ставки, +5.9% с комиссией, плюс в обеих половинах, z +0.99 при пороге +1.0 — не прошло на
 волосок, поэтому правило без изменений проверяется на новых днях. Порог (до первой ставки): ≥ 50 закрытых, ≥ +3%, z ≥ +1.0.
 
@@ -63,7 +63,8 @@ WALLET = "ml_day"
 WALLET_FAV = "ml_day_fav"
 WALLET_NOHIGH = "ml_day_nohigh"
 NOHIGH_HOURS = (12, 14)
-NOHIGH_BAND = (0.05, 0.25)   # цена лучшего покупателя «да»
+NOHIGH_BAND = (0.05, 0.25)   # цена лучшего покупателя «да» (настоящий стакан CLOB)
+NOHIGH_PREFILTER = (0.03, 0.35)   # 28.10: стакан смотрим только у вариантов с такой ценой Gamma (меньше запросов)
 FAV_BAND = (0.50, 0.95)  # как YES_BAND["fav"] в weather_paper
 FAV_OVER = 0.01          # «да» не дороже цены + 1¢ (как fav)
 HOURS = (10, 12, 14)
@@ -113,9 +114,14 @@ def build_train(conn):
         unit, tz = cfg["unit"], ZoneInfo(cfg["tz"])
         days = set(g["date"])
         obs = {}
-        for v, t in conn.execute("SELECT valid_utc, tmpf FROM station_obs WHERE city = ? AND tmpf IS NOT NULL", (city,)):
+        # 28.10 (полная проверка): с 23.10 SPECI не идёт в «максимум с утра» — как вживую (weather_obs_live.routine_only);
+        # тип — station_obs.report_type от IEM (4 — SPECI; NULL — не известен, идёт как раньше)
+        from weather_obs_live import ROUTINE_FROM
+        for v, t, rt in conn.execute("SELECT valid_utc, tmpf, report_type FROM station_obs WHERE city = ? AND tmpf IS NOT NULL", (city,)):
             dt = datetime.fromisoformat(v).replace(tzinfo=timezone.utc)
             d = dt.astimezone(tz).date().isoformat()
+            if d >= ROUTINE_FROM and rt == 4:
+                continue
             if d in days:
                 obs.setdefault(d, []).append((dt, ml.f_to_c(t)))
         win = {(d, h): (datetime.fromisoformat(d).replace(tzinfo=tz).timestamp() + (h - 1) * 3600,
@@ -294,6 +300,16 @@ def decide(row, f, mk, unit):
     return model, blend
 
 
+def clob_best_bid(m):
+    """Лучший покупатель «да» в настоящем стакане CLOB (None — стакан пуст или не ответил)."""
+    from polyexec import _book
+    try:
+        bids = _book(json.loads(m["clobTokenIds"])[0]).get("bids", [])
+    except (requests.RequestException, ValueError, KeyError):
+        return None
+    return max((float(x["price"]) for x in bids), default=None)
+
+
 def bet(conn, city, day, now, mk, blend, wallet=WALLET, day_max_c=None, hour=None):
     """Лучший перевес смеси ≥ EDGE над ценой продавца; покупка по живому стакану. Не исполнилось — запись nofill (в этот день
     больше не пробуем, как в проверке). ml_day_fav — только «да» 50-95¢, смесь выше цены, не дороже min(смесь, цена + 1¢)."""
@@ -305,9 +321,15 @@ def bet(conn, city, day, now, mk, blend, wallet=WALLET, day_max_c=None, hour=Non
         if wallet == WALLET_NOHIGH:     # вариант целиком выше максимума с утра (границы маркета — в его единицах)
             unit = OBS_CITIES[city]["unit"]
             mx = day_max_c * 9 / 5 + 32 if unit == "fahrenheit" else day_max_c
-            if (hour in NOHIGH_HOURS and b["lo"] > mx and NOHIGH_BAND[0] <= b["bid"] <= NOHIGH_BAND[1] and q <= b["bid"] - EDGE
-                    and (best is None or b["bid"] - q > best[0])):
-                best = (b["bid"] - q, "no", 1 - b["bid"], 1 - q, b)
+            if hour not in NOHIGH_HOURS or b["lo"] <= mx or not (NOHIGH_PREFILTER[0] <= b["price"] <= NOHIGH_PREFILTER[1]):
+                continue
+            # 28.10 (полная проверка): лучший покупатель «да» — из НАСТОЯЩЕГО стакана CLOB, как в проверке (book_snaps), а не bestBid
+            # Gamma: Gamma отстаёт и часто на 1+¢ ниже — за 25-28.10 кошелёк не сделал ни одной записи, хотя по стаканам 25-26.10
+            # у правила было 5 кандидатов (data/research/_nohigh_live_books_1028.py)
+            bid = clob_best_bid(b["m"])
+            if (bid is not None and NOHIGH_BAND[0] <= bid <= NOHIGH_BAND[1] and q <= bid - EDGE
+                    and (best is None or bid - q > best[0])):
+                best = (bid - q, "no", 1 - bid, 1 - q, b)
             continue
         if wallet == WALLET_FAV:
             if FAV_BAND[0] <= b["ask"] <= FAV_BAND[1] and q > b["ask"] and (best is None or q - b["ask"] > best[0]):
