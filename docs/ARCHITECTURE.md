@@ -171,7 +171,7 @@ flowchart LR
 
 ## 5. Факт и итог
 
-- 48 городов (`weather_cities.py`), маркеты «Highest temperature in X», резолв по METAR.
+- 47 городов (`weather_cities.py`; Чжэнчжоу убран 29.10 — маркетов нет с 02.10), маркеты «Highest temperature in X», резолв по METAR.
 - **Факт** — `weather_station_daily` (METAR, Iowa Mesonet); **итог** — `weather_poly_outcomes`.
   Совпадают в ~98%; ставки рассчитываются по итогу. 5-минутные замеры США не засчитываются.
 - Проверять преимущество — по настоящим сделкам (`poly_trades`), не по `price_history`

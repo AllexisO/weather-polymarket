@@ -76,7 +76,7 @@ COORDS = {
     'tel_aviv': (32.011, 34.887),
     'istanbul': (41.262, 28.74),
     'wuhan': (30.783, 114.205),
-    'zhengzhou': (34.52, 113.834),
+    # 29.10 (решение Alex): Чжэнчжоу убран — Polymarket не открывает маркеты с 02.10 (последний итог 01.10); координаты (34.52, 113.834)
 }
 
 
@@ -138,7 +138,7 @@ OBS_CITIES = {
     "tel_aviv": _c("LLBG", "Asia/Jerusalem", "celsius", "tel-aviv"),
     "istanbul": _c("LTFM", "Europe/Istanbul", "celsius", "istanbul"),
     "wuhan": _c("ZHHH", "Asia/Shanghai", "celsius", "wuhan"),
-    "zhengzhou": _c("ZHCC", "Asia/Shanghai", "celsius", "zhengzhou"),
+    # 29.10: "zhengzhou" (ZHCC) убран — был последним в списке, номера городов (city_id моделей) у остальных не сдвигаются
 }
 
 _with_coords()
