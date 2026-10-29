@@ -3697,6 +3697,12 @@ def real_page_data(conn):
     return {"cands": out, "today": today.strftime("%d.%m"), "dry": dry}
 
 
+@app.get("/dashboard", response_class=HTMLResponse)
+def dashboard_home(request: Request):
+    """29.10 (просьба Alex): страница Dashboard — первая в левом меню, пока пустая."""
+    return TEMPLATES.TemplateResponse("dashboard_home.html", {"request": request})
+
+
 @app.get("/real", response_class=HTMLResponse)
 def real_page(request: Request):
     conn = db()

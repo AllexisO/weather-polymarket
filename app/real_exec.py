@@ -12,6 +12,10 @@
 4. ПРЕДЕЛЫ РИСКА (guard), числа — LIMITS: ставка ≤ $5; новые ставки за сутки ≤ $100; убыток за сутки ≥ $40 → пауза до конца суток;
    счёт (свободные + открытые по цене покупки) < $60 → остановка. По октябрю (5 кошельков банка) ни один предел не сработал бы:
    максимум ставки $3.95, за сутки $95.54, худший день −$39.75.
+   + ОСТАНОВКА БИРЖИ (29.10, Alex «делай»): в тот день Polymarket после взлома ~64 мин (17:56-19:00 UTC) был в режиме «только отмена»
+   — стакан выглядел обычно, но сделки не проходили. Поэтому перед заявкой — время последней сделки по ВСЕЙ бирже (data-api /trades):
+   старше HALT_MIN минут → не ставить. Обычно там свежее 5 мин (задержка data-api ~4-5 мин, сделки идут каждую секунду); нет ответа —
+   тоже не ставить.
 
 Таблица real_ledger — в data/db/fast_dry.sqlite3 (рядом с холостыми ставками). Рабочая база — только чтение.
 """
@@ -26,6 +30,7 @@ LIMITS = {"bet_max": 5.0, "day_stake_max": 100.0, "day_loss_pause": 40.0, "equit
 POOL = ("fav", "ml5_cal", "ml5", "ml4e_cal", "ml_day")
 FAST = {"fav", "ml5_cal", "ml5", "ml4e_cal"}          # решают в weather_fast_dry (холостые ставки — в той же базе)
 REDEEM_LATE_H, UNSETTLED_LATE_H = 6, 48
+HALT_MIN = 15                                          # последняя сделка на бирже старше — биржа стоит
 REAL_MODE = False                                      # отправка настоящих заявок — только по решению Alex (PRD §4 п.5)
 
 
@@ -54,8 +59,30 @@ def state(c):
     return {"free": free, "open": open_cost, "equity": free + open_cost, "day_stake": day_stake, "day_pnl": day_pnl, "n": len(rows)}
 
 
+_halt = {"at": 0.0, "why": None}
+
+
+def exchange_halted():
+    """None — биржа торгует; иначе причина. Ответ кешируется на 60 с (tick — каждые 20 с)."""
+    import time
+    import requests
+    if time.time() - _halt["at"] < 60:
+        return _halt["why"]
+    try:
+        last = max(t["timestamp"] for t in requests.get("https://data-api.polymarket.com/trades", params={"limit": 20}, timeout=15).json())
+        age = (time.time() - last) / 60
+        why = f"биржа стоит: последняя сделка на Polymarket {age:.0f} мин назад (> {HALT_MIN})" if age > HALT_MIN else None
+    except Exception as e:
+        why = f"биржа: нет ответа о сделках ({type(e).__name__})"
+    _halt.update(at=time.time(), why=why)
+    return why
+
+
 def guard(c, cost):
-    """None — можно ставить; иначе причина (предел риска или нет денег)."""
+    """None — можно ставить; иначе причина (остановка биржи, предел риска или нет денег)."""
+    halted = exchange_halted()
+    if halted:
+        return halted
     s = state(c)
     if s["equity"] < LIMITS["equity_stop"]:
         return f"остановка: счёт ${s['equity']:.2f} < ${LIMITS['equity_stop']:.0f}"

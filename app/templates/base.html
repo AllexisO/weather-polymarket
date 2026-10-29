@@ -334,26 +334,27 @@
     </div>
     <nav aria-label="Разделы" id="side-nav" class="side-nav">
      <div class="side-block">
-      {{ navlink('/paper', 'кошельки', 'wallet', path == '/paper', nc.wallets) }}
-      {{ navlink('/real', 'реальные деньги', 'target', path == '/real') }}
-      {{ navlink('/failed', 'не прошли', 'close', path == '/failed') }}
-      {{ navlink('/models', 'модели', 'bar-chart', path.startswith('/models')) }}
+      {{ navlink('/dashboard', 'Dashboard', 'results', path == '/dashboard') }}
+      {{ navlink('/paper', 'Кошельки', 'wallet', path == '/paper', nc.wallets) }}
+      {{ navlink('/real', 'Реальные деньги', 'target', path == '/real') }}
+      {{ navlink('/failed', 'Не прошли', 'close', path == '/failed') }}
+      {{ navlink('/models', 'Модели', 'bar-chart', path.startswith('/models')) }}
       {{ navlink('/llm', 'LLM', 'message', path == '/llm') }}
-      {{ navlink('/skill', 'скилл', 'message', path == '/skill') }}
-      {{ navlink('/diary', 'дневник ИИ', 'notes', path == '/diary') }}
-      {{ navlink('/bets', 'ставки', 'trending', path == '/bets', nc.open) }}
-      {{ navlink('/cities', 'города', 'globe', path.startswith('/cities'), nc.cities if nc.cities else none) }}
-      {{ navlink('/traders', 'трейдеры', 'shuffle', path.startswith('/traders'), nc.traders if nc.traders else none) }}
-      {{ navlink('/training', 'обучение модели', 'sliders', path == '/training') }}
+      {{ navlink('/skill', 'Скилл', 'message', path == '/skill') }}
+      {{ navlink('/diary', 'Дневник ИИ', 'notes', path == '/diary') }}
+      {{ navlink('/bets', 'Ставки', 'trending', path == '/bets', nc.open) }}
+      {{ navlink('/cities', 'Города', 'globe', path.startswith('/cities'), nc.cities if nc.cities else none) }}
+      {{ navlink('/traders', 'Трейдеры', 'shuffle', path.startswith('/traders'), nc.traders if nc.traders else none) }}
+      {{ navlink('/training', 'Обучение модели', 'sliders', path == '/training') }}
      </div>
      <div class="side-block">
       <div class="side-group-label">Инструменты</div>
-      {{ navlink('/status', 'здоровье системы', 'status', path == '/status', nc.alerts if nc.alerts else none, 'bad' if nc.alerts else '') }}
-      {{ navlink('/events', 'события', 'news', path == '/events') }}
-      {{ navlink('/services', 'сервисы', 'plug', path == '/services') }}
-      {{ navlink('/backup', 'бэкап', 'database', path == '/backup') }}
-      {{ navlink('/notes', 'заметки', 'notes', path == '/notes', nc.notes if nc.notes else none, 'warn' if nc.notes else '') }}
-      {{ navlink('/audit', 'проверка', 'target', path == '/audit', ('ok' if nc.audit == 0 else nc.audit) if nc.audit is not none else none, 'good' if nc.audit == 0 else ('bad' if nc.audit else '')) }}
+      {{ navlink('/status', 'Здоровье системы', 'status', path == '/status', nc.alerts if nc.alerts else none, 'bad' if nc.alerts else '') }}
+      {{ navlink('/events', 'События', 'news', path == '/events') }}
+      {{ navlink('/services', 'Сервисы', 'plug', path == '/services') }}
+      {{ navlink('/backup', 'Бэкап', 'database', path == '/backup') }}
+      {{ navlink('/notes', 'Заметки', 'notes', path == '/notes', nc.notes if nc.notes else none, 'warn' if nc.notes else '') }}
+      {{ navlink('/audit', 'Проверка', 'target', path == '/audit', ('ok' if nc.audit == 0 else nc.audit) if nc.audit is not none else none, 'good' if nc.audit == 0 else ('bad' if nc.audit else '')) }}
      </div>
     </nav>
     <div class="side-spacer"></div>
