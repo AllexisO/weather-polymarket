@@ -3684,7 +3684,17 @@ def real_page_data(conn):
             c["progress"] = min(100, round(100 * best["n"] / c["need_n"]))
             c["best"] = best["label"]
         out.append(c)
-    return {"cands": out, "today": today.strftime("%d.%m")}
+    # 29.10 (Alex: «добавь на страницу, чтобы не смотреть командой»): настоящий счёт вхолостую — то же, что weather_fast_dry.py --report
+    dry = None
+    try:
+        import real_exec
+        rc = real_exec.open_ro(DB_PATH.parent / "fast_dry.sqlite3", DB_PATH)
+        if rc is not None:
+            dry = real_exec.summary(rc)
+            rc.close()
+    except Exception as e:
+        dry = {"error": f"{type(e).__name__}: {e}"}
+    return {"cands": out, "today": today.strftime("%d.%m"), "dry": dry}
 
 
 @app.get("/real", response_class=HTMLResponse)

@@ -59,6 +59,41 @@ def ensure_schema(conn):
     conn.commit()
 
 
+INSERT_SQL = """INSERT INTO snapshots_fast (ts_utc, city, local_date, local_hour, unit, bucket_lo, bucket_hi,
+                market_p, best_ask, event_vol, ml_model_p, ml2_model_p, ml3_model_p, ml3c_model_p,
+                ml4_model_p, ml4c_model_p, ml4e_model_p, ml4ec_model_p, ml5_model_p, ml5c_model_p, ml531_model_p, ml531c_model_p,
+                ml531m_model_p, p1_model_p, v2b_model_p, p1o_model_p, v2o_model_p, best_bid)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""
+
+
+def snapshot_rows(conn, city, cfg, now_local, market, metars_city):
+    """Строки снимка для одного города (шансы всех моделей и смесей) или (None, причина). 29.10: вынесено из main —
+    этим же расчётом пользуется холостая быстрая служба weather_fast_dry.py (одна логика на двоих)."""
+    res = bucket_probs(conn, city, cfg, market["buckets"], metars_city)
+    if res is None:
+        return None, "у модели нет оценки (нет прогнозов/замеров)"
+    v1, mu, v2, v3, v4, v4e, v5, v531, p1, p1o = res
+    prices = [b["market_p"] for b in market["buckets"]]
+    v3c = blend_with_market(v3, prices) if v3 else None
+    v4c = blend_with_market(v4, prices) if v4 else None
+    v4ec = blend_with_market(v4e, prices) if v4e else None
+    v5c = blend_with_market(v5, prices) if v5 else None
+    v531c = blend_with_market(v531, prices) if v531 else None
+    v531m = blend_with_market_cal(v531, prices) if v531 else None
+    v2b = blend_v2(v531c, p1) if (p1 and v531c) else None
+    v2o = blend_v2(v531c, p1o) if (p1o and v531c) else None
+    ts = datetime.now(timezone.utc).isoformat()
+    rows = [(ts, city, now_local.date().isoformat(), now_local.hour, cfg["unit"], b["lo"], b["hi"], b["market_p"],
+             b.get("best_ask"), market["event_vol"], v1[i] if v1 else None, v2[i] if v2 else None,
+             v3[i] if v3 else None, v3c[i] if v3c else None, v4[i] if v4 else None,
+             v4c[i] if v4c else None, v4e[i] if v4e else None, v4ec[i] if v4ec else None,
+             v5[i] if v5 else None, v5c[i] if v5c else None, v531[i] if v531 else None,
+             v531c[i] if v531c else None, v531m[i] if v531m else None,
+             p1[i] if p1 else None, v2b[i] if v2b else None,
+             p1o[i] if p1o else None, v2o[i] if v2o else None, b.get("best_bid")) for i, b in enumerate(market["buckets"])]
+    return rows, mu
+
+
 def main():
     conn = sqlite3.connect(DB_PATH, timeout=60)
     conn.row_factory = sqlite3.Row
@@ -92,33 +127,11 @@ def main():
             if not market or not market["buckets"]:
                 print(f"{city}: маркет на сегодня не найден")
                 continue
-            res = bucket_probs(conn, city, cfg, market["buckets"], metars.get(OBS_CITIES[city]["icao"], []))
-            if res is None:
-                print(f"{city}: у модели нет оценки (нет прогнозов/замеров)")
+            rows, mu = snapshot_rows(conn, city, cfg, now_local, market, metars.get(OBS_CITIES[city]["icao"], []))
+            if rows is None:
+                print(f"{city}: {mu}")
                 continue
-            v1, mu, v2, v3, v4, v4e, v5, v531, p1, p1o = res
-            v3c = blend_with_market(v3, [b["market_p"] for b in market["buckets"]]) if v3 else None
-            v4c = blend_with_market(v4, [b["market_p"] for b in market["buckets"]]) if v4 else None
-            v4ec = blend_with_market(v4e, [b["market_p"] for b in market["buckets"]]) if v4e else None
-            v5c = blend_with_market(v5, [b["market_p"] for b in market["buckets"]]) if v5 else None
-            v531c = blend_with_market(v531, [b["market_p"] for b in market["buckets"]]) if v531 else None
-            v531m = blend_with_market_cal(v531, [b["market_p"] for b in market["buckets"]]) if v531 else None
-            v2b = blend_v2(v531c, p1) if (p1 and v531c) else None
-            v2o = blend_v2(v531c, p1o) if (p1o and v531c) else None
-            ts = datetime.now(timezone.utc).isoformat()
-            rows = [(ts, city, now_local.date().isoformat(), now_local.hour, cfg["unit"], b["lo"], b["hi"], b["market_p"],
-                     b.get("best_ask"), market["event_vol"], v1[i] if v1 else None, v2[i] if v2 else None,
-                     v3[i] if v3 else None, v3c[i] if v3c else None, v4[i] if v4 else None,
-                     v4c[i] if v4c else None, v4e[i] if v4e else None, v4ec[i] if v4ec else None,
-                     v5[i] if v5 else None, v5c[i] if v5c else None, v531[i] if v531 else None,
-                     v531c[i] if v531c else None, v531m[i] if v531m else None,
-                     p1[i] if p1 else None, v2b[i] if v2b else None,
-                     p1o[i] if p1o else None, v2o[i] if v2o else None, b.get("best_bid")) for i, b in enumerate(market["buckets"])]
-            conn.executemany("""INSERT INTO snapshots_fast (ts_utc, city, local_date, local_hour, unit, bucket_lo, bucket_hi,
-                                market_p, best_ask, event_vol, ml_model_p, ml2_model_p, ml3_model_p, ml3c_model_p,
-                                ml4_model_p, ml4c_model_p, ml4e_model_p, ml4ec_model_p, ml5_model_p, ml5c_model_p, ml531_model_p, ml531c_model_p,
-                                ml531m_model_p, p1_model_p, v2b_model_p, p1o_model_p, v2o_model_p, best_bid)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", rows)
+            conn.executemany(INSERT_SQL, rows)
             conn.commit()
             print(f"{city}: быстрый снимок {now_local:%H:%M} местного, v1 максимум {mu:.1f}", flush=True)
             time.sleep(1)

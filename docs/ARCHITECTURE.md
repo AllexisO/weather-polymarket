@@ -138,6 +138,8 @@ flowchart LR
 | `weather_poly_outcomes` | `weather_poly_resolve.py` (+ `weather_obs_live.py`, `weather_price_history.py`) | **итог** Polymarket: какой вариант выиграл (с 15.10 и доп. города Гонконг/Тайбэй — последние 10 дней) |
 | `poly_trades`, `poly_trades_days`, `poly_trade_wallets`, `poly_market_final` | `weather_trades_history.py` | настоящие сделки — по ним проверяется преимущество |
 | `price_history`, `price_history_days` | `weather_price_history.py` | история цен (последние сделки, могут быть протухшими) |
+| `fast_dry.sqlite3` (своя база) | `weather_fast_dry.py` (крон :55, процесс на час) | быстрые решения в 08:00 вхолостую для fav, ml5_cal, ml5, ml4e_cal: свои `snapshots_fast` (тем же `weather_ml_fast.snapshot_rows`), пустой `snapshots`, `paper_trades`; рабочая база подключена только на чтение (ATTACH mode=ro); сравнение — `--report`, разбор 12.11 |
+| `real_ledger` (в `fast_dry.sqlite3`) | `real_exec.py` (из `weather_fast_dry.py`, каждые 20 с) | настоящий счёт $100 вхолостую на весь банк (fav, ml5_cal, ml5, ml4e_cal, ml_day): заявка в момент решения (собрана и подписана `weather_real_dry.build`, не отправлена), пределы риска `LIMITS`, деньги — после гашения, сверка — `weather_fast_dry.py --report` |
 | `fresh_hres_live` | `weather_fresh_live.py` (каждый час, :47, окно 07-14 местного) | свежий прогон ECMWF HRES к 08:00 (тот же выбор прогона, что `weather_fresh_fc.py`): `fresh` дня d и `stale` дня d+1, `fetched_utc` — когда получили (позже 08:00 — к решению не успел бы); ~48 запросов Open-Meteo в сутки; для проверки v7 с подвижным k на ноябре (журнал 28.10), ставок нет |
 | `sharp_wallets` | `weather_sharp_rank.py` | 30 сильных трейдеров для кошелька `copy` |
 
