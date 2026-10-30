@@ -3399,14 +3399,7 @@ REAL_CANDIDATES = [
      "rule": "ставки на дни 28.10-17.11: ≥ 100 закрытых докупок, докупка ≥ +10% на вложенное и итог банка в $ выше, чем у первого банка за те же дни",
      "since": "2026-10-28", "until": "2026-11-17", "need_refill": 100, "need_roi": 10.0,
      "then": "докупка в живом банке $100 (сначала §4 п.2-4 в docs/PRD.md)"},
-    {"key": "mm", "name": "Бот-мейкер, счёт $100", "wallets": ["mm100"], "decide": "2026-10-14",
-     "what": "Ставит заявки на дешёвую сторону и зарабатывает на склейке «да» + «нет». Строго как вживую: банк $100, 5 долей, только гарантированные исполнения.",
-     "rule": "на счёте больше $101 к 14.10 и плюс в обе недели (02-08.10 и 09-13.10)", "since": "2026-10-02",
-     "then": "живой тест $100 рядом с бумажным mm100"},
-    {"key": "mmf", "name": "Бот-мейкер, сосредоточенный $100", "wallets": ["mm100f"], "decide": "2026-10-21",
-     "what": "Тот же строгий бот с банком $100, но только в 5 самых оживлённых городах (по прошлым дням) и без пары не больше 5 долей одной стороны — чтобы складывались пары, а не лотерея, как у mm100. На прошлых днях выбранный заранее вариант (2 города) не прошёл (−$7), 5 городов были в плюсе — но выбраны задним числом, поэтому проверяем на будущих днях.",
-     "rule": "за 08-21.10: итог > 0 и плюс в обе недели (08-14.10 и 15-21.10)", "since": "2026-10-08",
-     "then": "живой тест $100 рядом с бумажным mm100f"},
+    # 30.10 (Alex): кандидаты «Бот-мейкер, счёт $100» (mm100) и «сосредоточенный $100» (mm100f) убраны — бот выключен целиком 27.10
     {"key": "llm", "name": "LLM каждый час", "wallets": ["llm_gem", "llm_ds", "llm_mix", "llm_cal"], "decide": "2026-10-18",
      "what": "Gemini и DeepSeek каждый час видят всё о дне и называют шансы; смесь Gemini + LightGBM и Gemini + рынок (с 08.10) — без своих запросов.",
      "rule": "за 04-17.10: ≥ 30 закрытых ставок и итог ≥ +5%; шанс на верный вариант выше рынка в тот же час на 3+ процентных пункта", "since": "2026-10-04",
@@ -3561,57 +3554,7 @@ def real_page_data(conn):
     for c in REAL_CANDIDATES:
         c = dict(c)
         c["days_left"] = (date.fromisoformat(c["decide"]) - today).days
-        if c["key"] == "mm":
-            res, st, has = None, None, MM_DB.exists()
-            if has:
-                mc = sqlite3.connect(f"file:{MM_DB}?mode=ro", uri=True, timeout=10)
-                try:
-                    tot = mc.execute("SELECT COALESCE(SUM(pnl), 0), COALESCE(SUM(n_fills), 0), COUNT(*) FROM mm_results WHERE wallet = 'mm100'").fetchone()
-                    w1 = mc.execute("SELECT COALESCE(SUM(pnl), 0) FROM mm_results WHERE wallet = 'mm100' AND local_date BETWEEN '2026-10-02' AND '2026-10-08'").fetchone()[0]
-                    w2 = mc.execute("SELECT COALESCE(SUM(pnl), 0), COUNT(*) FROM mm_results WHERE wallet = 'mm100' AND local_date BETWEEN '2026-10-09' AND '2026-10-13'").fetchone()
-                    st = mc.execute("SELECT cash, reserved, quotes FROM mm100_state ORDER BY ts DESC LIMIT 1").fetchone()
-                    zs = mc.execute("SELECT COALESCE(SUM(pnl), 0), COALESCE(SUM(spent), 0), COALESCE(SUM(n_fills), 0) FROM mm_results WHERE wallet = 'mm_ws_zs'").fetchone()
-                finally:
-                    mc.close()
-                bal = 100.0 + tot[0]
-                c["rows"] = [{"label": "Счёт", "value": f"${bal:.2f}", "tone": "pos" if bal > 100.005 else ("neg" if bal < 99.995 else ""),
-                              "note": f"{tot[2]} маркетов, исполнений {tot[1]}"},
-                             {"label": "Неделя 02-08.10", "value": money_str(w1), "tone": "pos" if w1 > 0 else ("neg" if w1 < 0 else "")},
-                             {"label": "Неделя 09-13.10", "value": money_str(w2[0]) if w2[1] else "ещё не началась",
-                              "tone": ("pos" if w2[0] > 0 else "neg") if w2[1] else ""},
-                             # 07.10: для сравнения — тот же бот без ограничения банка, строгая оценка исполнения (порог 02.10 сначала был по нему)
-                             {"label": "Для сравнения: тот же бот без банка $100 (mm_ws_zs)", "value": money_str(zs[0]),
-                              "tone": "pos" if zs[0] > 0 else ("neg" if zs[0] < 0 else ""),
-                              "note": (f"{100 * zs[0] / zs[1]:+.1f}% от потраченного, исполнений {zs[2]}" if zs[1] else None)}]
-                if st is not None:
-                    c["warn"] = (f"Сейчас свободно ${st[0]:.2f}: деньги в открытых позициях, новые заявки — когда маркеты закроются и деньги "
-                                 f"вернутся (так каждый день: бот упирается в банк $100)." if st[0] < 1 else None)
-                ok = bal > 101 and w1 > 0 and (w2[1] and w2[0] > 0)
-                c["status"] = ("pass" if ok else ("bad" if bal < 100 else "wait"))
-                need = ([f"ещё +${101 - bal:.2f} к счёту"] if bal <= 101 else [f"счёт уже ${bal:.2f} (> $101)"]) + \
-                       ([] if w1 > 0 else ["плюс в первой неделе"]) + ([] if (w2[1] and w2[0] > 0) else ["плюс во второй неделе (09-13.10)"])
-                c["status_text"] = "проходит" if ok else "; ".join(need[:1] + [("нужен " if bal > 101 else "и ") + "; ".join(need[1:])] if len(need) > 1 else need)
-        elif c["key"] == "mmf":
-            if MM_DB.exists():
-                mc = sqlite3.connect(f"file:{MM_DB}?mode=ro", uri=True, timeout=10)
-                try:
-                    q = "SELECT COALESCE(SUM(pnl), 0), COUNT(*), COALESCE(SUM(merged), 0) FROM mm_results WHERE wallet = 'mm100f' AND local_date BETWEEN ? AND ?"
-                    tot, w1, w2 = (mc.execute(q, a).fetchone() for a in (("2026-10-08", "2026-10-21"), ("2026-10-08", "2026-10-14"), ("2026-10-15", "2026-10-21")))
-                    st = mc.execute("SELECT cash FROM mm100f_state ORDER BY ts DESC LIMIT 1").fetchone() if \
-                        mc.execute("SELECT 1 FROM sqlite_master WHERE name = 'mm100f_state'").fetchone() else None
-                finally:
-                    mc.close()
-                bal = 100.0 + tot[0]
-                wk = lambda w: (money_str(w[0]) if w[1] else "ещё нет закрытых", ("pos" if w[0] > 0 else "neg") if w[1] else "")
-                c["rows"] = [{"label": "Счёт", "value": f"${bal:.2f}", "tone": "pos" if bal > 100.005 else ("neg" if bal < 99.995 else ""),
-                              "note": f"{tot[1]} закрытых маркетов, склеено пар {tot[2]:.0f}" + (f", свободно ${st[0]:.2f}" if st else "")},
-                             {"label": "Неделя 08-14.10", "value": wk(w1)[0], "tone": wk(w1)[1]},
-                             {"label": "Неделя 15-21.10", "value": wk(w2)[0], "tone": wk(w2)[1]}]
-                ok = bal > 100 and w1[1] and w1[0] > 0 and w2[1] and w2[0] > 0
-                c["status"] = "pass" if ok else ("wait" if not tot[1] or not w2[1] else "bad")
-                c["status_text"] = "проходит" if ok else ("ждём закрытых маркетов" if not tot[1] else
-                                                         f"счёт ${bal:.2f}; нужен итог > 0 и плюс в обе недели")
-        elif c["key"] == "pool_refill":
+        if c["key"] == "pool_refill":
             p = _real_pool(conn, c["wallets"], c["since"], c["until"], refill=True)
             base = _real_pool(conn, c["wallets"], c["since"], c["until"])
             tn = lambda v: "pos" if v > 0.005 else ("neg" if v < -0.005 else "")
