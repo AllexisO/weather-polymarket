@@ -29,6 +29,7 @@ from pathlib import Path
 
 import weather_ml_check as chk
 import weather_ml_q as mq
+from weather_cities import OBS_CITIES
 from weather_edge import emos_bucket_prob
 
 DB_PATH = Path(os.environ.get("POLY_LAB_DB", Path(__file__).parent.parent / "data" / "db" / "polymarket_lab.sqlite3"))
@@ -128,6 +129,8 @@ def history(conn, key, table, kind, min_shift, win):
     cols = "city, date, unit, qs" if kind in ("q", "q_blend") else "city, date, unit, ml_mu_c, ml_sigma_c"
     for r in conn.execute(f"SELECT {cols} FROM {table}").fetchall():
         city, date, unit = r[0], r[1], r[2]
+        if city not in OBS_CITIES:      # 30.10: город убран из списка (Чжэнчжоу 29.10) — его старые дни пропускаем
+            continue
         w = win.get((city, date))
         if w is None:
             continue
