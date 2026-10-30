@@ -346,8 +346,8 @@ Gemini напрямую в Google при `GEMINI_DIRECT`, отказ → OpenRou
     (`skill_status.live_traces`). Другая версия скилла на тех же письмах — `BT_SKILL_DIR`.
 - Ответы — `agy_skill_bt_<набор><движок><BT_TAG>.jsonl`. Сравнение кругов — `agy_skill_pair.py`, моделей — `model_compare.py`.
 
-**Бот-мейкер** (**выключен целиком 27.10**, решение Alex: со $100 не прошёл, остальное — «идеальный мир»; крон mm_ws и mm_ml снят, mm_settle досчитывает до 30.10, карточки — /failed, проверки в night_check — BOTS_OFF) — `weather_mm_ws.py` (крон каждый час, 57 мин): живой канал стаканов, заявка переставляется при каждом изменении,
-исполнения — `mm_ws_fills` (`data/db/mm.sqlite3`); расчёт — `weather_mm_settle.py` (`settle_ws`, каждые 2 ч). Кошельки:
+**Бот-мейкер** (**выключен целиком 27.10**, решение Alex: со $100 не прошёл, остальное — «идеальный мир»; крон mm_ws и mm_ml снят, mm_settle снят 30.10 — всё рассчитано, карточки — /failed, проверки в night_check — BOTS_OFF) — `weather_mm_ws.py` (крон каждый час, 57 мин): живой канал стаканов, заявка переставляется при каждом изменении,
+исполнения — `mm_ws_fills` (`data/db/mm.sqlite3`); расчёт — `weather_mm_settle.py` (`settle_ws`; с 30.10 не в кроне). Кошельки:
 `mm_ws_all` / `mm_ws_sel` / `mm_ws_zone` / `mm_ws_z30` / строгий `mm_ws_zs`; `mm100` (банк $100, `bank100()`, `mm100_state`), `mm100f`
 (`focus_cities()`, FOCUS_N=5, FOCUS_CAP=5; **закрыт 23.10** — порог не прошёл, новых заявок нет); `mm_ws_ml` — только исполнения, где модель `weather_mm_ml.py` (обучение 03:40,
 `data/ml/mm_ws_ml/`) ждёт плюс. Тот же бот пишет свои стаканы раз в 60 с → `data/books/books.sqlite3` `book_snaps` (формат Falcon).
