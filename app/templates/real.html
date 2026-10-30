@@ -2,146 +2,170 @@
 {% block title %}Реальные деньги — weather-lab{% endblock %}
 {% block content %}
 {#
-  06.10 (просьба Alex: «довести до конца, чтобы приносило прибыль»): кандидаты на реальные деньги — где каждый сейчас,
-  порог (записан заранее, docs/PRD.md §4а) и сколько осталось до решения. Данные — real_page_data() в dashboard.py.
+  06.10: кандидаты на реальные деньги — порог (записан заранее, docs/PRD.md §4а) и сколько осталось до решения.
+  30.10 (черновик согласован с Alex): три вкладки — Симуляция (кандидаты по категориям, карточки по две в ряд), Вхолостую
+  (настоящий счёт без отправки заявок) и Live (только настоящие ставки; пока — готовность к запуску). По умолчанию — Симуляция,
+  после запуска (REAL_READY["go"]) — Live; «Подробнее →» — отдельная страница /real/<key> (real_detail.html).
+  Данные — real_page_data() в dashboard.py, стили — _real_style.html.
 #}
 {% macro money(v) -%}{{ '−' if v < -0.005 else ('+' if v > 0.005 else '') }}${{ '%.2f' | format(v | abs) }}{%- endmacro %}
 {% macro tone(v) -%}{{ 'pos' if v > 0.005 else ('neg' if v < -0.005 else '') }}{%- endmacro %}
+{% macro dm(d) -%}{{ d[8:10] }}.{{ d[5:7] }}{%- endmacro %}
 {% include "_mm_style.html" %}
-<style>
-  .bk { overflow-wrap: anywhere; } .pane { min-width: 0; }
-  .cands { display: grid; gap: 14px; }
-  .cand { display: grid; grid-template-columns: minmax(0, 1fr) 220px; gap: 18px; }
-  .cand > div { min-width: 0; }   /* 25.10: иначе широкая таблица раздвигала страницу на телефоне */
-  @media (max-width: 760px) { .cand { grid-template-columns: minmax(0, 1fr); } }
-  .cand h3 { margin: 0 0 6px; font-size: 18px; }
-  .cand .what { color: var(--bk-muted); font-size: 14px; margin: 0 0 10px; }
-  .rule { font-size: 14px; margin: 0 0 10px; } .rule b { font-weight: 600; }
-  .st { display: inline-flex; align-items: center; gap: 6px; padding: 4px 11px; border-radius: 999px; font-size: 13px; font-weight: 600; }
-  .st.pass { background: var(--bk-pos-bg); color: var(--bk-pos); }
-  .st.wait { background: rgba(255, 213, 138, .14); color: #FFD58A; }
-  .st.bad { background: rgba(244, 167, 127, .14); color: var(--bk-neg); }
-  .side { background: var(--bk-raise); border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; font-size: 13.5px; }
-  .side .big { font-size: 26px; font-weight: 600; line-height: 1.1; } .side span { color: var(--bk-muted); font-size: 12.5px; }
-  .meter { height: 6px; background: var(--bk-card); border-radius: 3px; overflow: hidden; } .meter i { display: block; height: 100%; background: var(--bk-pos); }
-  table.t { width: 100%; border-collapse: collapse; font-size: 14px; }
-  table.t th { text-align: left; color: var(--bk-muted); font-weight: 500; padding: 6px 8px; border-bottom: 1px solid var(--bk-line); }
-  table.t td { padding: 7px 8px; border-bottom: 1px solid var(--bk-line); vertical-align: top; }
-  .tw { overflow-x: auto; }
-  .bk table.t td { overflow-wrap: normal; }   /* 25.10: в ячейках перенос по словам, а не по буквам (таблица листается внутри .tw) */
-  .luck { font-size: 12px; min-width: 9em; }
-  .warn { color: #FFD58A; font-size: 13.5px; margin-top: 8px; }
-  .muted { color: var(--bk-muted); }
-  ol.steps { margin: 0; padding-left: 20px; line-height: 1.7; }
-</style>
-<div class="bk">
+{% include "_real_style.html" %}
+
+{% macro card(c) %}
+<article class="rl-card{% if c.featured %} rl-featured rl-wide{% endif %}">
+  <div class="rl-head"><div><h3>{{ c.short or c.name }}</h3>{% if c.who %}<div class="rl-who">{{ c.who }}</div>{% endif %}</div>
+    <span class="rl-chip {{ c.state }}">{{ c.chip }}</span></div>
+  <div class="rl-money">{% if c.card.pnl is not none %}<b class="num {{ tone(c.card.pnl) }}">{{ money(c.card.pnl) }}</b>{% else %}<b class="num">—</b>{% endif %}<span>{{ c.card.note }}</span></div>
+  {% if c.card.goal %}{% set g = c.card.goal %}{% set on = [30, (30 * g[0] / g[1]) | round | int] | min %}
+  <div class="rl-goal">
+    <div class="rl-row"><span>до решения: {{ g[1] }} {{ g[2] }}</span><span class="num">{{ g[0] }} из {{ g[1] }}</span></div>
+    <div class="rl-seg" aria-hidden="true">{% for i in range(30) %}<i{% if i < on %} class="on"{% endif %}></i>{% endfor %}</div>
+  </div>{% endif %}
+  {% if c.cat == 'llm' and c.paper | length > 1 %}
+  <div class="tw"><table><thead><tr><th>Кошелёк</th><th class="r">Закрыто</th><th class="r">Итог</th><th class="r">Доходность</th></tr></thead><tbody>
+    {% for r in c.paper | sort(attribute='pnl', reverse=True) %}<tr><td>{{ r.label }}</td><td class="r num">{{ r.n }}</td>
+      <td class="r num {{ tone(r.pnl) }}">{{ money(r.pnl) if r.n else '—' }}</td><td class="r num">{{ ('%+.1f%%' | format(r.roi)) | replace('-', '−') if r.roi is not none else '—' }}</td></tr>{% endfor %}
+  </tbody></table></div>
+  {% else %}
+  <div class="rl-facts">{% for v, l, t in c.card.facts %}<div><b class="num {{ t }}">{{ v }}</b><span>{{ l }}</span></div>{% endfor %}</div>
+  {% endif %}
+  <a class="rl-more" href="/real/{{ c.key }}">Подробнее <span aria-hidden="true">→</span></a>
+  <div class="rl-when">{% if c.state == 'done' %}Решение было <b>{{ dm(c.decide) }}</b>{% else %}Решение <b>{{ dm(c.decide) }}</b>{% if c.days_left > 0 %} · через {{ c.days_left }} дн.{% elif c.days_left == 0 %} · сегодня{% else %} · прошло{% endif %}{% endif %}</div>
+</article>
+{% endmacro %}
+
+<div class="bk rl">
   <div class="top">
     <h1>Реальные деньги <span class="tag">сегодня {{ today }}</span></h1>
-    <p>Кандидаты на переход с бумаги на реальные деньги. У каждого порог записан заранее — до того, как видны результаты, — и дата решения.
-      Проходит порог → сначала маленький живой тест ($50-100) рядом с бумажным двойником, чтобы увидеть разницу «бумага / жизнь».
-      Всё решение — за Alex. Пока реальных денег $0.</p>
+  </div>
+  <div class="rl-tabs" role="tablist" aria-label="Раздел">
+    <button role="tab" id="tab-sim" aria-controls="p-sim" aria-selected="{{ 'false' if is_live else 'true' }}">Симуляция <span class="rl-tn">{{ n_live }} кандидатов</span></button>
+    <button role="tab" id="tab-dry" aria-controls="p-dry" aria-selected="false">Вхолостую <span class="rl-tn">{% if dry and not dry.error %}${{ '%.0f' | format(dry.state.equity) }}{% else %}—{% endif %}</span></button>
+    <button role="tab" id="tab-live" aria-controls="p-live" aria-selected="{{ 'true' if is_live else 'false' }}">Live <span class="rl-tn">$0</span></button>
   </div>
 
-  <section class="sec">
-    <div class="cands">
-      {% for c in cands %}
-      <div class="pane cand">
-        <div>
-          <h3>{{ c.name }}</h3>
-          <p class="what">{{ c.what }}</p>
-          <p class="rule"><b>Порог:</b> {{ c.rule }}. <b>Решение:</b> {{ c.decide[8:10] }}.{{ c.decide[5:7] }}{% if c.days_left > 0 %} (через {{ c.days_left }} дн.){% elif c.days_left == 0 %} (сегодня){% else %} (прошло){% endif %}.
-            <b>Если прошёл:</b> {{ c.then }}.</p>
-          {% if c.paper %}
-          <div class="tw"><table class="t"><thead><tr><th>Кошелёк</th><th>Закрыто</th><th>Угадано</th><th>Итог</th><th>Доходность</th>{% if c.acc %}<th>Точность против рынка</th>{% endif %}</tr></thead><tbody>
-            {% for r in c.paper %}<tr><td>{{ r.label }}{% if r.open %} <span class="muted">· ждут {{ r.open }}</span>{% endif %}</td>
-              <td class="num">{{ r.n }}</td><td class="num">{{ r.won }}</td>
-              <td class="num"><b class="{{ tone(r.pnl) }}">{{ money(r.pnl) if r.n else '—' }}</b>{% if r.luck and r.n %}<div class="muted luck">{{ r.luck[0] }}</div>{% endif %}</td>
-              <td class="num">{{ '%+.0f%%' | format(r.roi) if r.roi is not none else '—' }}</td>
-              {% if c.acc %}<td class="num">{% if r.acc %}{{ '%+.1f' | format(r.acc[0]) }} п.п. <span class="muted">({{ r.acc[1] }} ч)</span>{% elif r.wallet in ('llm_mix', 'llm_cal') %}<span class="muted">не нужно</span>{% else %}—{% endif %}</td>{% endif %}</tr>{% endfor %}
-          </tbody></table></div>
-          {% endif %}
-          {% if c.rows %}
-          <div class="tw"><table class="t"><tbody>
-            {% for r in c.rows %}<tr><td>{{ r.label }}</td><td class="num"><b class="{{ r.tone }}">{{ r.value }}</b>{% if r.note %} <span class="muted">· {{ r.note }}</span>{% endif %}</td></tr>{% endfor %}
-          </tbody></table></div>
-          {% endif %}
-          {% if c.warn %}<div class="warn">{{ c.warn }}</div>{% endif %}
-        </div>
-        <div class="side">
-          <span>сейчас</span>
-          <div><b class="st {{ c.status }}">{{ 'проходит' if c.status == 'pass' else ('копим ставки' if c.status == 'wait' else 'пока не проходит') }}</b></div>
-          <div>{{ c.status_text }}</div>
-          {% if c.progress is defined %}<span>ставок до порога{% if c.best %} ({{ c.best }}){% endif %}</span><div class="meter"><i style="width: {{ c.progress }}%;"></i></div>{% endif %}
-        </div>
-      </div>
-      {% endfor %}
+  {# ---- Симуляция: кандидаты на бумаге по категориям ---- #}
+  <div class="rl-panel" id="p-sim" role="tabpanel" aria-labelledby="tab-sim"{% if is_live %} hidden{% endif %}>
+    <div class="rl-sum">
+      <div><span>Ждут решения</span><b class="num">{{ n_waiting }}</b><span class="sub">из {{ n_live }} кандидатов</span></div>
+      <div><span>Ближайшее решение</span>{% if next %}<b class="num">{{ dm(next.decide) }}</b><span class="sub">«{{ next.short or next.name }}», через {{ next.days_left }} дн.</span>{% else %}<b>—</b>{% endif %}</div>
+      <div><span>Главное решение</span>{% if pool %}<b class="num">{{ dm(pool.decide) }}</b><span class="sub">общий банк $100, через {{ pool.days_left }} дн.</span>{% else %}<b>—</b>{% endif %}</div>
+      <div><span>Общий банк</span>{% if pool and pool.card.pnl is not none %}<b class="num {{ tone(pool.card.pnl) }}">{{ money(pool.card.pnl) }}</b><span class="sub">{{ pool.card.goal[0] }} из {{ pool.card.goal[1] }} ставок</span>{% else %}<b>—</b>{% endif %}</div>
     </div>
-  </section>
 
-  {# 29.10 (Claude, просьба Alex): настоящий счёт вхолостую — real_exec.summary(); простая разметка, оформление — Gemini #}
-  <section class="sec">
-    <div class="sec-head"><h2>Настоящий счёт вхолостую</h2><span class="aside">один счёт ${{ '%.0f' | format(dry.start) if dry and dry.start else '100' }} на весь банк · заявки собираются и подписываются, но не отправляются</span></div>
-    <div class="pane">
+    {% for cat in cats if cat['items'] %}
+    <section class="rl-sec">
+      <div class="sec-head"><h2>{{ cat.name }} <span class="rl-n">{{ cat['items'] | length }}</span></h2>{% if cat.aside %}<span class="aside">{{ cat.aside }}</span>{% endif %}</div>
+      <div class="rl-grid">
+        {% for c in cat['items'] %}{{ card(c) }}{% endfor %}
+        {% if (cat['items'] | rejectattr('featured') | list | length) is odd %}
+        <div class="rl-card rl-empty"><h3>Здесь появится следующий кандидат</h3><p>Со своим порогом и датой решения, записанными заранее.</p></div>
+        {% endif %}
+      </div>
+    </section>
+    {% endfor %}
+
+    {% if closed %}
+    <details class="rl-closed">
+      <summary><h2>Решено — не прошли</h2><span class="rl-n">{{ closed | length }}</span></summary>
+      <div class="rl-closed-list">{% for c in closed %}
+        <a href="/real/{{ c.key }}"><span>{{ c.name }} <span class="faint">({{ c.who }})</span></span>
+          <span class="num {{ tone(c.card.pnl or 0) }}">{{ money(c.card.pnl) if c.card.pnl is not none else '—' }}{% if c.paper and c.paper[0].roi is not none %} · {{ ('%+.1f%%' | format(c.paper[0].roi)) | replace('-', '−') }}{% endif %}</span>
+          <span class="d">решение {{ dm(c.decide) }}</span></a>{% endfor %}
+      </div>
+    </details>
+    {% endif %}
+  </div>
+
+  {# ---- Вхолостую: настоящий счёт без отправки заявок (real_exec) ---- #}
+  <div class="rl-panel" id="p-dry" role="tabpanel" aria-labelledby="tab-dry" hidden>
+    {% set s = dry.state if dry and not dry.error else none %}
+    {% set n_all = (dry.statuses | sum(attribute='n')) if s else 0 %}
+    {% set n_bad = (dry.statuses | selectattr('status', 'in', ['bad', 'blocked']) | sum(attribute='n')) if s else 0 %}
+    <div class="rl-sum">
+      <div><span>Счёт вхолостую</span>{% if s %}<b class="num {{ tone(s.equity - dry.start) }}">${{ '%.2f' | format(s.equity) }}</b><span class="sub">с ${{ '%.0f' | format(dry.start) }} с 29.10</span>{% else %}<b>—</b><span class="sub">данных нет</span>{% endif %}</div>
+      <div><span>От решения до заявки</span>{% if dry and dry.lat %}<b class="num">{{ '%.0f' | format(dry.lat.med) }} с</b><span class="sub">90% — до {{ '%.0f' | format(dry.lat.p90) }} с</span>{% else %}<b>—</b>{% endif %}</div>
+      <div><span>Заявок вхолостую</span><b class="num">{{ n_all }}</b><span class="sub">{{ n_all - n_bad }} ушли бы{% if n_bad %}, {{ n_bad }} нет{% endif %}</span></div>
+      <div><span>Биржа</span>{% if halt %}<b class="neg">стоит</b><span class="sub">{{ halt }}</span>{% else %}<b class="pos">торгует</b><span class="sub">последняя сделка — не старше 15 мин</span>{% endif %}</div>
+    </div>
+
+    <article class="rl-card rl-wide">
+      <div class="rl-head"><div><h3>Настоящий счёт вхолостую</h3><div class="rl-who">общий банк ${{ '%.0f' | format(dry.start) if s else '100' }} · заявки собираются и подписываются, но не отправляются</div></div></div>
       {% if not dry %}
       <p class="muted">Данных ещё нет — холостая быстрая служба (weather_fast_dry) начнёт с ближайших 08:00 местного.</p>
       {% elif dry.error %}
-      <p class="warn">Не удалось прочитать: {{ dry.error }}</p>
+      <p class="rl-warn">Не удалось прочитать: {{ dry.error }}</p>
       {% else %}
-      {% set s = dry.state %}
-      <div class="tw"><table class="t"><tbody>
-        <tr><td>Свободно на счёте</td><td class="num"><b>${{ '%.2f' | format(s.free) }}</b></td></tr>
-        <tr><td>В открытых ставках (по цене покупки)</td><td class="num">${{ '%.2f' | format(s.open) }}</td></tr>
-        <tr><td>Всего на счёте</td><td class="num"><b class="{{ tone(s.equity - dry.start) }}">${{ '%.2f' | format(s.equity) }}</b> <span class="muted">· {{ money(s.equity - dry.start) }} к старту</span></td></tr>
-        <tr><td>Сегодня (UTC): новые ставки / итог закрытых</td><td class="num">${{ '%.2f' | format(s.day_stake) }} / <b class="{{ tone(s.day_pnl) }}">{{ money(s.day_pnl) }}</b></td></tr>
-      </tbody></table></div>
-
-      <h3 style="margin: 16px 0 6px; font-size: 15px;">Заявки</h3>
-      <div class="tw"><table class="t"><thead><tr><th>Состояние</th><th>Сколько</th><th>От решения до подписанной заявки</th></tr></thead><tbody>
-        {% for r in dry.statuses %}<tr><td>{{ {'open': 'ждут итога', 'won': 'выиграли', 'lost': 'проиграли', 'blocked': 'остановлены пределом риска', 'bad': 'не ушли бы (ошибка заявки)'}.get(r.status, r.status) }}</td>
-          <td class="num">{{ r.n }}</td><td class="num">{{ '%.0f с' | format(r.lat) if r.lat is not none else '—' }}</td></tr>{% endfor %}
-        {% if not dry.statuses %}<tr><td colspan="3" class="muted">заявок пока нет</td></tr>{% endif %}
-      </tbody></table></div>
-      {% for r in dry.blocked %}<div class="warn">Предел риска: {{ r.blocked }} — {{ r.n }}</div>{% endfor %}
-      {% for r in dry.problems %}<div class="warn">Не ушла бы: {{ r.problem }} — {{ r.n }}</div>{% endfor %}
-
-      <h3 style="margin: 16px 0 6px; font-size: 15px;">Сверка учёта со ставками</h3>
-      {% if dry.mismatch %}{% for m in dry.mismatch[:10] %}<div class="warn">{{ m }}</div>{% endfor %}
-      {% else %}<p class="muted" style="margin: 0;">Всё сходится: у каждой заявки есть ставка, суммы, цены и итоги совпадают, деньги не в минусе, непогашенных выигрышей нет.</p>{% endif %}
-
-      <h3 style="margin: 16px 0 6px; font-size: 15px;">Быстрые решения (в 08:00) против обычных (через 3-4 мин)</h3>
-      <div class="tw"><table class="t"><thead><tr><th>Кошелёк</th><th>Общих сигналов</th><th>Исполнено: быстро / обычно</th><th>Задержка: быстро / обычно</th><th>Итог закрытых: быстро / обычно</th></tr></thead><tbody>
-        {% for r in dry.compare %}<tr><td>{{ r.wallet }}</td><td class="num">{{ r.n }}</td><td class="num">{{ r.dry_filled }} / {{ r.live_filled }}</td>
-          <td class="num">{{ '%.1f' | format(r.dry_lag) if r.dry_lag is not none else '—' }} / {{ '%.1f' | format(r.live_lag) if r.live_lag is not none else '—' }} мин</td>
-          <td class="num"><b class="{{ tone(r.dry_pnl) }}">{{ money(r.dry_pnl) }}</b> / <b class="{{ tone(r.live_pnl) }}">{{ money(r.live_pnl) }}</b></td></tr>{% endfor %}
-      </tbody></table></div>
-
-      {% if dry.last %}
-      <h3 style="margin: 16px 0 6px; font-size: 15px;">Последние заявки</h3>
-      <div class="tw"><table class="t"><thead><tr><th>Кошелёк</th><th>Город, день</th><th>Ставка</th><th>Состояние</th><th>Задержка</th></tr></thead><tbody>
-        {% for r in dry.last %}<tr><td>{{ r.wallet }}</td><td>{{ r.city }} {{ r.local_date[8:10] }}.{{ r.local_date[5:7] }}</td>
-          <td class="num">{{ 'нет' if r.side == 'no' else 'да' }} по {{ '%.0f' | format(100 * r.price) }}¢, ${{ '%.2f' | format(r.cost) }}</td>
-          <td>{{ r.blocked or r.problem or {'open': 'ждёт итога', 'won': 'выиграла', 'lost': 'проиграла'}.get(r.status, r.status) }}</td>
-          <td class="num">{{ '%.0f с' | format(r.latency_s) if r.latency_s is not none else '—' }}</td></tr>{% endfor %}
-      </tbody></table></div>
+      <div class="rl-money"><b class="num {{ tone(s.equity - dry.start) }}">${{ '%.2f' | format(s.equity) }}</b>
+        <span>свободно ${{ '%.2f' | format(s.free) }} · в ставках ${{ '%.2f' | format(s.open) }} · сегодня поставлено ${{ '%.2f' | format(s.day_stake) }}, итог {{ money(s.day_pnl) }}</span></div>
+      {% set by = {} %}{% for r in dry.statuses %}{% set _ = by.update({r.status: r.n}) %}{% endfor %}
+      <div class="rl-facts four">
+        <div><b class="num">{{ by.get('won', 0) }} / {{ by.get('lost', 0) }} / {{ by.get('open', 0) }}</b><span>выиграли / проиграли / ждут</span></div>
+        <div><b class="num">{% if dry.lat %}{{ '%.0f' | format(dry.lat.med) }} с{% else %}—{% endif %}</b><span>от решения до заявки{% if dry.lat %} (90% — до {{ '%.0f' | format(dry.lat.p90) }} с){% endif %}</span></div>
+        <div><b class="num {{ 'neg' if dry.mismatch else 'pos' }}">{{ dry.mismatch | length }}</b><span>расхождений в сверке</span></div>
+        <div><b class="num {{ 'neg' if dry.blocked else 'pos' }}">{{ dry.blocked | sum(attribute='n') }}</b><span>остановок пределом риска</span></div>
+      </div>
+      {% if dry.problem_last %}{% set q = dry.problem_last %}{% set np = dry.problems | sum(attribute='n') %}
+      <div class="rl-warn">Не ушли бы: {{ np }}. Последняя — {{ q.wallet }}, {{ q.city }} {{ dm(q.local_date) }}, «{{ 'нет' if q.side == 'no' else 'да' }}» по {{ '%.0f' | format(100 * q.price) }}¢: {{ q.problem }}</div>{% endif %}
+      {% for m in dry.mismatch[:3] %}<div class="rl-warn">{{ m }}</div>{% endfor %}
       {% endif %}
-      <p class="muted" style="margin: 12px 0 0; font-size: 13px;">Пределы риска: ставка ≤ ${{ '%.0f' | format(dry.limits.bet_max) }}; новые ставки за сутки ≤ ${{ '%.0f' | format(dry.limits.day_stake_max) }};
-        убыток за сутки ${{ '%.0f' | format(dry.limits.day_loss_pause) }} → пауза до конца суток; счёт ниже ${{ '%.0f' | format(dry.limits.equity_stop) }} → остановка.
-        Выигрыш возвращается на счёт только после гашения (как на Polymarket). Разбор быстрых решений — 12.11.</p>
-      {% endif %}
-    </div>
-  </section>
+      <a class="rl-more" href="/real/dry">Подробнее <span aria-hidden="true">→</span></a>
+      <div class="rl-when">Работает с <b>29.10</b> · настоящий счёт — на вкладке Live</div>
+    </article>
 
-  <section class="sec">
-    <div class="sec-head"><h2>Перед первыми реальными деньгами</h2><span class="aside">docs/PRD.md §4 — общие условия для любого кандидата</span></div>
-    <div class="pane">
-      <ol class="steps">
-        <li>Кандидат прошёл свой порог на бумаге (выше).</li>
-        <li>Прогон настоящих заявок вхолостую (py-clob-client): заявка ставится и отменяется, деньги не тратятся.</li>
-        <li>Проверены пополнение и вывод USDC — маленькой суммой.</li>
-        <li>Проверено, что Polymarket доступен.</li>
-        <li><b>Прямое решение Alex.</b> Только деньги, которые не нужны на жизнь; первый тест — $50-100.</li>
-      </ol>
+    {% if dry and dry.compare %}
+    <section class="rl-sec">
+      <div class="sec-head"><h2>Быстрые решения (в 08:00) против обычных (через 1-4 мин)</h2><span class="aside">разбор — 12.11</span></div>
+      <div class="rl-card"><div class="tw"><table><thead><tr><th>Кошелёк</th><th class="r">Общих сигналов</th><th class="r">Исполнено: быстро / обычно</th><th class="r">Итог закрытых: быстро / обычно</th></tr></thead><tbody>
+        {% for r in dry.compare %}<tr><td>{{ r.wallet }}</td><td class="r num">{{ r.n }}</td><td class="r num">{{ r.dry_filled }} / {{ r.live_filled }}</td>
+          <td class="r num"><b class="{{ tone(r.dry_pnl) }}">{{ money(r.dry_pnl) }}</b> / <b class="{{ tone(r.live_pnl) }}">{{ money(r.live_pnl) }}</b></td></tr>{% endfor %}
+      </tbody></table></div></div>
+    </section>
+    {% endif %}
+  </div>
+
+
+  {# ---- Live: только настоящие ставки; пока счёт не запущен — готовность ---- #}
+  <div class="rl-panel" id="p-live" role="tabpanel" aria-labelledby="tab-live"{% if not is_live %} hidden{% endif %}>
+    <div class="rl-sum">
+      <div><span>Настоящих денег</span><b class="num">$0</b><span class="sub">счёт ещё не пополнен</span></div>
+      <div><span>Настоящих ставок</span><b class="num">0</b><span class="sub">заявки не отправляются</span></div>
+      <div><span>Готовность</span><b class="num">{{ n_ready }} из {{ ready | length }}</b><span class="sub">шагов до запуска</span></div>
+      <div><span>Биржа</span>{% if halt %}<b class="neg">стоит</b><span class="sub">{{ halt }}</span>{% else %}<b class="pos">торгует</b><span class="sub">последняя сделка — не старше 15 мин</span>{% endif %}</div>
     </div>
-  </section>
+    <div class="rl-card rl-empty"><h3>Настоящий счёт не запущен</h3><p>Здесь будут настоящие ставки: счёт, заявки, итоги. Пока счёт работает вхолостую — вкладка «Вхолостую».</p></div>
+    <details class="rl-ready">
+      <summary><h2>Готовность к запуску</h2>
+        <div class="rl-dots" aria-label="готово {{ n_ready }} из {{ ready | length }}">{% for r in ready %}<i{% if r[0] == 'ok' %} class="on"{% endif %}></i>{% endfor %}</div>
+        <span class="muted num">{{ n_ready }} из {{ ready | length }}</span></summary>
+      <ol>{% for st, t, w in ready %}<li><span class="m {{ st }}">{{ '✓' if st == 'ok' else ('…' if st == 'wait' else '○') }}</span><span>{{ t }}</span><span class="w">{{ w }}</span></li>{% endfor %}</ol>
+    </details>
+  </div>
+
 </div>
+
+<script>
+(function () {
+  var tabs = document.querySelectorAll('.rl-tabs [role="tab"]');
+  function show(id) {
+    tabs.forEach(function (t) {
+      var on = t.id === id;
+      t.setAttribute('aria-selected', on ? 'true' : 'false');
+      document.getElementById(t.getAttribute('aria-controls')).hidden = !on;
+    });
+  }
+  tabs.forEach(function (t) {
+    t.addEventListener('click', function () {
+      show(t.id);
+      history.replaceState(null, '', '#' + t.id.slice(4));
+    });
+  });
+  // открывается на Симуляции, после запуска настоящего счёта — на Live (is_live); #sim / #dry / #live — нужная вкладка
+  var want = location.hash ? 'tab-' + location.hash.slice(1) : null;
+  if (want && document.getElementById(want)) show(want);
+})();
+</script>
 {% endblock %}

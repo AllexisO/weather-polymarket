@@ -62,14 +62,17 @@ def state(c):
 _halt = {"at": 0.0, "why": None}
 
 
-def exchange_halted():
-    """None — биржа торгует; иначе причина. Ответ кешируется на 60 с (tick — каждые 20 с)."""
+def exchange_halted(timeout=15):
+    """None — биржа торгует; иначе причина. Ответ кешируется на 60 с (tick — каждые 20 с; страница /real — timeout 3 с)."""
+    import json
     import time
-    import requests
+    import urllib.request   # не requests: функцию зовёт и сайт (/real), а в его контейнере requests нет
     if time.time() - _halt["at"] < 60:
         return _halt["why"]
     try:
-        last = max(t["timestamp"] for t in requests.get("https://data-api.polymarket.com/trades", params={"limit": 20}, timeout=15).json())
+        req = urllib.request.Request("https://data-api.polymarket.com/trades?limit=20", headers={"User-Agent": "weather-lab"})
+        with urllib.request.urlopen(req, timeout=timeout) as f:
+            last = max(t["timestamp"] for t in json.load(f))
         age = (time.time() - last) / 60
         why = f"биржа стоит: последняя сделка на Polymarket {age:.0f} мин назад (> {HALT_MIN})" if age > HALT_MIN else None
     except Exception as e:
@@ -228,7 +231,15 @@ def summary(c):
             "problems": [dict(r) for r in c.execute("SELECT problem, COUNT(*) n FROM main.real_ledger WHERE problem IS NOT NULL GROUP BY problem")],
             "last": [dict(r) for r in c.execute("""SELECT wallet, city, local_date, side, price, cost, status, latency_s, blocked, problem
                                                    FROM main.real_ledger ORDER BY id DESC LIMIT 10""")],
-            "mismatch": reconcile(c), "compare": compare(c)}
+            "mismatch": reconcile(c), "compare": compare(c),
+            # 30.10 (новая /real): задержка решение → заявка (медиана, 90%) и последняя заявка, которая не ушла бы
+            "lat": _lat(c), "problem_last": next((dict(r) for r in c.execute("""SELECT wallet, city, local_date, side, price, problem
+                                                  FROM main.real_ledger WHERE problem IS NOT NULL ORDER BY id DESC LIMIT 1""")), None)}
+
+
+def _lat(c):
+    v = sorted(r[0] for r in c.execute("SELECT latency_s FROM main.real_ledger WHERE latency_s IS NOT NULL"))
+    return {"med": v[len(v) // 2], "p90": v[int(len(v) * 0.9)], "n": len(v)} if v else None
 
 
 def open_ro(dry_db, live_db):

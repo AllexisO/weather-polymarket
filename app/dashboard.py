@@ -3380,47 +3380,52 @@ REAL_CANDIDATES = [
     # свободных денег не хватает, деньги возвращаются при расчёте. Состав выбран по месяцу 23.09-23.10 (задним числом) — поэтому
     # считаем только ставки на дни с 24.10. llm_mix и ml5_cal30 не взяты (Alex: LLM меняются с 01.11, у ml5_cal30 12 ставок);
     # ml_day добавлен 24.10 до первой ставки периода (Alex). Как один настоящий счёт — _real_pool.
-    {"key": "pool", "name": "Общие $100 на 5 кошельков", "wallets": ["fav", "ml5_cal", "ml5", "ml4e_cal", "ml_day"], "decide": "2026-11-21",
+    {"key": "pool", "name": "Общие $100 на 5 кошельков", "cat": "pool", "short": "Обычная ставка ~$2", "who": "главный кандидат", "featured": True, "wallets": ["fav", "ml5_cal", "ml5", "ml4e_cal", "ml_day"], "decide": "2026-11-21",
      "what": "fav, ml5_cal, ml5, ml4e_cal и ml_day ставят как обычно, но как с одного настоящего счёта $100: нет свободных денег — ставка пропускается; деньги возвращаются, когда Polymarket закрыл маркет; если кошельки покупают одну и ту же долю, следующая покупка идёт по стакану без уже купленного нами (5 лучших цен кончились — сколько купилось, меньше 5 долей — не купили). За 27.09-23.10 так вышло бы +$168 по закрытым ставкам (+13% на вложенное), но состав выбран, уже зная итог, — поэтому судим только новые дни.",
      "rule": "ставки на дни 24.10-20.11: ≥ 150 закрытых и доходность на вложенное ≥ +5%", "since": "2026-10-24", "until": "2026-11-20",
      "need_n": 150, "need_roi": 5.0, "then": "живые $100 на Polymarket рядом с бумажным общим банком (сначала §4 п.2-4 в docs/PRD.md)"},
     # 24.10 (Alex: «чем больше денег, тем дороже ставка»): тот же банк, ставка 2% от счёта. Проверка 27.09-23.10 (задним числом):
     # 2% +$184 против ~$2 +$168; 4% +$30, 6% +$61, 10% — банкрот; банк $500 +38%, $1000 +10%, $3000 −14% (не хватает стакана).
-    {"key": "pool2", "name": "Общие $100 на 5 кошельков, ставка 2% от счёта", "wallets": ["fav", "ml5_cal", "ml5", "ml4e_cal", "ml_day"],
+    {"key": "pool2", "name": "Общие $100 на 5 кошельков, ставка 2% от счёта", "cat": "pool", "short": "Ставка 2% от счёта", "who": "ставка растёт вместе со счётом", "wallets": ["fav", "ml5_cal", "ml5", "ml4e_cal", "ml_day"],
      "decide": "2026-11-21", "frac": 0.02,
      "what": "То же, что выше, но ставка растёт вместе со счётом: 2% от всех денег (свободные + в открытых ставках), не меньше 5 долей; каждая покупка — по стакану Polymarket в момент ставки (5 лучших цен). За 27.09-23.10 так вышло бы +$184 против +$168 у ставки ~$2, но свободных денег в худший момент оставалось $0.15; ставки 4-10% — хуже или банкротство.",
      "rule": "ставки на дни 24.10-20.11: ≥ 150 закрытых и доходность на вложенное ≥ +5%; сравнение с банком выше — по итогу в $", "since": "2026-10-24",
      "until": "2026-11-20", "need_n": 150, "need_roi": 5.0, "then": "живые $100 со ставкой 2% от счёта — если итог лучше, чем у ставки ~$2"},
     # 27.10 (Alex «давай делай»): тот же банк + докупка по живому стакану (weather_pool_refill.py). Порог записан до результатов.
     # Проверка 05-26.10 по стаканам mm_ws: докупка ≥ 10¢ за 6 ч +26% на вложенное (цель $10; половины +1% / +47%); первая покупка +5.8%.
-    {"key": "pool_refill", "name": "Общие $100 на 5 кошельков + докупка, когда цена вернулась", "wallets": ["fav", "ml5_cal", "ml5", "ml4e_cal", "ml_day"],
+    {"key": "pool_refill", "name": "Общие $100 на 5 кошельков + докупка, когда цена вернулась", "cat": "pool", "short": "+ Докупка, когда цена вернулась", "who": "6 часов после ставки, раз в 30 минут", "wallets": ["fav", "ml5_cal", "ml5", "ml4e_cal", "ml_day"],
      "decide": "2026-11-18", "refill": True,
      "what": "То же, что первый банк, плюс каждые 30 минут в течение 6 часов после ставки смотрим настоящий стакан Polymarket и докупаем ту же долю, если она снова стоит не дороже первой покупки — пока докупка не дойдёт до суммы первой ставки; дешевле 10¢ не докупаем (вариант уже почти проиграл). Купленное нами считаем вынутым из стакана, комиссия 0.05·p·(1−p) всегда, меньше 5 долей не покупаем, денег на счёте нет — не докупаем. На прошлых днях 05-26.10 докупка (не дешевле 10¢) дала +26% на вложенное, первая покупка +5.8%; но по половинам 05-15.10 +1%, 16-27.10 +47%.",
      "rule": "ставки на дни 28.10-17.11: ≥ 100 закрытых докупок, докупка ≥ +10% на вложенное и итог банка в $ выше, чем у первого банка за те же дни",
      "since": "2026-10-28", "until": "2026-11-17", "need_refill": 100, "need_roi": 10.0,
      "then": "докупка в живом банке $100 (сначала §4 п.2-4 в docs/PRD.md)"},
     # 30.10 (Alex): кандидаты «Бот-мейкер, счёт $100» (mm100) и «сосредоточенный $100» (mm100f) убраны — бот выключен целиком 27.10
-    {"key": "llm", "name": "LLM каждый час", "wallets": ["llm_gem", "llm_ds", "llm_mix", "llm_cal"], "decide": "2026-10-18",
+    {"key": "llm", "name": "LLM каждый час", "cat": "llm", "who": "Gemini, DeepSeek и две смеси", "decided": "решено: ждёт разбора 01.11", "wallets": ["llm_gem", "llm_ds", "llm_mix", "llm_cal"], "decide": "2026-10-18",
      "what": "Gemini и DeepSeek каждый час видят всё о дне и называют шансы; смесь Gemini + LightGBM и Gemini + рынок (с 08.10) — без своих запросов.",
      "rule": "за 04-17.10: ≥ 30 закрытых ставок и итог ≥ +5%; шанс на верный вариант выше рынка в тот же час на 3+ процентных пункта", "since": "2026-10-04",
      "until": "2026-10-17", "need_n": 30, "need_roi": 5.0, "acc": True, "then": "больше городов, потом малый живой тест"},
-    {"key": "day", "name": "Дневная модель", "wallets": ["ml_day"], "decide": "2026-10-20",
+    {"key": "day", "name": "Дневная модель", "cat": "model", "who": "ml_day · решения в 10/12/14 ч по местному", "decided": "решено: в банке", "wallets": ["ml_day"], "decide": "2026-10-20",
      "what": "LightGBM в 10/12/14 ч видит замеры с утра и цену рынка в этот час. На проверке точнее рынка все 8 недель.",
      "rule": "с 06.10: ≥ 40 закрытых ставок и итог ≥ +2% (на проверке свежий период дал +3%)", "since": "2026-10-06",
      "need_n": 40, "need_roi": 2.0, "then": "малый живой тест рядом с бумажным ml_day"},
-    {"key": "dayfav", "name": "Фавориты днём", "wallets": ["ml_day_fav"], "decide": "2026-11-05",
+    {"key": "dayfav", "name": "Фавориты днём", "cat": "model", "who": "ml_day_fav · «да» 50-95¢ по дневной модели", "wallets": ["ml_day_fav"], "decide": "2026-11-05",
      "what": "Правило fav (единственный кошелёк в плюсе на всех трёх отрезках), но днём по дневной модели: «да» 50-95¢, если смесь выше цены. На истории не проверить — у дневной модели прогнозы только с 06.10.",
      "rule": "с 15.10: ≥ 40 закрытых ставок и итог ≥ +5%", "since": "2026-10-15", "need_n": 40, "need_roi": 5.0,
      "then": "малый живой тест рядом с бумажным ml_day_fav"},
-    {"key": "techno", "name": "Дешёвые «да» среди фаворитов", "wallets": ["techno"], "decide": "2026-10-20",
+    {"key": "techno", "name": "Дешёвые «да» среди фаворитов", "cat": "model", "who": "techno", "wallets": ["techno"], "decide": "2026-10-20",
      "what": "«Да» за 8-30¢ на одном из 4 самых дорогих вариантов, если смесь модели и рынка не ниже цены. До 06.10: 34 ставки +71% — выбран по результату, поэтому судим только свежие ставки.",
      "rule": "только ставки с 07.10: ≥ 30 закрытых и итог ≥ +5%", "since": "2026-10-07", "need_n": 30, "need_roi": 5.0,
      "then": "малый живой тест"},
-    {"key": "z", "name": "Смесь v3, «да» 20-40¢", "wallets": ["ml3_z"], "decide": "2026-10-17",
+    {"key": "z", "name": "Смесь v3, «да» 20-40¢", "cat": "model", "who": "ml3_z", "wallets": ["ml3_z"], "decide": "2026-10-17",
      "what": "Смесь главной модели с рынком, только «да» за 20-40¢ — на истории единственная прибыльная зона.",
      "rule": "к 17.10: ≥ 40 закрытых ставок и итог ≥ +5%", "since": "2026-10-03", "until": "2026-10-17", "need_n": 40, "need_roi": 5.0,
      "then": "малый живой тест"},
 ]
+
+
+# 30.10: готовность к настоящим деньгам (вкладка Live на /real) — отмечать вручную, когда сделано;
+# "go" = True (настоящий счёт запущен) → /real открывается на вкладке Live, до этого — на Симуляции
+REAL_READY = {"usdc": False, "wallet": False, "redeem": False, "go": False}
 
 
 def _real_paper(conn, wallet, since, until=None):
@@ -3577,6 +3582,11 @@ def real_page_data(conn):
                 (["итог выше первого банка"] if not ok_vs else []))
             c["progress"] = min(100, round(100 * p["refill_n"] / c["need_refill"]))
             c["paper"] = []
+            c["card"] = {"pnl": p["pnl"] if p["n"] else None, "note": f"с докупками, ставки с {c['since'][8:10]}.{c['since'][5:7]}",
+                         "goal": (p["refill_n"], c["need_refill"], "закрытых докупок"),
+                         "facts": [(money_str(p["refill_pnl"]) if p["refill_n"] else "—", "из них докупки", tn(p["refill_pnl"])),
+                                   (money_str(base["pnl"]) if base["n"] else "—", "первый банк за те же дни", tn(base["pnl"])),
+                                   (f"${p['cash']:.2f}", "свободно", "")]}
         elif c["key"] in ("pool", "pool2"):
             p = _real_pool(conn, c["wallets"], c["since"], c["until"], frac=c.get("frac"))
             tn = lambda v: "pos" if v > 0.005 else ("neg" if v < -0.005 else "")
@@ -3600,6 +3610,15 @@ def real_page_data(conn):
                                   "note": (f"собраны и подписаны, не отправлялись; не ушли бы: {rd[2]}"
                                            + (f" (последняя: {last[0]} {last[1]} — {last[2]})" if last else "")) if rd[0] else None})
             c["paper"] = [_real_paper(conn, w, c["since"], c["until"]) for w in c["wallets"]]
+            facts = [(f"${p['cash']:.2f}", "свободно", "")]
+            if c.get("frac"):
+                facts.append((f"${p['max_stake']:.2f}", "самая большая ставка", ""))
+            else:
+                facts.append((str(p["skip"]), "пропущено без денег", "neg" if p["skip"] else ""))
+                if c["rows"][-1]["label"] == "Настоящие заявки вхолостую":
+                    facts.append((c["rows"][-1]["value"], "заявки вхолостую", c["rows"][-1]["tone"]))
+            c["card"] = {"pnl": p["pnl"] if p["n"] else None, "note": f"закрытые ставки с {c['since'][8:10]}.{c['since'][5:7]}",
+                         "goal": (p["n"], c["need_n"], "закрытых ставок"), "facts": facts}
             ok_n, ok_roi = p["n"] >= c["need_n"], p["roi"] is not None and p["roi"] >= c["need_roi"]
             c["status"] = "pass" if ok_n and ok_roi else ("wait" if not ok_n else "bad")
             c["status_text"] = "проходит" if c["status"] == "pass" else "; ".join(
@@ -3626,6 +3645,15 @@ def real_page_data(conn):
             c["status_text"] = "проходит" if c["status"] == "pass" else "; ".join(need)
             c["progress"] = min(100, round(100 * best["n"] / c["need_n"]))
             c["best"] = best["label"]
+            roi = f"{best['roi']:+.1f}%".replace("-", "−") if best["roi"] is not None else "—"
+            c["card"] = {"pnl": best["pnl"] if best["n"] else None,
+                         "note": ((f"{roi} · закрытых ставок: {best['n']}" if len(rows) == 1 else f"лучший: {best['label']}, {roi}")
+                                  if best["n"] else "ещё нет закрытых ставок"),
+                         "goal": None, "facts": [(f"≥ {c['need_n']}", "ставок нужно", ""), (f"≥ +{c['need_roi']:.0f}%", "доходность нужна", ""),
+                                                 (roi, "сейчас", "pos" if (best["roi"] or 0) > 0 else ("neg" if (best["roi"] or 0) < 0 else ""))]}
+        # 30.10 (новая /real, черновик согласован): состояние карточки — решено / не прошли / порог
+        c["state"] = "done" if c.get("decided") else ("closed" if c["status"] == "bad" and c["days_left"] < 0 else c["status"])
+        c["chip"] = c.get("decided") or {"wait": "ждём", "pass": "проходит", "bad": "не проходит", "closed": "не прошёл"}[c["state"]]
         out.append(c)
     # 29.10 (Alex: «добавь на страницу, чтобы не смотреть командой»): настоящий счёт вхолостую — то же, что weather_fast_dry.py --report
     dry = None
@@ -3635,9 +3663,42 @@ def real_page_data(conn):
         if rc is not None:
             dry = real_exec.summary(rc)
             rc.close()
+            for r in dry["last"] + ([dry["problem_last"]] if dry.get("problem_last") else []):
+                r["city"] = CITY_RU.get(r["city"], r["city"])
     except Exception as e:
         dry = {"error": f"{type(e).__name__}: {e}"}
-    return {"cands": out, "today": today.strftime("%d.%m"), "dry": dry}
+    byk = {c["key"]: c for c in out}
+    if "pool" in byk and "pool2" in byk and byk["pool"]["card"]["pnl"] is not None and byk["pool2"]["card"]["pnl"] is not None:
+        d = byk["pool2"]["card"]["pnl"] - byk["pool"]["card"]["pnl"]
+        byk["pool2"]["card"]["facts"].append((money_str(d), "против ставки ~$2", "pos" if d > 0.005 else ("neg" if d < -0.005 else "")))
+    live_c = [c for c in out if c["state"] != "closed"]
+    cats = [{"key": k, "name": n, "aside": a, "items": [c for c in live_c if c["cat"] == k]} for k, n, a in (
+        ("pool", "Общий банк", "$100 на 5 кошельков: " + ", ".join(byk["pool"]["wallets"]) if "pool" in byk else ""),
+        ("model", "Модели", "отдельный кошелёк — отдельный кандидат"),
+        ("llm", "LLM", "заморожено до 31.10, разбор всех LLM — 01.11" if today <= date(2026, 11, 1) else ""))]
+    waiting = [c for c in live_c if c["state"] in ("wait", "bad") and c["days_left"] >= 0]
+    nxt = min(waiting, key=lambda c: c["days_left"], default=None)
+    halt = None
+    try:
+        import real_exec
+        halt = real_exec.exchange_halted(timeout=3)
+    except Exception as e:
+        halt = None
+        print(f"/real: проверка биржи не удалась — {type(e).__name__}: {e}")
+    pool = byk.get("pool")
+    ready = [("ok" if table_exists(conn, "real_dry") else "no", "Настоящие заявки собираются вхолостую", "идёт с 26.10"),
+             ("ok" if dry and not dry.get("error") else "no", "Один счёт $100 на весь банк, пределы риска, остановка биржи", "вхолостую с 29.10"),
+             ("ok", "Polymarket доступен из Молдовы", "проверено 26.10"),
+             ("ok" if pool and pool["status"] == "pass" else "wait", "Кандидат прошёл свой порог на бумаге",
+              f"банк: {pool['card']['goal'][0]} из {pool['card']['goal'][1]} ставок" if pool else "")] + \
+            [("ok" if REAL_READY[k] else "no", t, w) for k, t, w in (
+                ("usdc", "Пробное пополнение и вывод USDC ($10)", "не сделано"),
+                ("wallet", "Кошелёк Polymarket выбран (вход через почту, ключ — «Export private key»)", "не выбран"),
+                ("redeem", "Настоящее гашение выигрышей и сверка с балансом Polymarket", "после кошелька"),
+                ("go", "Решение о запуске. Только деньги, которые не нужны на жизнь; первый тест $50-100", ""))]
+    return {"cands": out, "today": today.strftime("%d.%m"), "dry": dry, "cats": cats, "closed": [c for c in out if c["state"] == "closed"],
+            "n_live": len(live_c), "n_waiting": len(waiting), "next": nxt, "pool": pool, "halt": halt, "ready": ready,
+            "n_ready": sum(r[0] == "ok" for r in ready), "is_live": REAL_READY["go"]}
 
 
 @app.get("/dashboard", response_class=HTMLResponse)
@@ -3652,6 +3713,18 @@ def real_page(request: Request):
     data = real_page_data(conn)
     conn.close()
     return TEMPLATES.TemplateResponse("real.html", {"request": request, **data})
+
+
+@app.get("/real/{key}", response_class=HTMLResponse)
+def real_detail(request: Request, key: str):
+    """30.10: страница одного кандидата (или настоящего счёта вхолостую — key 'dry'), «Подробнее →» с карточки /real."""
+    conn = db()
+    data = real_page_data(conn)
+    conn.close()
+    c = next((x for x in data["cands"] if x["key"] == key), None)
+    if c is None and key != "dry":
+        raise HTTPException(404)
+    return TEMPLATES.TemplateResponse("real_detail.html", {"request": request, **data, "c": c, "key": key})
 
 
 @app.get("/skill", response_class=HTMLResponse)
