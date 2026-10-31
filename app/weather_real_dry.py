@@ -61,9 +61,11 @@ def build(client, r):
     if m.get("closed") or not m.get("acceptingOrders", True):
         out["problem"] = "маркет закрыт или не принимает заявки"
         return out
-    tick = client.get_tick_size(tok)
     nr = client.get_neg_risk(tok)
     book = client.get_order_book(tok)
+    # шаг — после стакана: get_order_book переписывает кеш шага клиента, подпись сверяет с ним (31.10: у 4¢ шаг сменился
+    # между запросами — 0.001 из get_tick_size, 0.01 из стакана → «invalid tick size», ml_day Циндао 30.10)
+    tick = client.get_tick_size(tok)
     out.update(tick=float(tick), neg_risk=int(bool(nr)), min_size=float(book.min_order_size or 0))
     asks = sorted(float(a.price) for a in (book.asks or []))
     out["best_ask_now"] = asks[0] if asks else None
