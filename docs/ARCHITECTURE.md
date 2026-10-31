@@ -310,7 +310,7 @@ weather-lab/
   максимум в минуты сводки METAR, запас `ROUND_MARGIN`; без ставок — `NO_BET_SOURCES` (KNMI с 12.10, FMI с 15.10); Synoptic
   выключен 12.10. Фора — `weather_fastobs_report.py`. `obs_fmi` — ставок нет с 15.10 (`FMI_BETS = False`).
 - `obs_wethr` — `weather_obs_wethr.py` (крон :07, 57.5 мин), поток wethr.net (`WETHR_API_KEY`), 5 станций США; подписка отменена,
-  **крон снять 31.10**. Использует функции выключенного `weather_obs_rt.py` (`buy_dead`, источники в `metar_seen_src`).
+  **крон снят 31.10** (кошелёк в `RETIRED`). Использует функции выключенного `weather_obs_rt.py` (`buy_dead`, источники в `metar_seen_src`).
 - `weather_logic_check.py` (пн и чт 09:00) — правила замеров против итогов Polymarket, группа «Логика» на /audit.
 
 **Дневная модель** `ml_day` — `weather_ml_day.py`: обучение `--train` 05:45 (утренние строки v3 × часы 10/12/14, `day_feats()` —

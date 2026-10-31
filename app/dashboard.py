@@ -275,7 +275,7 @@ WALLET_INFO = {
 }
 # 14.10 (решение Alex): выключенные кошельки — история и страница остаются, в подписи дата
 HIDDEN_VERSIONS = {"ml", "ml2"}  # 14.10: версии модели без кошельков — не показываем на /training (27.10: и v2)
-RETIRED = {**{w: "2026-10-14" for w in ("main", "main_mk", "emos", "emos_mk", "mm", "mm_mk", "ml", "ml_shift")}, "ens": "2026-10-14", "obs_rt": "2026-10-15", "obs_fmi": "2026-10-15", "techno": "2026-10-27", "ml2": "2026-10-27", "no_big5": "2026-10-28"}  # как weather_paper.RETIRED (сверяет preflight.py)
+RETIRED = {**{w: "2026-10-14" for w in ("main", "main_mk", "emos", "emos_mk", "mm", "mm_mk", "ml", "ml_shift")}, "ens": "2026-10-14", "obs_rt": "2026-10-15", "obs_fmi": "2026-10-15", "techno": "2026-10-27", "ml2": "2026-10-27", "no_big5": "2026-10-28", "obs_wethr": "2026-10-31"}  # как weather_paper.RETIRED (сверяет preflight.py)
 for _w, _d in RETIRED.items():
     if _w in WALLET_INFO:
         _g, _n, _t = WALLET_INFO[_w]
