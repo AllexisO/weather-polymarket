@@ -68,7 +68,7 @@ def check_audit():
         f"нарушений {a['n_violations']}" + (": " + "; ".join(a["violations"][:3]) if a["violations"] else ""),
         "открыть страницу «Проверка» — там список по кошелькам")
     import weather_paper as wp
-    broke = [w for w in a["wallets"] if w["key"] not in ("obs", "obs_fmi", "obs_fast", "obs_rt", "obs_wethr") and w["key"] not in wp.RETIRED
+    broke = [w for w in a["wallets"] if w["key"] not in ("obs", "obs_fmi", "obs_fast", "obs_rt", "obs_wethr", "obs_speci") and w["key"] not in wp.RETIRED
              and w["cash"] < 2.0]
     add("Ставки", "warn" if broke else True, "У всех кошельков есть деньги на ставку",
         ", ".join(f"{w['key']} ${w['cash']:.2f}" for w in broke) or "у всех ≥ $2",

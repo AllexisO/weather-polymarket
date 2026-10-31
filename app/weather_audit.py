@@ -170,14 +170,17 @@ def check_wallets(c, out, now):
     # кошельки по замерам
     orow = [dict(r) for r in c.execute("SELECT * FROM paper_obs_trades")] if \
         c.execute("SELECT 1 FROM sqlite_master WHERE name = 'paper_obs_trades'").fetchone() else []
-    for w in ("obs", "obs_fmi", "obs_fast", "obs_rt", "obs_wethr"):
+    for w in ("obs", "obs_fmi", "obs_fast", "obs_rt", "obs_wethr", "obs_speci"):
         rs = [r for r in orow if r.get("wallet", "obs") == w]
         bets = [r for r in rs if r["status"] in ("open", "won", "lost", "void")]
         closed = [r for r in bets if r["status"] != "open"]
         n_bets += len(bets)
         v = []
         for r in bets:
-            if r["bucket_hi"] >= r["obs_max"]:
+            if w == "obs_speci":   # 31.10: «нет» на вариант SPECI — SPECI внутри варианта, плановые сводки ниже него
+                if not (r["bucket_lo"] < r["obs_max"] < r["bucket_hi"]) or r.get("routine_max") is None or r["routine_max"] >= r["bucket_lo"]:
+                    v.append(f"{r['city']} {r['local_date']}: ставка не по правилу SPECI (SPECI {r['obs_max']}, плановые {r.get('routine_max')})")
+            elif r["bucket_hi"] >= r["obs_max"]:
                 v.append(f"{r['city']} {r['local_date']}: ставка против ещё возможного варианта")
         for r in closed:
             o = out.get((r["city"], r["local_date"]))
@@ -330,9 +333,9 @@ def run(deep=False):
     for w in wallets:
         if w["key"] in wp.RETIRED:   # 15.10: выключенные 14.10 кошельки не ставят — их пустой счёт не требует решения
             continue
-        if w["key"] not in ("obs", "obs_fmi", "obs_fast", "obs_rt", "obs_wethr") and w["cash"] < wp.STAKE and w["in_play"] < 1e-6:
+        if w["key"] not in ("obs", "obs_fmi", "obs_fast", "obs_rt", "obs_wethr", "obs_speci") and w["cash"] < wp.STAKE and w["in_play"] < 1e-6:
             attention.append(f"{w['key']}: денег ${w['cash']:.2f} и нет открытых ставок — кошелёк остановился")
-        elif w["key"] not in ("obs", "obs_fmi", "obs_fast", "obs_rt", "obs_wethr") and w["cash"] < wp.STAKE:
+        elif w["key"] not in ("obs", "obs_fmi", "obs_fast", "obs_rt", "obs_wethr", "obs_speci") and w["cash"] < wp.STAKE:
             attention.append(f"{w['key']}: свободно ${w['cash']:.2f} — меньше ставки, новых ставок не делает")
     if data["gaps"]:
         attention.append("пропуски снимков: " + "; ".join(data["gaps"]))

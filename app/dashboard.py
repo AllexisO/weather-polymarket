@@ -269,6 +269,9 @@ WALLET_INFO = {
                   "Как «живые замеры — быстро», но сводки METAR 5 городов США (Чикаго, Атланта, Остин, Денвер, Майами) приходят платным потоком wethr.net (~на минуту раньше NOAA)"),
     "obs_atis": ("Живые замеры", "Живые замеры — ATIS (США)",
                  "Как «живые замеры — wethr», но сводки 11 городов США читаются из текстового ATIS аэропорта (atis.info, бесплатно) — в среднем на 75 с раньше NOAA; первые 7 дней ставок нет — проверка"),
+    "obs_speci": ("Живые замеры", "Живые замеры — против SPECI",
+                  "С 23.10 Polymarket считает только плановые сводки METAR. Если максимум дня увела вверх только внеочередная (SPECI), "
+                  "а следующая плановая ниже — ставка «нет» на вариант SPECI (рынок в нём путается: Сан-Франциско 25.10 — 93¢ за проигравший вариант)"),
     "obs_fmi": ("Живые замеры", "Хельсинки: 10-минутные замеры FMI (ставки остановлены 15.10)",
                 "То же, что «по живым замерам», но по 10-минутным данным финской метеослужбы — раньше METAR. "
                 "С 15.10 не ставит: максимум FMI за день в 15 из 75 дней «убивал» вариант, который выиграл"),
@@ -441,7 +444,7 @@ def _failed_weeks(rows):
            "lost_usd": sum(w["lost_usd"] for w in out), "pnl": sum(w["pnl"] for w in out)}
     return out, tot
 # кошельки по живым замерам (paper_obs_trades, колонка wallet) — weather_obs_live.py
-OBS_WALLETS = ("obs", "obs_fmi", "obs_fast", "obs_rt", "obs_wethr", "obs_atis")
+OBS_WALLETS = ("obs", "obs_fmi", "obs_fast", "obs_rt", "obs_wethr", "obs_atis", "obs_speci")
 # 2026-09-25: страница кошелька в стиле банковского приложения — города по-русски,
 # у каждого счёта короткий значок вместо иконки.
 CITY_RU = {
@@ -459,7 +462,7 @@ CITY_RU = {
     "wuhan": "Ухань", "zhengzhou": "Чжэнчжоу", "hong_kong": "Гонконг", "taipei": "Тайбэй",
 }
 WALLET_BADGE = {"ml3": "v3", "ml2": "v2", "ml": "v1", "ml_shift": "v1+", "mm": "MX", "emos": "EM", "main": "GI",
-                "mm_mk": "MX", "emos_mk": "EM", "main_mk": "GI", "ml3_mk": "v3", "ml3_cal": "v3+", "ml3_z": "v3Z", "ml3_no": "v3−", "ml3_cal_k": "v3$", "ml4": "v4", "ml4_cal": "v4+", "ml4e": "v4³", "ml4e_cal": "v4³+", "ens": "EN", "ml3_cal15": "v3+¢", "ml3_cal30": "v3+30", "no_cheap": "НЕТ", "fav": "ФАВ", "no_mid": "НЕТ½", "no_big": "НЕТ+", "techno": "ДА¢", "ml3_conf": "v3+У", "ml5_cal": "v5+", "ml5": "v5", "ml5_cal30": "v5+30", "ml5_25": "v5·25", "ml5_31": "v5³¹", "ml5_31_cal": "v5³¹+", "ml5_31_mk": "v5³¹п", "ml5_p1": "П1", "ml5_p1o": "П1з", "ml5_p1o_no": "П1−", "ml5_cal_ask": "v5+ask", "ml5_cal_sz": "v5+$", "ml5_no": "v5−", "no_cheap5": "НЕТ5", "no_mid5": "НЕТ½5", "no_big5": "НЕТ+5", "ml_day": "ДН", "ml_day_fav": "ДН★", "ml_day_nohigh": "ДН↓", "ml3_city": "v3+Г", "copy": "CP", "obs": "OB", "obs_fmi": "FI", "obs_fast": "OB+", "obs_rt": "OB⚡", "obs_wethr": "OBW", "llm_gem": "LG", "llm_ds": "LD"}
+                "mm_mk": "MX", "emos_mk": "EM", "main_mk": "GI", "ml3_mk": "v3", "ml3_cal": "v3+", "ml3_z": "v3Z", "ml3_no": "v3−", "ml3_cal_k": "v3$", "ml4": "v4", "ml4_cal": "v4+", "ml4e": "v4³", "ml4e_cal": "v4³+", "ens": "EN", "ml3_cal15": "v3+¢", "ml3_cal30": "v3+30", "no_cheap": "НЕТ", "fav": "ФАВ", "no_mid": "НЕТ½", "no_big": "НЕТ+", "techno": "ДА¢", "ml3_conf": "v3+У", "ml5_cal": "v5+", "ml5": "v5", "ml5_cal30": "v5+30", "ml5_25": "v5·25", "ml5_31": "v5³¹", "ml5_31_cal": "v5³¹+", "ml5_31_mk": "v5³¹п", "ml5_p1": "П1", "ml5_p1o": "П1з", "ml5_p1o_no": "П1−", "ml5_cal_ask": "v5+ask", "ml5_cal_sz": "v5+$", "ml5_no": "v5−", "no_cheap5": "НЕТ5", "no_mid5": "НЕТ½5", "no_big5": "НЕТ+5", "ml_day": "ДН", "ml_day_fav": "ДН★", "ml_day_nohigh": "ДН↓", "ml3_city": "v3+Г", "copy": "CP", "obs": "OB", "obs_fmi": "FI", "obs_fast": "OB+", "obs_rt": "OB⚡", "obs_wethr": "OBW", "obs_speci": "SP", "llm_gem": "LG", "llm_ds": "LD"}
 # 14.10 (просьба Alex): группы — по модели, к которой относится кошелёк (MODEL_GROUP ниже)
 WALLET_GROUPS = ["v3 — варианты главной модели", "v5 «от рынка»", "Дневная модель", "v4", "v2", "Правила без модели (перекосы рынка)",
                  "Повтор за сильными трейдерами", "Живые замеры"]
@@ -1638,7 +1641,7 @@ def _paper(request, w, failed_page=False):
     for okey in OBS_WALLETS if table_exists(conn, "paper_obs_trades") else ():
         obs = conn.execute("SELECT * FROM paper_obs_trades WHERE wallet = ? ORDER BY placed_at DESC", (okey,)).fetchall()
         label = WALLET_INFO[okey][1]
-        src = {"obs_fmi": "10-мин замер FMI", "obs_fast": "быстрый замер в минуту сводки", "obs_rt": "свежая сводка METAR", "obs_wethr": "свежая сводка METAR (wethr)", "obs_atis": "свежая сводка METAR (ATIS)"}.get(okey, "станция")
+        src = {"obs_fmi": "10-мин замер FMI", "obs_fast": "быстрый замер в минуту сводки", "obs_rt": "свежая сводка METAR", "obs_wethr": "свежая сводка METAR (wethr)", "obs_atis": "свежая сводка METAR (ATIS)", "obs_speci": "SPECI"}.get(okey, "станция")
         card = _wallet_card(label, obs, nofill=sum(r["status"] == "nofill" for r in obs))
         trades_by[okey] = obs
         card["key"] = okey
@@ -1649,11 +1652,13 @@ def _paper(request, w, failed_page=False):
             if r["status"] == "nofill":
                 skips.append({"local_date": r["local_date"], "city": r["city"], "wallet": label, "wkey": okey,
                               "kind": "не смогли купить",
-                              "reason": (f"{src} уже показал{'' if okey in ('obs_fmi', 'obs_fast', 'obs_rt', 'obs_wethr', 'obs_atis') else 'а'} {r['obs_max']:.0f}{unit}, значит {bucket} невозможно; "
+                              "reason": ((f"SPECI дала {r['obs_max']:.0f}{unit}, плановые сводки ниже — Polymarket её не считает; " if okey == "obs_speci" else
+                                          f"{src} уже показал{'' if okey in ('obs_fmi', 'obs_fast', 'obs_rt', 'obs_wethr', 'obs_atis') else 'а'} {r['obs_max']:.0f}{unit}, значит {bucket} невозможно; ")
                                          + (r["reason"] if "reason" in r.keys() and r["reason"] else ""))})
                 continue
             item = {"local_date": r["local_date"], "city": r["city"], "wallet": label, "wkey": okey,
-                    "what": f"против {bucket} ({src} уже {r['obs_max']:.0f}{unit})",
+                    "what": (f"против {bucket} (SPECI {r['obs_max']:.0f}{unit}, плановые до {r['routine_max']:.0f}{unit})" if okey == "obs_speci"
+                             else f"против {bucket} ({src} уже {r['obs_max']:.0f}{unit})"),
                     "price": r["price"], "stake": r["stake"], "fee": _fee(r), "model_p": None, "market_p": None}
             if r["status"] == "open":
                 item["closes"] = expected_close(r["city"], r["local_date"])

@@ -43,6 +43,13 @@
 0-5¢ — кошелёк проверяет это вживую. Максимум FMI округляется до целого (как METAR).
 Ставки обоих кошельков — в paper_obs_trades, колонка wallet.
 
+2026-10-31 (заметка #112, Alex «давай»): кошелёк obs_speci. С 23.10 Polymarket считает только плановые
+сводки, а рынок путается во внеочередных (SPECI): Сан-Франциско 25.10 — SPECI 73°F, плановые 71°F, через час
+вариант 72-73 стоил 93¢, итог 70-71. Правило: SPECI выше всех плановых сводок дня, после неё уже вышла плановая
+и всё ещё ниже варианта SPECI → «нет» на вариант SPECI не дороже 90¢, $2, одна попытка на вариант в день.
+Проверка до запуска (23-30.10, 47 городов, архив IEM, 376 город-дней): 2 таких дня (Денвер 24.10, Сан-Франциско
+25.10), итог оба раза по плановым — расхождений 0 (data/research/_note112_1031/).
+
 5-минутные замеры станций США (api.weather.gov) НЕ используем: проверка
 2026-09-23 — Polymarket в 3 из 4 спорных дней засчитал METAR, а не
 5-минутный максимум (Даллас 21.09: 5 мин — 99°F, METAR — 97°F, выиграл
@@ -84,6 +91,8 @@ FMI_STATIONS = {"helsinki": 100968}  # кошелёк obs_fmi: город -> fmi
 # в 2 даже с запасом 0.5° — датчик/усреднение FMI не совпадает с METAR. По правилу CLAUDE.md («хоть один день расходится — не
 # запускать») ставок нет; история кошелька сохранена.
 FMI_BETS = False
+SPECI_WALLET = "obs_speci"   # 31.10 (заметка #112): «нет» на вариант, который дала только SPECI
+SPECI_MAX_NO = 0.90          # «нет» не дороже 90¢: дороже — выигрыш < $0.22 на $2
 
 
 def ensure_schema(conn):
@@ -174,6 +183,9 @@ def ensure_schema(conn):
     if "ask_depth_usd" not in cols:
         # сколько долларов No продавалось по цене не дороже 1 - MIN_BID в момент сигнала
         conn.execute("ALTER TABLE paper_obs_trades ADD COLUMN ask_depth_usd REAL")
+    if "routine_max" not in cols:
+        # 31.10 (obs_speci): верхняя граница максимума плановых сводок в момент ставки — для проверки правила
+        conn.execute("ALTER TABLE paper_obs_trades ADD COLUMN routine_max REAL")
     conn.commit()
 
 
@@ -360,6 +372,10 @@ def run():
             if best is not None:
                 bet_dead_buckets(conn, "obs", city, cfg, today, best[0], best[1], now, events_cache,
                                  f"станция уже {best[0]} (сводка {best[1]:%H:%M}Z)")
+        with item_guard(f"{SPECI_WALLET} {city}", conn):
+            today, r_hi, targets = speci_targets(by_station.get(st, []), cfg, city)
+            if targets:
+                bet_speci(conn, city, cfg, today, r_hi, targets, now, events_cache)
     for city, fmisid in (FMI_STATIONS.items() if FMI_BETS else ()):
         with item_guard(f"obs_fmi {city}", conn):
             cfg = OBS_CITIES[city]
@@ -371,7 +387,7 @@ def run():
             if best is not None:
                 bet_dead_buckets(conn, "obs_fmi", city, cfg, today, best[0], best[1], now, events_cache,
                                  f"10-мин замер FMI уже {best[0]} ({best[1]:%H:%M}Z)")
-    for w in ("obs", "obs_fmi"):
+    for w in ("obs", "obs_fmi", SPECI_WALLET):
         print(f"{w}: баланс ${cash(conn, w):.2f}")
     conn.close()
 
@@ -413,20 +429,28 @@ def safe_value(temp_c, unit):
     return round(temp_c * 9 / 5 + 32)
 
 
-def bet_dead_buckets(conn, wallet, city, cfg, today, obs_max, obs_time, now, events_cache, why):
-    """Против каждого варианта ниже уже замеренного максимума, пока рынок за него ещё платит ≥ MIN_BID."""
-    # Уже решённые сегодня бакеты этого кошелька (купили или стакан был пуст) — не трогаем повторно.
-    seen = {row[0] for row in conn.execute(
-        "SELECT bucket_lo FROM paper_obs_trades WHERE wallet = ? AND city = ? AND local_date = ?",
-        (wallet, city, today.isoformat()))}
+def _events(cfg, today, events_cache, wallet, city):
     slug = f"highest-temperature-in-{cfg['poly_slug']}-on-{month_day_year_slug(today)}"
     if slug not in events_cache:
         try:
             events_cache[slug] = requests.get(f"{GAMMA}/events", params={"slug": slug}, timeout=20).json()
         except requests.RequestException as e:
             print(f"{wallet}: {city} ошибка Polymarket — {e}", file=sys.stderr)
-            return
-    events = events_cache[slug]
+            return None
+    return events_cache[slug]
+
+
+def _seen(conn, wallet, city, today):
+    """Уже решённые сегодня бакеты этого кошелька (купили или стакан был пуст) — не трогаем повторно."""
+    return {row[0] for row in conn.execute(
+        "SELECT bucket_lo FROM paper_obs_trades WHERE wallet = ? AND city = ? AND local_date = ?",
+        (wallet, city, today.isoformat()))}
+
+
+def bet_dead_buckets(conn, wallet, city, cfg, today, obs_max, obs_time, now, events_cache, why):
+    """Против каждого варианта ниже уже замеренного максимума, пока рынок за него ещё платит ≥ MIN_BID."""
+    seen = _seen(conn, wallet, city, today)
+    events = _events(cfg, today, events_cache, wallet, city)
     if not events:
         return
     for m in events[0]["markets"]:
@@ -436,40 +460,102 @@ def bet_dead_buckets(conn, wallet, city, cfg, today, obs_max, obs_time, now, eve
         bid = m.get("bestBid")
         if bid in (None, "") or float(bid) < MIN_BID:
             continue
-        bid = float(bid)
-        if cash(conn, wallet) < STAKE:
-            print(f"{wallet}: денег нет")
+        if not _buy_no(conn, wallet, city, cfg, today, m, rng, float(bid), obs_max, obs_time, now, why, 1 - MIN_BID,
+                       "по данным gamma рынок ещё давал {bid}¢ за уже невозможный вариант, но в живом стакане ставку против: "):
             break
-        if trading_stopped():
-            print(f"{wallet}: файл STOP — новые ставки не делаем")
-            break
-        try:
-            ex = simulate_buy(m, json.loads(m["clobTokenIds"])[1], STAKE, 1 - MIN_BID)
-        except (requests.RequestException, ValueError, KeyError) as e:
-            print(f"{wallet}: {city} ошибка стакана — {e}", file=sys.stderr)
+
+
+def value_range(temp_c, unit):
+    """31.10 (obs_speci): какие значения маркета может дать сводка по правилу с 23.10 (°F = °C × 9/5 + 32, половина вверх;
+    °C — целые, половина вверх). Целые °C в °F-городе (тело METAR без группы T) — любое от −0.5 до +0.5 °C (как safe_value)."""
+    if unit != "fahrenheit":
+        v = math.floor(temp_c + 0.5 + 1e-9)
+        return v, v
+    conv = lambda c: math.floor(c * 9 / 5 + 32 + 0.5 + 1e-9)
+    if abs(temp_c - round(temp_c)) < 1e-9:
+        return conv(temp_c - 0.5), conv(temp_c + 0.49)
+    return conv(temp_c), conv(temp_c)
+
+
+def speci_targets(metars, cfg, city, today=None):
+    """31.10 (obs_speci): (сегодня, верхняя граница максимума плановых, [(SPECI от, до, время)]) — SPECI выше всех плановых
+    сводок дня, и после неё уже вышла плановая (ждём плановую: SPECI бывает, когда температура быстро меняется)."""
+    tz = ZoneInfo(cfg["tz"])
+    today = today or datetime.now(tz).date()
+    if str(today) < ROUTINE_FROM:
+        return today, None, []
+    rout, spec = [], []
+    for m in metars:
+        if m.get("temp") is None or not m.get("obsTime"):
             continue
-        filled = ex["cost"] >= MIN_FILL
-        reason = None if filled else (
-            f"по данным gamma рынок ещё давал {bid*100:.0f}¢ за уже невозможный вариант, но в живом стакане ставку против: "
-            + (ex["reason"] or f"можно было купить меньше чем на ${MIN_FILL:.0f}"))
-        conn.execute(
-            """
-            INSERT OR IGNORE INTO paper_obs_trades
-            (wallet, city, local_date, unit, bucket_lo, bucket_hi, obs_max, obs_time_utc, placed_at, yes_bid,
-             price, stake, status, reason, shares, fee, book_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (wallet, city, today.isoformat(), cfg["unit"], rng[0], rng[1], obs_max, obs_time.isoformat(),
-             now.isoformat(), bid, ex["avg"], ex["cost"] if filled else 0.0, "open" if filled else "nofill",
-             reason, ex["shares"] if filled else 0.0, ex["fee"] if filled else 0.0, ex["book"]),
-        )
-        conn.commit()
-        if filled:
-            print(f"{wallet}: {city} {today} {why} — бакет "
-                  f"{rng[0]}..{rng[1]} ещё стоит {bid:.2f}; купили {ex['shares']:.1f} долей No по {ex['avg']:.3f} "
-                  f"на ${ex['cost']:.2f} + комиссия ${ex['fee']:.3f}")
-        else:
-            print(f"{wallet}: {city} {today} {reason}")
+        t = datetime.fromtimestamp(m["obsTime"], timezone.utc)
+        if t.astimezone(tz).date() != today:
+            continue
+        (rout if routine_only(m, city, cfg, today) else spec).append((t, value_range(m["temp"], cfg["unit"])))
+    if not rout or not spec:
+        return today, None, []
+    r_hi, last_r = max(v[1] for t, v in rout), max(t for t, v in rout)
+    return today, r_hi, [(v[0], v[1], t) for t, v in spec if v[0] > r_hi and t < last_r]
+
+
+def bet_speci(conn, city, cfg, today, r_hi, targets, now, events_cache):
+    """«Нет» на вариант, в который максимум увела только SPECI (Polymarket её не считает), — не дороже SPECI_MAX_NO."""
+    seen = _seen(conn, SPECI_WALLET, city, today)
+    events = _events(cfg, today, events_cache, SPECI_WALLET, city)
+    if not events:
+        return
+    for m in events[0]["markets"]:
+        rng = parse_bucket(m["question"])
+        if rng is None or m.get("closed") or rng[0] in seen or rng[0] <= r_hi:   # плановые могут быть в этом варианте
+            continue
+        hit = [x for x in targets if rng[0] < x[0] and x[1] < rng[1]]
+        if not hit:
+            continue
+        s_lo, s_hi, ts = min(hit, key=lambda x: x[2])
+        bid = m.get("bestBid")
+        if bid in (None, "") or float(bid) < 1 - SPECI_MAX_NO:
+            continue
+        why = f"SPECI {ts:%H:%M}Z дала {s_hi}, плановые не выше {r_hi}"
+        if not _buy_no(conn, SPECI_WALLET, city, cfg, today, m, rng, float(bid), s_hi, ts, now, why, SPECI_MAX_NO,
+                       "рынок давал {bid}¢ за вариант, который дала только SPECI, но в живом стакане ставку против: ", routine_max=r_hi):
+            break
+
+
+def _buy_no(conn, wallet, city, cfg, today, m, rng, bid, obs_max, obs_time, now, why, max_price, nofill_text, routine_max=None):
+    """Покупка «нет» по живому стакану и запись ставки. False — дальше по городу не идти (нет денег / STOP)."""
+    if cash(conn, wallet) < STAKE:
+        print(f"{wallet}: денег нет")
+        return False
+    if trading_stopped():
+        print(f"{wallet}: файл STOP — новые ставки не делаем")
+        return False
+    try:
+        ex = simulate_buy(m, json.loads(m["clobTokenIds"])[1], STAKE, max_price)
+    except (requests.RequestException, ValueError, KeyError) as e:
+        print(f"{wallet}: {city} ошибка стакана — {e}", file=sys.stderr)
+        return True
+    filled = ex["cost"] >= MIN_FILL
+    reason = None if filled else (
+        nofill_text.format(bid=f"{bid*100:.0f}") + (ex["reason"] or f"можно было купить меньше чем на ${MIN_FILL:.0f}"))
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO paper_obs_trades
+        (wallet, city, local_date, unit, bucket_lo, bucket_hi, obs_max, obs_time_utc, placed_at, yes_bid,
+         price, stake, status, reason, shares, fee, book_json, routine_max)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (wallet, city, today.isoformat(), cfg["unit"], rng[0], rng[1], obs_max, obs_time.isoformat(),
+         now.isoformat(), bid, ex["avg"], ex["cost"] if filled else 0.0, "open" if filled else "nofill",
+         reason, ex["shares"] if filled else 0.0, ex["fee"] if filled else 0.0, ex["book"], routine_max),
+    )
+    conn.commit()
+    if filled:
+        print(f"{wallet}: {city} {today} {why} — бакет "
+              f"{rng[0]}..{rng[1]} ещё стоит {bid:.2f}; купили {ex['shares']:.1f} долей No по {ex['avg']:.3f} "
+              f"на ${ex['cost']:.2f} + комиссия ${ex['fee']:.3f}")
+    else:
+        print(f"{wallet}: {city} {today} {reason}")
+    return True
 
 if __name__ == "__main__":
     run()

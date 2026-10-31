@@ -235,7 +235,7 @@ $100 на кошелёк (`ml`, `mm_mk`, `mm` — $300, `copy` — $1000, `ml3` 
 | `copy` | повтор покупок 30 сильных трейдеров накануне дня маркета, за секунды |
 | `ml_day`, `ml_day_fav` | дневная модель 10/12/14 местного (§10) |
 | `llm_*` | LLM каждый час и agy (§10) |
-| `obs`, `obs_fast`, `obs_wethr`, `obs_fmi` | по замерам станций (§10) |
+| `obs`, `obs_fast`, `obs_speci`, `obs_wethr`, `obs_fmi` | по замерам станций (§10) |
 | `mm_ws_*`, `mm100`, `mm100f` | бот-мейкер (§10, страница /mm) |
 | выключены 14-15.10 (`RETIRED`) | main, main_mk, emos, emos_mk, mm, mm_mk, ml, ml_shift, ens, obs_rt |
 
@@ -309,6 +309,9 @@ weather-lab/
 - `obs_fast` — `weather_fastobs.py` (каждую минуту): JMA, KNMI, DWD, FMI, HKO, RCSS → `data/db/fastobs.sqlite3` (`fast_obs`);
   максимум в минуты сводки METAR, запас `ROUND_MARGIN`; без ставок — `NO_BET_SOURCES` (KNMI с 12.10, FMI с 15.10); Synoptic
   выключен 12.10. Фора — `weather_fastobs_report.py`. `obs_fmi` — ставок нет с 15.10 (`FMI_BETS = False`).
+- `obs_speci` (с 31.10, заметка #112) — в том же `weather_obs_live.py`: SPECI выше всех плановых сводок дня, после неё вышла
+  плановая и она ниже варианта SPECI → «нет» на вариант SPECI ≤ 90¢ (`speci_targets`, `bet_speci`); `routine_max` в
+  `paper_obs_trades` — максимум плановых в момент ставки (проверка правила в `weather_audit`). Порог — 30.11 (заметка).
 - `obs_wethr` — `weather_obs_wethr.py` (крон :07, 57.5 мин), поток wethr.net (`WETHR_API_KEY`), 5 станций США; подписка отменена,
   **крон снят 31.10** (кошелёк в `RETIRED`). Использует функции выключенного `weather_obs_rt.py` (`buy_dead`, источники в `metar_seen_src`).
 - `weather_logic_check.py` (пн и чт 09:00) — правила замеров против итогов Polymarket, группа «Логика» на /audit.
