@@ -10,10 +10,14 @@ agy стоит на сервере (~/.local/bin/agy, вход по аккаун
 и GEMINI.md проекта (правила вида сайта) в письмо не попадает.
 Исчерпан лимит Google — пауза на час (data/agy/paused_until): письма сразу получают ответ PAUSED, Google не долбим.
 Лог — data/logs/agy_runner.log, пишется только когда есть письма.
+01.11 (кошелёк llm_skill, app/weather_llm_skill.py): вторая очередь data/agy/skill_queue/<имя>.json — письмо скилла и папка
+скилла на день. Такое письмо идёт через agy_box.sh (agy с Python в изолированном контейнере, 3-5 мин) — только когда основная
+очередь пуста, по одному, перед каждым снова проверяем основную (её письма ждут не дольше одного письма скилла).
 """
 import fcntl
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -23,6 +27,10 @@ from pathlib import Path
 LAB = Path(__file__).resolve().parent
 AGY_DIR = LAB / "data" / "agy"
 QUEUE, WORK, DONE = AGY_DIR / "queue", AGY_DIR / "work", AGY_DIR / "done"
+SKILL_Q, SKILL_WORK = AGY_DIR / "skill_queue", LAB / "data" / "agy_box" / "work"
+SKILL_TIMEOUT = 300      # секунд на письмо скилла (медиана проверок 217 с, максимум 312)
+# у сервера нет группы docker (TrueNAS) — agy_box.sh запускает контейнер через sudo -n
+DOCKER = "docker" if os.access("/var/run/docker.sock", os.W_OK) else "sudo -n docker"
 PAUSE = AGY_DIR / "paused_until"
 AGY = os.path.expanduser("~/.local/bin/agy")
 MODEL = "gemini-3.8-flash-medium"
@@ -52,6 +60,25 @@ def ask(text):
         return None, (p.stderr or p.stdout or f"код {p.returncode}").strip()[-400:]
 
 
+def ask_skill(job):
+    """Письмо скилла: своя чистая копия папки скилла → agy_box.sh. → (dict ответа agy или None, текст ошибки или None)."""
+    work = SKILL_WORK / ("live_" + job["name"])
+    shutil.rmtree(work, ignore_errors=True)
+    shutil.copytree(LAB / job["folder"], work)
+    (work / ".prompt.txt").write_text(job["prompt"])
+    try:
+        p = subprocess.run([str(LAB / "agy_box.sh"), str(work / ".prompt.txt"), str(work), str(SKILL_TIMEOUT)], capture_output=True,
+                           text=True, timeout=SKILL_TIMEOUT + 90, env={**os.environ, "DOCKER": DOCKER})
+    except subprocess.TimeoutExpired:
+        return None, f"скилл не ответил за {SKILL_TIMEOUT} с"
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+    try:
+        return json.loads(p.stdout), None
+    except ValueError:
+        return None, (p.stderr or p.stdout or f"код {p.returncode}").strip()[-400:]
+
+
 def write_done(name, obj):
     tmp = DONE / f".{name}.tmp"
     tmp.write_text(json.dumps(obj, ensure_ascii=False))
@@ -60,7 +87,7 @@ def write_done(name, obj):
 
 
 def main():
-    for d in (QUEUE, WORK, DONE):
+    for d in (QUEUE, WORK, DONE, SKILL_Q):
         d.mkdir(parents=True, exist_ok=True)
         try:
             os.chmod(d, 0o777)   # контейнер пишет от root, сервер — от allexiso: обоим нужно создавать и удалять файлы
@@ -107,6 +134,36 @@ def main():
         out["seconds"] = round(time.time() - t0, 1)
         write_done(name, out)
         log(f"{name}: {out.get('status')} {out['seconds']} с {(out.get('response') or out.get('error') or '').strip()[:80]!r}")
+    SKILL_Q.mkdir(parents=True, exist_ok=True)
+    for f in sorted(SKILL_Q.glob("*.json")):
+        if any(QUEUE.glob("*.txt")):
+            break   # основная очередь — первой; скилл — в следующую минуту
+        name = f.stem
+        try:
+            job = {**json.loads(f.read_text()), "name": name}
+            f.unlink()
+        except (OSError, ValueError):
+            continue
+        try:
+            paused = float(PAUSE.read_text()) if PAUSE.exists() else 0
+        except (OSError, ValueError):
+            paused = 0
+        if paused > time.time():
+            write_done(name, {"status": "PAUSED", "error": f"лимит Google — пауза до {datetime.fromtimestamp(paused):%H:%M}"})
+            log(f"{name}: пауза (лимит Google)")
+            continue
+        t0 = time.time()
+        res, err = ask_skill(job)
+        blob = json.dumps(res or {}) + (err or "")
+        if any(w in blob for w in QUOTA_WORDS) and not (res and (res.get("response") or "").strip()):
+            PAUSE.write_text(str(time.time() + PAUSE_SEC))
+            log(f"{name}: лимит Google исчерпан — пауза на час: {blob[-300:]}")
+        out = res or {"status": "ERROR"}
+        if err:
+            out["error"] = err
+        out["seconds"] = round(time.time() - t0, 1)
+        write_done(name, out)
+        log(f"{name}: скилл {out.get('status')} {out['seconds']} с {(out.get('response') or out.get('error') or '').strip()[:80]!r}")
 
 
 if __name__ == "__main__":

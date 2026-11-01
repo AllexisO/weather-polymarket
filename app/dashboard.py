@@ -255,6 +255,19 @@ WALLET_INFO = {
     "llm_agy_bet": ("LLM каждый час", "Gemini ставит сама",
                     "Пара к «Gemini через Antigravity»: та же модель и данные, но сама решает — ставить или ждать, на что, «да» или «нет», "
                     "сколько ($0-5) и до какой цены. Код держит рамки риска: до $5, одна ставка на город в день, за день до 20% денег"),
+    "llm_gem_agy": ("LLM каждый час", "LLM Gemini через Antigravity — двойник",
+                    "То же длинное письмо, что у LLM Gemini в этот час, и Gemini так же сама даёт шансы по вариантам — но запрос идёт через "
+                    "Antigravity (бесплатно), а не через OpenRouter. Сравнение покажет, можно ли перевести LLM Gemini на бесплатный путь"),
+    "llm_agy_p": ("LLM каждый час", "Gemini через Antigravity — шансы сама",
+                  "Близнец «Gemini через Antigravity»: то же короткое письмо, но Gemini называет не одно число, а шансы каждого варианта — "
+                  "колокола кода нет. 5 городов США. Проверяет, в шансах ли слабое место «Gemini через Antigravity»"),
+    "llm_agy_cal": ("LLM каждый час", "Gemini через Antigravity + рынок",
+                    "Без своих запросов: шансы «Gemini через Antigravity» этого часа 35% + цена рынка 65%, ставка при перевесе от 10 п.п. — "
+                    "как «Gemini + рынок», только на бесплатной Gemini. Только города в °F (США)"),
+    "llm_skill": ("LLM каждый час", "Скилл: Gemini считает на Python",
+                  "Раз в день в 08:10 местного Gemini через Antigravity работает как агент: читает правила (SKILL.md), сама считает "
+                  "на Python по истории станции, прогнозам и их прошлым ошибкам и даёт шансы всех вариантов. 5 городов США. "
+                  "На проверках прошлого — наравне с рынком; здесь — проверка деньгами"),
     "llm_agy_nomem": ("LLM каждый час", "Gemini без памяти",
                       "Близнец «Gemini через Antigravity», но в письме нет её прошлых прогнозов и ошибок. Сравнение двух показывает, "
                       "учится ли LLM на своих ошибках. Шансы и правила ставок те же"),
@@ -278,7 +291,7 @@ WALLET_INFO = {
 }
 # 14.10 (решение Alex): выключенные кошельки — история и страница остаются, в подписи дата
 HIDDEN_VERSIONS = {"ml", "ml2"}  # 14.10: версии модели без кошельков — не показываем на /training (27.10: и v2)
-RETIRED = {**{w: "2026-10-14" for w in ("main", "main_mk", "emos", "emos_mk", "mm", "mm_mk", "ml", "ml_shift")}, "ens": "2026-10-14", "obs_rt": "2026-10-15", "obs_fmi": "2026-10-15", "techno": "2026-10-27", "ml2": "2026-10-27", "no_big5": "2026-10-28", "obs_wethr": "2026-10-31"}  # как weather_paper.RETIRED (сверяет preflight.py)
+RETIRED = {**{w: "2026-10-14" for w in ("main", "main_mk", "emos", "emos_mk", "mm", "mm_mk", "ml", "ml_shift")}, "ens": "2026-10-14", "obs_rt": "2026-10-15", "obs_fmi": "2026-10-15", "techno": "2026-10-27", "ml2": "2026-10-27", "no_big5": "2026-10-28", "obs_wethr": "2026-10-31", "llm_ds": "2026-11-01", "llm_agy_bet": "2026-11-01"}  # как weather_paper.RETIRED (сверяет preflight.py)
 for _w, _d in RETIRED.items():
     if _w in WALLET_INFO:
         _g, _n, _t = WALLET_INFO[_w]
@@ -419,6 +432,27 @@ FAILED["obs_fmi"] = {"kind": "Кошельки", "threshold": "Отдельно�
                      "off": "Ставки выключены 15.10 (проверка проекта): 13.10 FMI показал 9.0°C, а METAR весь день 8 — «нет» на 8 "
                             "за 75¢ проиграл. FMI усредняет иначе, чем METAR, по которому решает Polymarket: в 15 из 75 прошлых дней "
                             "максимум FMI «убивал» вариант, который выиграл."}
+# 01.11 (разбор LLM за октябрь, заметка #56, data/research/_llm_review_1101): выключены DeepSeek и «Gemini ставит сама»
+FAILED["llm_ds"] = {"kind": "LLM",
+                    "rule": "DeepSeek V4 Pro каждый час 08-19 видит всё о дне (замеры, прогнозы, цены, свои ошибки) и называет шансы "
+                            "вариантов; ставка — по тем же правилам, что у Gemini. Держали для сравнения двух LLM.",
+                    "threshold": "Правило записано заранее (PRD §9 п.16): шанс, который DeepSeek даёт верному варианту, ниже цены рынка "
+                                 "в тот же час → выключить.",
+                    "failed": "Октябрь (дни 04-31.10): шанс верному на 5.6 п.п. ниже рынка (61.2% против 66.8%), хуже в обеих "
+                              "половинах месяца. Деньги: 155 ставок, −$22.00 (−5.7%), угадано 64 при ожидании по цене 68.2.",
+                    "off": "Выключен 01.11: запросы к DeepSeek больше не уходят (минус $2.64 в месяц на OpenRouter). Открытые ставки "
+                           "проданы по стакану в тот же час. Gemini (llm_gem) работает дальше."}
+FAILED["llm_agy_bet"] = {"kind": "LLM",
+                         "rule": "Gemini через Antigravity видит те же данные, что «Gemini через Antigravity», плюс цены, комиссию, "
+                                 "свои деньги и закрытые ставки — и сама решает: ставить или ждать, вариант, сторона, $0-5, "
+                                 "предельная цена. Код держит только рамки риска.",
+                         "threshold": "Порог PRD §9 п.19 (записан до запуска): 11-24.10 ≥ 30 ставок, доходность выше «Gemini через "
+                                      "Antigravity» на 5+ п.п., не хуже в каждой неделе, итог не ниже −$20. 25.10 — все 4 условия "
+                                      "прошли (+7.2% на 48 ставках).",
+                         "failed": "После порога плюс ушёл: ставки дней 18-31.10 — 37, −$32.37 (−19.1%). За октябрь 67 ставок, "
+                                   "−$25.77 (−8.7%), угадано 29 при ожидании по цене 29.5 — перевеса над рынком нет.",
+                         "off": "Выключен 01.11: писем ей больше нет, схему «LLM ставит сама» на основной Gemini не переносим. "
+                                "«Gemini через Antigravity» и близнец без памяти работают дальше."}
 
 
 def _failed_weeks(rows):
@@ -462,7 +496,7 @@ CITY_RU = {
     "wuhan": "Ухань", "zhengzhou": "Чжэнчжоу", "hong_kong": "Гонконг", "taipei": "Тайбэй",
 }
 WALLET_BADGE = {"ml3": "v3", "ml2": "v2", "ml": "v1", "ml_shift": "v1+", "mm": "MX", "emos": "EM", "main": "GI",
-                "mm_mk": "MX", "emos_mk": "EM", "main_mk": "GI", "ml3_mk": "v3", "ml3_cal": "v3+", "ml3_z": "v3Z", "ml3_no": "v3−", "ml3_cal_k": "v3$", "ml4": "v4", "ml4_cal": "v4+", "ml4e": "v4³", "ml4e_cal": "v4³+", "ens": "EN", "ml3_cal15": "v3+¢", "ml3_cal30": "v3+30", "no_cheap": "НЕТ", "fav": "ФАВ", "no_mid": "НЕТ½", "no_big": "НЕТ+", "techno": "ДА¢", "ml3_conf": "v3+У", "ml5_cal": "v5+", "ml5": "v5", "ml5_cal30": "v5+30", "ml5_25": "v5·25", "ml5_31": "v5³¹", "ml5_31_cal": "v5³¹+", "ml5_31_mk": "v5³¹п", "ml5_p1": "П1", "ml5_p1o": "П1з", "ml5_p1o_no": "П1−", "ml5_cal_ask": "v5+ask", "ml5_cal_sz": "v5+$", "ml5_no": "v5−", "no_cheap5": "НЕТ5", "no_mid5": "НЕТ½5", "no_big5": "НЕТ+5", "ml_day": "ДН", "ml_day_fav": "ДН★", "ml_day_nohigh": "ДН↓", "ml3_city": "v3+Г", "copy": "CP", "obs": "OB", "obs_fmi": "FI", "obs_fast": "OB+", "obs_rt": "OB⚡", "obs_wethr": "OBW", "obs_speci": "SP", "llm_gem": "LG", "llm_ds": "LD"}
+                "mm_mk": "MX", "emos_mk": "EM", "main_mk": "GI", "ml3_mk": "v3", "ml3_cal": "v3+", "ml3_z": "v3Z", "ml3_no": "v3−", "ml3_cal_k": "v3$", "ml4": "v4", "ml4_cal": "v4+", "ml4e": "v4³", "ml4e_cal": "v4³+", "ens": "EN", "ml3_cal15": "v3+¢", "ml3_cal30": "v3+30", "no_cheap": "НЕТ", "fav": "ФАВ", "no_mid": "НЕТ½", "no_big": "НЕТ+", "techno": "ДА¢", "ml3_conf": "v3+У", "ml5_cal": "v5+", "ml5": "v5", "ml5_cal30": "v5+30", "ml5_25": "v5·25", "ml5_31": "v5³¹", "ml5_31_cal": "v5³¹+", "ml5_31_mk": "v5³¹п", "ml5_p1": "П1", "ml5_p1o": "П1з", "ml5_p1o_no": "П1−", "ml5_cal_ask": "v5+ask", "ml5_cal_sz": "v5+$", "ml5_no": "v5−", "no_cheap5": "НЕТ5", "no_mid5": "НЕТ½5", "no_big5": "НЕТ+5", "ml_day": "ДН", "ml_day_fav": "ДН★", "ml_day_nohigh": "ДН↓", "ml3_city": "v3+Г", "copy": "CP", "obs": "OB", "obs_fmi": "FI", "obs_fast": "OB+", "obs_rt": "OB⚡", "obs_wethr": "OBW", "obs_speci": "SP", "llm_gem": "LG", "llm_ds": "LD", "llm_gem_agy": "LGa", "llm_agy_p": "AGp", "llm_agy_cal": "AG+", "llm_skill": "SK"}
 # 14.10 (просьба Alex): группы — по модели, к которой относится кошелёк (MODEL_GROUP ниже)
 WALLET_GROUPS = ["v3 — варианты главной модели", "v5 «от рынка»", "Дневная модель", "v4", "v2", "Правила без модели (перекосы рынка)",
                  "Повтор за сильными трейдерами", "Живые замеры"]
@@ -1138,8 +1172,8 @@ def spark(rows, start=100.0, w=160, h=44):
 
 
 LLM_WALLETS = ("llm_gem", "llm_ds")   # LLM со своими запросами — вкладки страницы
-LLM_BET_WALLETS = (*LLM_WALLETS, "llm_mix", "llm_cal", "llm_agy", "llm_agy_bet", "llm_agy_nomem")   # 10.10: llm_agy_nomem — близнец без памяти; llm_agy_bet — ставку решает сама LLM; 09.10: llm_agy — Gemini через Antigravity CLI, только число   # 08.10: llm_cal — Gemini 35% + рынок 65%, перевес от 10 п.п.   # 06.10: и смесь Gemini + LightGBM (weather_llm_hour.MIX_WALLET) — карточки, ставки, деньги
-LLM_LIMIT = {"llm_gem": 13.5, "llm_ds": 4.0, "llm_mix": 0.0, "llm_cal": 0.0, "llm_agy": 0.0, "llm_agy_bet": 0.0, "llm_agy_nomem": 0.0}   # как weather_llm_hour.MONTH_LIMIT; у смеси своих запросов нет
+LLM_BET_WALLETS = (*LLM_WALLETS, "llm_mix", "llm_cal", "llm_agy", "llm_agy_bet", "llm_agy_nomem", "llm_gem_agy", "llm_agy_p", "llm_agy_cal", "llm_skill")   # 01.11: llm_gem_agy — двойник llm_gem через agy; 10.10: llm_agy_nomem — близнец без памяти; llm_agy_bet — ставку решает сама LLM; 09.10: llm_agy — Gemini через Antigravity CLI, только число   # 08.10: llm_cal — Gemini 35% + рынок 65%, перевес от 10 п.п.   # 06.10: и смесь Gemini + LightGBM (weather_llm_hour.MIX_WALLET) — карточки, ставки, деньги
+LLM_LIMIT = {"llm_gem": 13.5, "llm_ds": 4.0, "llm_mix": 0.0, "llm_cal": 0.0, "llm_agy": 0.0, "llm_agy_bet": 0.0, "llm_agy_nomem": 0.0, "llm_gem_agy": 0.0, "llm_agy_p": 0.0, "llm_agy_cal": 0.0, "llm_skill": 0.0}   # как weather_llm_hour.MONTH_LIMIT; у смеси своих запросов нет
 
 
 def _smooth(pts):
@@ -1234,7 +1268,7 @@ def _llm_range(lab):
 LLM_V2_FROM = "2026-10-06T09:45:00+00:00"   # как weather_llm_hour.V2_FROM: с этого запуска — обучение v2 (LightGBM, ошибки, деньги, поправка шансов)
 LLM_KEY_LIMIT = 19.95  # всего внесено на OpenRouter: 08.10 баланс $16.70 после пополнения на $10 + потрачено $3.25 (было $10)
 LLM_CITIES = ("chicago", "atlanta", "austin", "miami", "dallas", "london", "nyc", "paris", "tokyo")   # как weather_llm_hour.ALL_CITIES (Лондон с 04.10; Нью-Йорк, Париж, Токио — только agy, с 10.10)
-LLM_MODEL_NAME = {"llm_gem": "Gemini 3.8 Flash", "llm_ds": "DeepSeek V4 Pro", "llm_mix": "Смесь Gemini + LightGBM", "llm_cal": "Gemini + рынок", "llm_agy": "Gemini через Antigravity", "llm_agy_bet": "Gemini ставит сама", "llm_agy_nomem": "Gemini без памяти"}
+LLM_MODEL_NAME = {"llm_gem": "Gemini 3.8 Flash", "llm_ds": "DeepSeek V4 Pro", "llm_mix": "Смесь Gemini + LightGBM", "llm_cal": "Gemini + рынок", "llm_agy": "Gemini через Antigravity", "llm_agy_bet": "Gemini ставит сама", "llm_agy_nomem": "Gemini без памяти", "llm_gem_agy": "Gemini (письмо llm_gem) через agy", "llm_agy_p": "agy — шансы сама", "llm_agy_cal": "agy + рынок", "llm_skill": "Скилл (agy + Python)"}
 
 
 def _llm_fact_hourly(conn, city, day):
@@ -1287,7 +1321,8 @@ def llm_page_data(conn, key, city, day):
     cols = {r[1] for r in conn.execute("PRAGMA table_info(llm_hour_preds)")} if have else set()
     month = datetime.now(timezone.utc).strftime("%Y-%m-01")
     cards, spend_all, spend_month = [], 0.0, 0.0
-    for k in LLM_BET_WALLETS:
+    # 01.11: выключенные (llm_ds, llm_agy_bet) — карточки на «Не прошли»; сравнения ниже за октябрь остаются с ними
+    for k in (k for k in LLM_BET_WALLETS if k not in RETIRED):
         rows = conn.execute("SELECT * FROM paper_trades WHERE wallet = ? AND status != 'skip'", (k,)).fetchall() if table_exists(conn, "paper_trades") else []
         c = _wallet_card(WALLET_INFO[k][1], [r for r in rows if r["status"] != "nofill"], nofill=0, skipped=0)
         sp = conn.execute("SELECT COUNT(*), COALESCE(SUM(cost), 0), COALESCE(SUM(CASE WHEN ts_utc >= ? THEN cost END), 0) FROM llm_hour_preds WHERE wallet = ?",
@@ -1303,7 +1338,7 @@ def llm_page_data(conn, key, city, day):
         spend_all += sp[1]
         spend_month += sp[2]
         cards.append(c)
-    out = {"v2_from": LLM_V2_FROM, "cards": cards, "spend": {"all": spend_all, "month": spend_month, "limit_month": sum(LLM_LIMIT.values()), "key_limit": LLM_KEY_LIMIT},
+    out = {"v2_from": LLM_V2_FROM, "cards": cards, "spend": {"all": spend_all, "month": spend_month, "limit_month": sum(v for k, v in LLM_LIMIT.items() if k not in RETIRED), "key_limit": LLM_KEY_LIMIT},
            "key": key, "city": city, "cities": [(c, CITY_RU.get(c, c), _llm_clock(c)) for c in LLM_CITIES], "model": LLM_MODEL_NAME[key]}
     if not have:
         return out
@@ -1449,7 +1484,7 @@ def llm_page_data(conn, key, city, day):
 
 
 LLM_VS_HOURS = (8, 10, 12, 14, 16, 18)
-LLM_VS_EXTRA = ("llm_mix", "llm_cal", "llm_agy", "llm_agy_nomem")   # 15.10 (Alex): остальные модели в «В течение дня»; llm_agy_bet шансов не пишет
+LLM_VS_EXTRA = ("llm_mix", "llm_cal", "llm_agy", "llm_agy_nomem", "llm_gem_agy", "llm_agy_p", "llm_agy_cal", "llm_skill")   # 15.10 (Alex): остальные модели в «В течение дня»; llm_agy_bet шансов не пишет
 
 
 def _bucket_score(bk, a):
@@ -1592,7 +1627,9 @@ def _paper(request, w, failed_page=False):
     if table_exists(conn, "paper_trades"):
         rows = conn.execute("SELECT * FROM paper_trades ORDER BY local_date DESC, city").fetchall()
         has_reason = "reason" in rows[0].keys() if rows else False
-        for key, label in PAPER_WALLETS.items():
+        # 01.11: на «Не прошли» — и выключенные кошельки, которых нет на /paper (LLM живут на /llm)
+        extra = {k: WALLET_INFO[k][1] for k in FAILED if k not in PAPER_WALLETS and k in WALLET_INFO} if failed_page else {}
+        for key, label in {**PAPER_WALLETS, **extra}.items():
             wr = trades_by[key] = [r for r in rows if r["wallet"] == key]
             card = _wallet_card(label, wr, nofill=sum(r["status"] == "nofill" for r in wr),
                                 skipped=sum(r["status"] == "skip" for r in wr))
@@ -3396,6 +3433,14 @@ REAL_CANDIDATES = [
      "what": "То же, что выше, но ставка растёт вместе со счётом: 2% от всех денег (свободные + в открытых ставках), не меньше 5 долей; каждая покупка — по стакану Polymarket в момент ставки (5 лучших цен). За 27.09-23.10 так вышло бы +$184 против +$168 у ставки ~$2, но свободных денег в худший момент оставалось $0.15; ставки 4-10% — хуже или банкротство.",
      "rule": "ставки на дни 24.10-20.11: ≥ 150 закрытых и доходность на вложенное ≥ +5%; сравнение с банком выше — по итогу в $", "since": "2026-10-24",
      "until": "2026-11-20", "need_n": 150, "need_roi": 5.0, "then": "живые $100 со ставкой 2% от счёта — если итог лучше, чем у ставки ~$2"},
+    # 01.11 (разбор LLM, заметка #123, Alex «запускай, пускай будет»): тот же банк + ставки llm_mix. Порог записан до первой ставки.
+    # Октябрь задним числом (data/research/_llm_review_1101/pool_mix.py): 06-17.10 +$134 против +$83 у банка, 18-31.10 +$153 против
+    # +$189 (37 ставок банка пропущены без денег) — llm_mix во второй половине около нуля и занимает деньги.
+    {"key": "pool_mix", "name": "Общие $100 на 5 кошельков + LLM (llm_mix)", "cat": "pool", "short": "+ ставки llm_mix", "who": "двойник банка",
+     "wallets": ["fav", "ml5_cal", "ml5", "ml4e_cal", "ml_day", "llm_mix"], "base": ["fav", "ml5_cal", "ml5", "ml4e_cal", "ml_day"], "decide": "2026-11-30",
+     "what": "Тот же общий счёт $100, но кроме пяти кошельков ставит и llm_mix (смесь Gemini и LightGBM, ~5 ставок в день, 5 городов США и Лондон). Деньги общие: ставки llm_mix занимают счёт, и ставка банка может пропуститься.",
+     "rule": "ставки на дни 02-29.11: ≥ 150 закрытых, доходность на вложенное ≥ +5% и итог в $ выше первого банка за те же дни", "since": "2026-11-02", "until": "2026-11-29",
+     "need_n": 150, "need_roi": 5.0, "then": "ставки llm_mix в живом банке $100 (сначала §4 п.2-4 в docs/PRD.md)"},
     # 27.10 (Alex «давай делай»): тот же банк + докупка по живому стакану (weather_pool_refill.py). Порог записан до результатов.
     # Проверка 05-26.10 по стаканам mm_ws: докупка ≥ 10¢ за 6 ч +26% на вложенное (цель $10; половины +1% / +47%); первая покупка +5.8%.
     {"key": "pool_refill", "name": "Общие $100 на 5 кошельков + докупка, когда цена вернулась", "cat": "pool", "short": "+ Докупка, когда цена вернулась", "who": "6 часов после ставки, раз в 30 минут", "wallets": ["fav", "ml5_cal", "ml5", "ml4e_cal", "ml_day"],
@@ -3405,7 +3450,7 @@ REAL_CANDIDATES = [
      "since": "2026-10-28", "until": "2026-11-17", "need_refill": 100, "need_roi": 10.0,
      "then": "докупка в живом банке $100 (сначала §4 п.2-4 в docs/PRD.md)"},
     # 30.10 (Alex): кандидаты «Бот-мейкер, счёт $100» (mm100) и «сосредоточенный $100» (mm100f) убраны — бот выключен целиком 27.10
-    {"key": "llm", "name": "LLM каждый час", "cat": "llm", "who": "Gemini, DeepSeek и две смеси", "decided": "решено: ждёт разбора 01.11", "wallets": ["llm_gem", "llm_ds", "llm_mix", "llm_cal"], "decide": "2026-10-18",
+    {"key": "llm", "name": "LLM каждый час", "cat": "llm", "who": "Gemini и две смеси", "decided": "разбор 01.11: DeepSeek выключен, Gemini и смеси — ноябрь", "wallets": ["llm_gem", "llm_mix", "llm_cal"], "decide": "2026-10-18",
      "what": "Gemini и DeepSeek каждый час видят всё о дне и называют шансы; смесь Gemini + LightGBM и Gemini + рынок (с 08.10) — без своих запросов.",
      "rule": "за 04-17.10: ≥ 30 закрытых ставок и итог ≥ +5%; шанс на верный вариант выше рынка в тот же час на 3+ процентных пункта", "since": "2026-10-04",
      "until": "2026-10-17", "need_n": 30, "need_roi": 5.0, "acc": True, "then": "больше городов, потом малый живой тест"},
@@ -3592,7 +3637,7 @@ def real_page_data(conn):
                          "facts": [(money_str(p["refill_pnl"]) if p["refill_n"] else "—", "из них докупки", tn(p["refill_pnl"])),
                                    (money_str(base["pnl"]) if base["n"] else "—", "первый банк за те же дни", tn(base["pnl"])),
                                    (f"${p['cash']:.2f}", "свободно", "")]}
-        elif c["key"] in ("pool", "pool2"):
+        elif c["key"] in ("pool", "pool2", "pool_mix"):
             p = _real_pool(conn, c["wallets"], c["since"], c["until"], frac=c.get("frac"))
             tn = lambda v: "pos" if v > 0.005 else ("neg" if v < -0.005 else "")
             c["rows"] = [{"label": "Свободно на счёте", "value": f"${p['cash']:.2f}", "tone": tn(p["cash"] + p["open_cost"] - 100),
@@ -3606,7 +3651,7 @@ def real_page_data(conn):
                         ([{"label": "Самая большая ставка", "value": f"${p['max_stake']:.2f}",
                            "note": f"не купили — меньше 5 долей в стакане: {p['nofill']}"}] if c.get("frac") else [])
             # 26.10 (PRD §4 п.2): те же ставки настоящими заявками Polymarket вхолостую — weather_real_dry.py
-            if not c.get("frac") and table_exists(conn, "real_dry"):
+            if c["key"] == "pool" and table_exists(conn, "real_dry"):
                 rd = conn.execute("SELECT COUNT(*), COALESCE(SUM(ok = 1), 0), COALESCE(SUM(ok = 0), 0) FROM real_dry WHERE local_date >= ?",
                                   (c["since"],)).fetchone()
                 last = conn.execute("SELECT wallet, city, problem FROM real_dry WHERE ok = 0 ORDER BY built_at DESC LIMIT 1").fetchone()
@@ -3625,10 +3670,18 @@ def real_page_data(conn):
             c["card"] = {"pnl": p["pnl"] if p["n"] else None, "note": f"закрытые ставки с {c['since'][8:10]}.{c['since'][5:7]}",
                          "goal": (p["n"], c["need_n"], "закрытых ставок"), "facts": facts}
             ok_n, ok_roi = p["n"] >= c["need_n"], p["roi"] is not None and p["roi"] >= c["need_roi"]
-            c["status"] = "pass" if ok_n and ok_roi else ("wait" if not ok_n else "bad")
+            ok_vs = True
+            if c.get("base"):   # 01.11 pool_mix: ещё и итог выше первого банка за те же дни
+                base = _real_pool(conn, c["base"], c["since"], c["until"])
+                ok_vs = p["n"] > 0 and p["pnl"] > base["pnl"]
+                c["rows"].insert(2, {"label": "Первый банк за те же дни", "value": money_str(base["pnl"]) if base["n"] else "ещё нет",
+                                     "tone": tn(base["pnl"]), "note": f"{base['n']} закрытых, пропущено без денег {base['skip']}" if base["n"] else None})
+                facts.append((money_str(base["pnl"]) if base["n"] else "—", "первый банк за те же дни", tn(base["pnl"])))
+            c["status"] = "pass" if ok_n and ok_roi and ok_vs else ("wait" if not ok_n else "bad")
             c["status_text"] = "проходит" if c["status"] == "pass" else "; ".join(
                 ([f"ещё {c['need_n'] - p['n']} закрытых ставок"] if not ok_n else []) +
-                ([f"доходность {p['roi']:+.1f}% → нужно ≥ +5%" if p["roi"] is not None else "доходность ≥ +5%"] if not ok_roi else []))
+                ([f"доходность {p['roi']:+.1f}% → нужно ≥ +5%" if p["roi"] is not None else "доходность ≥ +5%"] if not ok_roi else []) +
+                (["итог выше первого банка"] if not ok_vs else []))
             c["progress"] = min(100, round(100 * p["n"] / c["need_n"]))
         else:
             rows = [_real_paper(conn, w, c["since"], c.get("until")) for w in c["wallets"]]

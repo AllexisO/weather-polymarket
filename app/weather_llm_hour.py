@@ -41,10 +41,13 @@ from polyexec import simulate_buy, trading_stopped
 from weather_cities import OBS_CITIES
 from weather_edge import GAMMA, month_day_year_slug, parse_bucket
 from weather_paper import cash
+from weather_obs_live import routine_only
 
 DB_PATH = Path(os.environ.get("POLY_LAB_DB", Path(__file__).parent.parent / "data" / "db" / "polymarket_lab.sqlite3"))
 # 03.10: llm_gem — Gemini 3.8 Flash, как у коллеги Alex (первый час 03.10 15:08 UTC — 2.5 Flash; порог считается с 04.10)
-WALLETS = {"llm_gem": "google/gemini-3.8-flash", "llm_ds": "deepseek/deepseek-v4-pro"}
+# 01.11 (разбор LLM за октябрь, заметка #56): llm_ds выключен — DeepSeek хуже рынка (шанс верному −5.6 п.п., −5.7%), правило
+# записано заранее (PRD_archive §9 п.16 (3)); запросы к нему больше не уходят, EXTRA / MONTH_LIMIT для него — история
+WALLETS = {"llm_gem": "google/gemini-3.8-flash"}
 # 08.10 (решение Alex: октябрь — эксперимент, данные важнее лимита; настройки LLM заморожены до 31.10, PRD §9 п.16): $13.5 / $4
 # хватает на весь месяц (Gemini ~$0.48/день, DeepSeek ~$0.11/день после выбора дешёвого провайдера 07.10)
 MONTH_LIMIT = {"llm_gem": 13.5, "llm_ds": 4.0}   # $ в месяц на кошелёк (04.10: $6 → $7 → $8.5 + $1.5; 08.10: $13.5 + $4)
@@ -466,17 +469,36 @@ def market_blend(probs, mk, mx):
 # Проба 09.10 (Атланта 15:05 и 4 города 08.10 10:05): 3-17 с на письмо, ответ всегда чистое число; лимит Google почти не тратит.
 AGY_WALLET, AGY_MODEL = "llm_agy", "gemini-3.8-flash-medium"
 AGY_DIR = Path("/data/agy")
-AGY_WAIT = 480          # секунд ждать ответы (обработчик стартует раз в минуту, письмо 3-20 с, по одному); 11.10: было 300 —
+AGY_WAIT = 600          # 01.11: 480 → 600 — +11 писем в час (llm_gem_agy, llm_agy_p); секунд ждать ответы (обработчик стартует раз в минуту, письмо 3-20 с, по одному); 11.10: было 300 —
                         # с 9 городами в 15-21 ч по Кишинёву ~20 писем ≈ 4-5 мин, впритык; запуску отведено 40 мин (JOB_TIMEOUT)
 AGY_MIN_N = 30          # своих ошибок меньше — разброс по ошибкам llm_gem
 AGY_SIGMA_MIN = {"fahrenheit": 0.3, "celsius": 0.2}
 # 10.10: разброс — по 2 часа после полудня: у llm_gem ошибка максимума 14-15 ч ±0.7°F, 16-17 ч ±0.4°F, 18-19 ч ±0.04°F
 # (в первый день был общий блок 14-19 и нижняя граница ±0.8° — в 17:05 Атланта дала 27% варианту выше уже ясного максимума)
 AGY_BLOCKS = ((5, 9), (10, 13), (14, 15), (16, 17), (18, 19))
+# 01.11 (разбор LLM, Alex «делай двойника и сравним»): llm_gem_agy — двойник llm_gem через agy. То же длинное письмо, что llm_gem в этот
+# час (его память, его поправка шансов calibration('llm_gem')), Gemini сама даёт шансы по вариантам; отличие одно — путь запроса
+# (agy Medium вместо OpenRouter с пределом рассуждения 800 токенов). Ставка — bet(), как у llm_gem. Нет ответа llm_gem (лимит,
+# сбой OpenRouter) — двойник всё равно спрашивается. Проба 01.11: 21-22 с на письмо, JSON с шансами по всем вариантам.
+GEM_AGY_WALLET = "llm_gem_agy"
+# 01.11 (Alex «давай все 4»): офлайн 04-31.10 максимум llm_agy угадывает как llm_gem, но её шансы (колокол кода вокруг одного числа)
+# к рынку ничего не добавляют (−0.001 логошибки), а шансы самой Gemini у llm_gem — −0.021 (data/research/_llm_review_1101/agy_ideas.py).
+# llm_agy_p — близнец llm_agy: то же короткое письмо (её память), отличие одно — Gemini сама даёт шансы по вариантам, колокола нет.
+# Только 5 городов США (THRESHOLD_CITIES) — меньше писем в очереди agy. llm_agy_cal — без своих писем: шансы llm_agy этого часа 35%
+# + рынок 65%, ставка от CAL_EDGE (как llm_cal у llm_gem); только города в °F — в °C смесь с llm_agy хуже рынка (+0.03…+0.04).
+AGY_P_WALLET, AGY_CAL_WALLET = "llm_agy_p", "llm_agy_cal"
+AGY_CAL_CITIES = ("chicago", "atlanta", "austin", "miami", "dallas", "nyc")
+GEM_AGY_NOTE = "\n\nDo NOT use any tools, commands or files. Reply with the JSON object only, nothing else.\n\n"
 AGY_HEAD = ("You are an expert weather forecaster for one airport weather station. Using the data below, forecast today's MAXIMUM "
             "temperature at this station (the value the market settles on: the official METAR maximum for the local calendar day, "
             "whole degrees of the market unit). The final max can never be below the max already observed today.\n"
             'Do NOT use any tools, commands or files. Reply with one JSON object only, nothing else: {"max_f": <number in the market unit>}\n\n')
+AGY_P_HEAD = ("You are an expert weather forecaster for one airport weather station. Using the data below, forecast today's MAXIMUM "
+              "temperature at this station (the value the market settles on: the official routine METAR maximum for the local calendar day, "
+              "whole degrees of the market unit) and the probability of every market bucket. The final max can never be below the max "
+              "already observed today. Give honest probabilities: they decide bets against the market price.\n"
+              'Do NOT use any tools, commands or files. Reply with one JSON object only, nothing else: {"max_f": <number in the market unit>, '
+              '"probs": {"<bucket label exactly as given>": <probability 0-1>, ...}} — cover every bucket, probabilities sum to 1.\n\n')
 
 
 def agy_name(wallet, city, day, hour):
@@ -637,7 +659,7 @@ def agy_bet_place(conn, city, day, now, mk, mx, ans):
 def agy_finish(conn, now, pending):
     """Забирает ответы agy, пишет прогноз и шансы, ставит."""
     got = agy_collect(list(pending))
-    for name, (wallet, city, day, lnow, mk, mx, text) in pending.items():
+    for name, (wallet, city, day, lnow, mk, mx, text, *rest) in pending.items():
         with item_guard(f"{city}/{wallet}", conn):
             a = got.get(name)
             # 10.10: сбой agy — ошибкой элемента, а не строкой в логе: на /status запуск виден «с пропусками»
@@ -645,6 +667,9 @@ def agy_finish(conn, now, pending):
             if a is None:
                 raise RuntimeError(f"agy не ответил за {AGY_WAIT // 60} мин — работает ли крон agy_runner.py на сервере?")
             raw = (a.get("response") or "").strip()
+            if wallet == GEM_AGY_WALLET:
+                gem_agy_finish(conn, now, wallet, city, day, lnow, mk, mx, text, rest[0], a, raw)
+                continue
             try:
                 ans = _parse(raw)
                 pred = float(ans["max_f"])
@@ -652,6 +677,21 @@ def agy_finish(conn, now, pending):
                 raise RuntimeError(f"agy без ответа ({a.get('status')}: {(a.get('error') or raw)[:200]!r})") from None
             if mx is not None and pred < mx:
                 pred = float(mx)
+            if wallet == AGY_P_WALLET:
+                probs = probs_for(ans, mk, mx)
+                u = a.get("usage") or {}
+                conn.execute("""INSERT OR REPLACE INTO llm_hour_preds (wallet, city, local_date, local_hour, ts_utc, model, pred_max,
+                    probs_json, market_json, max_so_far, reason, cost, tokens, prompt, answer_json, probs_raw_json)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,0,?,?,?,?)""",
+                             (wallet, city, day.isoformat(), slot(lnow).hour, now.isoformat(), f"agy:{AGY_MODEL}", pred,
+                              json.dumps(probs) if probs else None, json.dumps({b["label"]: b["price"] for b in mk}), mx,
+                              f"шансы — сама Gemini, {a.get('seconds', '?')} с", u.get("total_tokens"), text,
+                              json.dumps(ans, ensure_ascii=False), json.dumps(probs) if probs else None))
+                conn.commit()
+                res = (bet(conn, wallet, city, day, now, mk, probs) if probs else "шансы не разобрать") if slot(lnow).hour >= BET_FROM else None
+                print(f"{wallet} {city} {lnow:%H:%M}: максимум {pred:g}° (уже {mx}), шансы сама, {a.get('seconds', '?')} с"
+                      f"{'; ' + res if res else ''}", flush=True)
+                continue
             if wallet == AGY_BET_WALLET:
                 u = a.get("usage") or {}
                 conn.execute("""INSERT OR REPLACE INTO llm_hour_preds (wallet, city, local_date, local_hour, ts_utc, model, pred_max,
@@ -678,6 +718,45 @@ def agy_finish(conn, now, pending):
             res = (bet(conn, wallet, city, day, now, mk, probs) if probs else "шансы не посчитать") if slot(lnow).hour >= BET_FROM else None
             print(f"{wallet} {city} {lnow:%H:%M}: максимум {pred:g}° (уже {mx}), разброс ±{sigma:.1f}°, "
                   f"{a.get('seconds', '?')} с{'; ' + res if res else ''}", flush=True)
+            if wallet == AGY_WALLET and city in AGY_CAL_CITIES and probs and slot(lnow).hour >= BET_FROM:
+                with item_guard(f"{city}/{AGY_CAL_WALLET}", conn):
+                    cp = market_blend(probs, mk, mx)
+                    if cp:
+                        conn.execute("""INSERT OR REPLACE INTO llm_hour_preds (wallet, city, local_date, local_hour, ts_utc, model,
+                            probs_json, market_json, max_so_far, reason, cost, tokens) VALUES (?,?,?,?,?,?,?,?,?,?,0,0)""",
+                                     (AGY_CAL_WALLET, city, day.isoformat(), slot(lnow).hour, now.isoformat(), f"cal:agy:{AGY_MODEL}+market",
+                                      json.dumps(cp), json.dumps({b["label"]: b["price"] for b in mk}), mx,
+                                      f"{CAL_W:.0%} llm_agy + {1 - CAL_W:.0%} рынок, перевес от {CAL_EDGE * 100:.0f} п.п."))
+                        conn.commit()
+                        cres = bet(conn, AGY_CAL_WALLET, city, day, now, mk, cp, CAL_EDGE)
+                        print(f"{AGY_CAL_WALLET} {city} {lnow:%H:%M}: llm_agy + рынок{'; ' + cres if cres else ''}", flush=True)
+
+
+def gem_agy_finish(conn, now, wallet, city, day, lnow, mk, mx, text, cal, a, raw):
+    """llm_gem_agy: ответ agy в том же виде, что у llm_gem (шансы, почасовой прогноз) → та же поправка шансов и та же ставка."""
+    try:
+        ans = _parse(raw)
+    except ValueError:
+        raise RuntimeError(f"agy без ответа ({a.get('status')}: {(a.get('error') or raw)[:200]!r})") from None
+    raw_p = probs_for(ans, mk, mx)
+    probs = calibrate(raw_p, cal, mk, mx) if raw_p else None
+    hourly_ans = {}
+    for k, v in (ans.get("hourly_f") or {}).items():
+        try:
+            hourly_ans[f"{int(str(k)[:2]):02d}"] = float(v)
+        except (TypeError, ValueError):
+            pass
+    u = a.get("usage") or {}
+    conn.execute("""INSERT OR REPLACE INTO llm_hour_preds (wallet, city, local_date, local_hour, ts_utc, model, pred_max, probs_json,
+        market_json, max_so_far, reason, cost, tokens, prompt, answer_json, hourly_json, probs_raw_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,0,?,?,?,?,?)""",
+                 (wallet, city, day.isoformat(), slot(lnow).hour, now.isoformat(), f"agy:{AGY_MODEL}", ans.get("pred_max_f"),
+                  json.dumps(probs) if probs else None, json.dumps({b["label"]: b["price"] for b in mk}), mx,
+                  str(ans.get("reason", ""))[:300], u.get("total_tokens"), text, json.dumps(ans, ensure_ascii=False), json.dumps(hourly_ans),
+                  json.dumps(raw_p) if raw_p else None))
+    conn.commit()
+    res = (bet(conn, wallet, city, day, now, mk, probs) if probs else "шансы не разобрать") if slot(lnow).hour >= BET_FROM else None
+    print(f"{wallet} {city} {lnow:%H:%M}: максимум {ans.get('pred_max_f')}° (уже {mx}), {a.get('seconds', '?')} с{'; ' + res if res else ''}",
+          flush=True)
 
 
 def label_range(lab):
@@ -707,11 +786,14 @@ def prompt(conn, wallet, city, day, lnow, obs, hrs, mk, sun=None, now=None, cal=
         if m["icaoId"] != c["icao"] or t.date() != day or m.get("temp") is None:
             continue
         f = to_unit(m["temp"], c["unit"])
-        mx = max(mx, round(f)) if mx is not None else round(f)
+        # 01.11 (заметка #109): с маркетов на 23.10 итог — только плановые сводки; SPECI видна в письме, но в максимум не идёт
+        counts = routine_only(m, city, c, day)
+        if counts:
+            mx = max(mx, round(f)) if mx is not None else round(f)
         cl = " ".join(f"{x['cover']}{x.get('base') or ''}" for x in m.get("clouds") or [])
         dew = f"{to_unit(m['dewp'], c['unit']):.0f}{u}" if m.get("dewp") is not None else "-"
         o_lines.append(f"{t:%H:%M} temp {f:.1f}{u} dew {dew} wind {m.get('wdir')}/{m.get('wspd')}kt "
-                       f"clouds {cl or '-'} {m.get('wxString') or ''}".rstrip())
+                       f"clouds {cl or '-'} {m.get('wxString') or ''}".rstrip() + ("" if counts else " [SPECI — does not count for settlement]"))
     f_lines = [f"{h['time'][-5:]} {h['temperature_2m']}{u} dew {h['dew_point_2m']} cloud {h['cloud_cover']}% "
                f"rain {h['precipitation_probability']}% {h['precipitation']}mm wind {h['wind_direction_10m']}/{h['wind_speed_10m']}kt sun {h.get('shortwave_radiation')}W/m2"
                for h in hrs if int(h["time"][11:13]) >= lnow.hour]
@@ -729,7 +811,8 @@ def prompt(conn, wallet, city, day, lnow, obs, hrs, mk, sun=None, now=None, cal=
                                 "YOUR HOUR-AHEAD FORECASTS vs ACTUAL (review these first):",
                                 hour_review(conn, wallet, city, now or datetime.now(timezone.utc), obs)]),
             f"Market unit: {u} (buckets and all temperatures below are in {u}).",
-            f"Max observed so far today (METAR, rounded {u}): {mx if mx is not None else 'none yet'}",
+            f"Max observed so far today (routine METAR only — the market settles on routine reports, SPECI do not count; rounded {u}): "
+            f"{mx if mx is not None else 'none yet'}",
             "Today's METAR observations:", *(o_lines or ["none yet"]),
             "Remaining hourly forecast (Open-Meteo):", *(f_lines or ["none"]),
             f"Daily max forecasts by weather model ({u}): " + (", ".join(f"{m} {v:.1f}" for m, v in models) or "none"),
@@ -941,8 +1024,10 @@ def run():
                 print(f"{city}: маркета на {day} нет")
                 continue
             hrs, sun = hourly(city)
-            agy_ws = (AGY_WALLET, AGY_BET_WALLET, AGY_NOMEM_WALLET) if city in THRESHOLD_CITIES else \
-                ((AGY_WALLET, AGY_NOMEM_WALLET) if city in AGY_EXTRA_CITIES else ())
+            # 01.11 (разбор LLM, заметка #56): llm_agy_bet выключен — после порога 11-24.10 (+5.1%) потерял 19% за 18-31.10;
+            # писем ему больше нет, код ставки (agy_bet_*) остаётся для истории
+            agy_ws = ((AGY_WALLET, AGY_NOMEM_WALLET) if city in THRESHOLD_CITIES + AGY_EXTRA_CITIES else ()) + \
+                ((AGY_P_WALLET,) if city in THRESHOLD_CITIES else ())
             for aw in agy_ws:
                 with item_guard(f"{city}/{aw}", conn):
                     if conn.execute("SELECT 1 FROM llm_hour_preds WHERE wallet = ? AND city = ? AND local_date = ? AND local_hour = ?",
@@ -952,15 +1037,28 @@ def run():
                     if aw == AGY_BET_WALLET and conn.execute("SELECT 1 FROM paper_trades WHERE wallet = ? AND city = ? AND local_date = ?",
                                                               (aw, city, day.isoformat())).fetchone():
                         continue
-                    text, mx = prompt(conn, aw, city, day, lnow, obs, hrs, mk, sun, now, short=True, nomem=aw == AGY_NOMEM_WALLET)
+                    # llm_agy_p — письмо llm_agy (её память), меняется только просьба об ответе
+                    text, mx = prompt(conn, AGY_WALLET if aw == AGY_P_WALLET else aw, city, day, lnow, obs, hrs, mk, sun, now, short=True,
+                                      nomem=aw == AGY_NOMEM_WALLET)
                     if aw == AGY_BET_WALLET:
                         text = AGY_BET_HEAD + text + "\n" + agy_bet_block(conn, city, day, mk, mx)
+                    elif aw == AGY_P_WALLET:
+                        text = AGY_P_HEAD + text
                     else:
                         text = AGY_HEAD + text
                     name = agy_name(aw, city, day, slot(lnow).hour)
                     agy_submit(name, text)
                     agy_pending[name] = (aw, city, day, lnow, mk, mx, text)
-            for wallet, model in (WALLETS.items() if city in CITIES else ()):   # Gemini/DeepSeek через OpenRouter — только CITIES
+            if city in CITIES:
+                with item_guard(f"{city}/{GEM_AGY_WALLET}", conn):
+                    if not conn.execute("SELECT 1 FROM llm_hour_preds WHERE wallet = ? AND city = ? AND local_date = ? AND local_hour = ?",
+                                        (GEM_AGY_WALLET, city, day.isoformat(), slot(lnow).hour)).fetchone():
+                        gcal = calibration(conn, MIX_FROM, day)
+                        gtext, gmx = prompt(conn, MIX_FROM, city, day, lnow, obs, hrs, mk, sun, now, gcal)
+                        name = agy_name(GEM_AGY_WALLET, city, day, slot(lnow).hour)
+                        agy_submit(name, SYSTEM + GEM_AGY_NOTE + gtext)
+                        agy_pending[name] = (GEM_AGY_WALLET, city, day, lnow, mk, gmx, gtext, gcal)
+            for wallet, model in (WALLETS.items() if city in CITIES else ()):   # Gemini через OpenRouter — только CITIES
                 with item_guard(f"{city}/{wallet}", conn):
                     if conn.execute("SELECT 1 FROM llm_hour_preds WHERE wallet = ? AND city = ? AND local_date = ? AND local_hour = ?",
                                     (wallet, city, day.isoformat(), slot(lnow).hour)).fetchone():

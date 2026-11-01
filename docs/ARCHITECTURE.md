@@ -327,14 +327,20 @@ weather-lab/
 Gemini напрямую в Google при `GEMINI_DIRECT`, отказ → OpenRouter; DeepSeek — провайдер StreamLake, `PROVIDER_DS`) →
 `llm_hour_preds`. Ставка — `bet()`: лучший перевес ≥ 5 п.п., 10-90¢ (и по цене покупки), $2. Лимит — `MONTH_LIMIT`.
 Без своих запросов: `llm_mix` (Gemini + v3 поровну, `mix_probs`), `llm_cal` (Gemini 35% + рынок, `CAL_EDGE`). Тетрадь и разбор часа
-выключены 13.10 (`NOTEBOOK_ON = False`). **Настройки заморожены до 31.10.** Страница **/llm** (`llm_page_data()`).
+выключены 13.10 (`NOTEBOOK_ON = False`). Заморозка кончилась 31.10; `llm_ds` выключен 01.11 (из `WALLETS` убран, запросов нет). «Максимум на сейчас» (`max_so_far`) — только плановые
+сводки (`weather_obs_live.routine_only`, с 01.11), SPECI в письме с пометкой.
+Страница **/llm** (`llm_page_data()`).
 
-**agy (Gemini через Antigravity CLI)** — `llm_agy`, `llm_agy_bet`, `llm_agy_nomem`: письма кладутся в `data/agy/queue/`,
+**agy (Gemini через Antigravity CLI)** — `llm_agy`, `llm_agy_nomem`, с 01.11 `llm_gem_agy` (двойник llm_gem: то же письмо
+`prompt('llm_gem')` + `SYSTEM`, шансы даёт Gemini, ставка `bet()`; `gem_agy_finish`), `llm_agy_p` (письмо llm_agy, шансы даёт Gemini,
+`AGY_P_HEAD`, 5 городов США), `llm_agy_cal` (без писем: llm_agy 35% + рынок, `AGY_CAL_CITIES`, `CAL_EDGE`) (`llm_agy_bet` выключен 01.11 — писем нет): письма кладутся в `data/agy/queue/`,
 `agy_runner.py` (крон сервера каждую минуту) отдаёт их `agy -p`, ответ — `data/agy/done/`; ждём до `AGY_WAIT`; лимит Google →
 пауза (`data/agy/paused_until`). Ответ — `{"max_f"}`, шансы — код (`agy_probs`, разброс `agy_sigma` по `AGY_BLOCKS`). Доп. города
 `AGY_EXTRA_CITIES`. `llm_agy_bet` — сама решает ставку в рамках `AGY_BET_*`; `llm_agy_nomem` — без памяти (`nomem=True`).
 
-**Скилл agy с Python** (проверка на прошлом, живого кошелька нет; страница **/skill**, `app/skill_status.py`):
+**Скилл agy с Python** (проверка на прошлом; страница **/skill**, `app/skill_status.py`). С 01.11 живой кошелёк `llm_skill` —
+`weather_llm_skill.py` (крон :10, письмо в 08 местного, 5 городов США; папка дня `agy_skill.build` + `app/agy_skill_live`;
+очередь `data/agy/skill_queue` → `agy_runner.py` → `agy_box.sh`, когда основная очередь пуста):
 - Папка на день — `app/agy_skill.py ДАТА` → `data/agy_box/skill*/<дата>/`: `SKILL.md`, `tools.py`, `cities.json`, CSV станции
   и прогнозов — строго до дня письма.
 - Коробка: **`agy_box.sh`** + `Dockerfile.agybox` (образ `weather-lab-agybox`: без проекта, `.env` и базы, корень только для
