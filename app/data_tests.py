@@ -112,7 +112,8 @@ def ml_day(c):
         if abs(sum(m.values()) - 1) > 0.01 or abs(sum(b.values()) - 1) > 0.01 or set(m) != set(b) or set(b) != set(k):
             bad.append(f"{city} {d} {h}ч: сумма/варианты")
             continue
-        dmx = round(dmax if u == "celsius" else dmax * 9 / 5 + 32)
+        from weather_cities import poly_round
+        dmx = poly_round(dmax if u == "celsius" else dmax * 9 / 5 + 32)
         for lab, p in m.items():
             lo_hi = parse_bucket(f"be {'between ' if '-' in lab[1:] else ''}{lab} on")
             if lo_hi is None:

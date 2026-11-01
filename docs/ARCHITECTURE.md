@@ -325,7 +325,7 @@ weather-lab/
 `FAV_BAND`, с 19.10 и по цене покупки). `ml5` — чистая v5 по правилам ml3.
 
 **LLM каждый час** — `weather_llm_hour.py`, крон `5,56 * * * *` (`slot()`, `due()`, замок `/data/logs/.weather_llm_hour.lock`).
-Города `CITIES` (5 США + Лондон), 08-19 местного. Письмо: METAR с полуночи, почасовой Open-Meteo, `mm_forecasts`, цены, свои
+Города `CITIES` (5 США + Лондон; с 03.11 + Сан-Франциско — `NEW_CITIES`, первый день маркета; у agy-кошельков, кроме llm_gem_agy, и в папке скилла его нет), 08-19 местного. Письмо: METAR с полуночи, почасовой Open-Meteo, `mm_forecasts`, цены, свои
 прогнозы за 7 дней, утренний v3 (`lgbm_forecast`, `bias_stats`, `bet_summary`, `calibration`) → OpenRouter (`OPENROUTER_API_KEY`;
 Gemini напрямую в Google при `GEMINI_DIRECT`, отказ → OpenRouter; DeepSeek — провайдер StreamLake, `PROVIDER_DS`) →
 `llm_hour_preds`. Ставка — `bet()`: лучший перевес ≥ 5 п.п., 10-90¢ (и по цене покупки), $2. Лимит — `MONTH_LIMIT`.

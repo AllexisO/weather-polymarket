@@ -1278,7 +1278,7 @@ def _llm_range(lab):
 
 LLM_V2_FROM = "2026-10-06T09:45:00+00:00"   # как weather_llm_hour.V2_FROM: с этого запуска — обучение v2 (LightGBM, ошибки, деньги, поправка шансов)
 LLM_KEY_LIMIT = 19.95  # всего внесено на OpenRouter: 08.10 баланс $16.70 после пополнения на $10 + потрачено $3.25 (было $10)
-LLM_CITIES = ("chicago", "atlanta", "austin", "miami", "dallas", "london", "nyc", "paris", "tokyo")   # как weather_llm_hour.ALL_CITIES (Лондон с 04.10; Нью-Йорк, Париж, Токио — только agy, с 10.10)
+LLM_CITIES = ("chicago", "atlanta", "austin", "miami", "dallas", "london", "nyc", "paris", "tokyo", "san_francisco")   # как weather_llm_hour.ALL_CITIES (Лондон с 04.10; Нью-Йорк, Париж, Токио — только agy, с 10.10; Сан-Франциско — OpenRouter и llm_gem_agy, с 03.11)
 LLM_MODEL_NAME = {"llm_gem": "Gemini 3.8 Flash", "llm_ds": "DeepSeek V4 Pro", "llm_mix": "Смесь Gemini + LightGBM", "llm_cal": "Gemini + рынок", "llm_agy": "Gemini через Antigravity", "llm_agy_bet": "Gemini ставит сама", "llm_agy_nomem": "Gemini без памяти", "llm_gem_agy": "Gemini (письмо llm_gem) через agy", "llm_agy_p": "agy — шансы сама", "llm_agy_cal": "agy + рынок", "llm_skill": "Скилл (agy + Python)", "llm_mix5": "Смесь Gemini + v5"}
 
 

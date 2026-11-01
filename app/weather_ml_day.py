@@ -55,7 +55,7 @@ import requests
 import weather_ml as ml
 import weather_ml_q as mq
 from jobmark import item_guard, mark
-from weather_cities import OBS_CITIES, station_for
+from weather_cities import OBS_CITIES, poly_round, station_for
 
 DB_PATH = Path(os.environ.get("POLY_LAB_DB", Path(__file__).parent.parent / "data" / "db" / "polymarket_lab.sqlite3"))
 ML_DIR = DB_PATH.parent.parent / "ml"
@@ -282,7 +282,7 @@ def morning_row(conn, city, d, tz, metars):
     if prev not in actual:
         pv = [o[1] for o in obs if o[0].astimezone(tz).date().isoformat() == prev]
         if pv:
-            actual[prev] = round(max(pv) * 9 / 5 + 32) if unit == "fahrenheit" else round(max(pv))
+            actual[prev] = poly_round(max(pv) * 9 / 5 + 32) if unit == "fahrenheit" else poly_round(max(pv))
     row = ml.row_for(conn, city, list(OBS_CITIES).index(city), cfg, d, fc, fv, known8, actual)
     p8 = {(lo, hi): p for lo, hi, p in conn.execute(
         """SELECT bucket_lo, bucket_hi, market_p FROM snapshots_fast WHERE city = ? AND local_date = ?

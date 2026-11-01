@@ -29,7 +29,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from weather_cities import OBS_CITIES
-from weather_llm_hour import ALL_CITIES
+from weather_llm_hour import ALL_CITIES, NEW_CITIES
 from weather_station_obs import whole_f
 
 DB_PATH = Path(os.environ.get("POLY_LAB_DB", Path(__file__).parent.parent / "data" / "db" / "polymarket_lab.sqlite3"))
@@ -102,6 +102,8 @@ def build(day, out=None):
         "SELECT city, local_date, win_lo, win_hi FROM weather_poly_outcomes WHERE local_date < ?", (day.isoformat(),))}
     cities = {}
     for city in ALL_CITIES:
+        if city in NEW_CITIES:   # 02.11: папка скилла — прежние 9 городов (Сан-Франциско только у OpenRouter-кошельков)
+            continue
         cfg = OBS_CITIES[city]
         tz, unit = ZoneInfo(cfg["tz"]), cfg["unit"]
         u = "F" if unit == "fahrenheit" else "C"

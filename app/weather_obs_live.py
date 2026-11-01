@@ -72,7 +72,7 @@ from zoneinfo import ZoneInfo
 import requests
 
 from polyexec import final_price, simulate_buy, trading_stopped
-from weather_cities import ALL_OBS_CITIES, OBS_CITIES, station_for
+from weather_cities import ALL_OBS_CITIES, OBS_CITIES, poly_round, station_for
 from weather_edge import GAMMA, month_day_year_slug, parse_bucket
 from weather_poly_resolve import fetch_winning_bucket
 
@@ -423,10 +423,10 @@ def safe_value(temp_c, unit):
     32 → 90 °F, и вариант «88-89 °F» считался мёртвым, а сбывался (obs_fast в США 13 из 28 таких ставок проиграл, −$16;
     obs_wethr Майами 05.10: wethr 32.0, сводка 31.7 = 89 °F). Берём нижнюю границу; в °C-городах итог и так целые °C."""
     if unit != "fahrenheit":
-        return round(temp_c)
+        return poly_round(temp_c)   # 02.11: половина вверх, как в правилах маркета (было round — к чётному)
     if abs(temp_c - round(temp_c)) < 1e-9:
         temp_c -= 0.5
-    return round(temp_c * 9 / 5 + 32)
+    return poly_round(temp_c * 9 / 5 + 32)
 
 
 def _events(cfg, today, events_cache, wallet, city):

@@ -27,7 +27,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from weather_cities import OBS_CITIES
+from weather_cities import OBS_CITIES, poly_round
 
 DB_PATH = Path(os.environ.get("POLY_LAB_DB", Path(__file__).parent.parent / "data" / "db" / "polymarket_lab.sqlite3"))
 MM_DB = DB_PATH.parent / "mm.sqlite3"
@@ -43,7 +43,7 @@ ROUNDS = 300
 
 def market_value(temp_c, unit):
     """Значение сводки в единицах маркета (как признак обучения): °C — целое, °F — из десятых °C до целого."""
-    return round(temp_c) if unit == "celsius" else round(temp_c * 9 / 5 + 32)
+    return poly_round(temp_c) if unit == "celsius" else poly_round(temp_c * 9 / 5 + 32)   # 02.11: половина вверх (папка скилла agy_skill — тоже отсюда)
 
 
 def features(side, price, ts, city, local_date, lo, hi, size, day_max):

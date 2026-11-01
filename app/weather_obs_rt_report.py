@@ -14,7 +14,7 @@ from pathlib import Path
 
 import requests
 
-from weather_cities import OBS_CITIES
+from weather_cities import OBS_CITIES, poly_round
 from weather_edge import parse_bucket
 
 MAIN_DB = Path(os.environ.get("POLY_LAB_DB", "/data/db/polymarket_lab.sqlite3"))
@@ -67,7 +67,7 @@ def main():
         if not city or not rng:
             continue
         cfg = OBS_CITIES[city]
-        val = (lambda t: round(t * 9 / 5 + 32)) if cfg["unit"] == "fahrenheit" else (lambda t: round(t))
+        val = (lambda t: poly_round(t * 9 / 5 + 32)) if cfg["unit"] == "fahrenheit" else poly_round
         kills = [(o, fs) for o, fs, t in met.get(cfg["icao"], []) if val(t) > rng[1] and o <= x["timestamp"] + 60]
         if not kills:
             continue

@@ -146,6 +146,11 @@ def run_checks():
         from weather_obs_live import safe_value, FMI_BETS
         t("целые 32 °C в °F-городе — нижняя граница", safe_value(32.0, "fahrenheit"), 89)
         t("десятые 31.7 °C в °F-городе", safe_value(31.7, "fahrenheit"), 89)
+        from weather_cities import poly_round   # 02.11: примеры из описания маркета Polymarket (половина вверх)
+        for x, want in ((13.9, 14), (17.4, 17), (16.5, 17), (-1.7, -2), (-8.5, -8), (18.3 * 9 / 5 + 32, 65), (17.8 * 9 / 5 + 32, 64),
+                        (19 * 9 / 5 + 32, 66), (-22.5 * 9 / 5 + 32, -8), (12.5 * 9 / 5 + 32, 55)):
+            t(f"округление как Polymarket: {x:.2f}", poly_round(x), want)
+        t("десятые 16.5 °C в °C-городе — 17, как Polymarket", safe_value(16.5, "celsius"), 17)
         t("obs_fmi ставок не делает (FMI против итога: 15 ошибок из 75 дней)", FMI_BETS, False)
         import weather_fastobs as fo
         t("KNMI и FMI только пишем", {"knmi", "fmi"} <= fo.NO_BET_SOURCES, True)

@@ -33,7 +33,7 @@ import numpy as np
 import pandas as pd
 
 import weather_ml as ml
-from weather_cities import OBS_CITIES
+from weather_cities import OBS_CITIES, poly_round
 
 DB_PATH = Path(os.environ.get("POLY_LAB_DB", Path(__file__).parent.parent / "data" / "db" / "polymarket_lab.sqlite3"))
 ML_DIR = DB_PATH.parent.parent / "ml"
@@ -327,7 +327,7 @@ def bucket_probs(conn, city, cfg, buckets, metars):
         prev_vals = [o[1] for o in obs if o[0].astimezone(tz).date().isoformat() == prev]
         if prev_vals:
             mx = max(prev_vals)
-            actual[prev] = round(mx * 9 / 5 + 32) if unit == "fahrenheit" else round(mx)
+            actual[prev] = poly_round(mx * 9 / 5 + 32) if unit == "fahrenheit" else poly_round(mx)
     ci = list(OBS_CITIES).index(city)
     row = ml.row_for(conn, city, ci, ocfg, d, fc, fv, known, actual)
     X = pd.DataFrame([row]).reindex(columns=meta["features"])

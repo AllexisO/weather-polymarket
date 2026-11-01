@@ -31,7 +31,7 @@ for src, city, obs, t, seen in fast.execute("SELECT source, city, obs_utc, temp_
 res = {}
 for (src, city), rs in fr.items():
     unit = OBS_CITIES[city]["unit"]
-    f = (lambda c: round(c * 9 / 5 + 32)) if unit == "fahrenheit" else (lambda c: math.floor(c + 0.5))
+    f = (lambda c: math.floor(c * 9 / 5 + 32 + 0.5 + 1e-9)) if unit == "fahrenheit" else (lambda c: math.floor(c + 0.5))
     for mo, ms, mt in metar.get(city, []):
         near = [x for x in rs if abs((x[0] - mo).total_seconds()) <= 120]
         if not near or mt is None:

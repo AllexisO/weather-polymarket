@@ -38,7 +38,7 @@ import requests
 
 from jobmark import item_guard
 from polyexec import simulate_buy, trading_stopped
-from weather_cities import OBS_CITIES
+from weather_cities import OBS_CITIES, poly_round
 from weather_edge import GAMMA, month_day_year_slug, parse_bucket
 from weather_paper import cash
 from weather_obs_live import routine_only
@@ -63,7 +63,13 @@ PROVIDER = {"sort": "price"}
 PROVIDER_DS = {"order": ["streamlake"], "allow_fallbacks": True, "max_price": {"completion": 3}}
 EXTRA = {"llm_ds": {"reasoning": {"enabled": False}, "provider": PROVIDER_DS},
          "llm_gem": {"reasoning": {"max_tokens": 800}, "provider": PROVIDER}}
-CITIES = ("chicago", "atlanta", "austin", "miami", "dallas", "london")
+# 02.11 (Alex «давай»): + Сан-Франциско — кошельки OpenRouter (llm_gem, llm_mix, llm_mix5, llm_cal) и llm_gem_agy, с дня маркета
+# 03.11 (NEW_CITIES — первый день). Выбран по копии базы 04-31.10 (city_pick.py): к обеду рынок знает итог хуже всех наших городов
+# (логошибка 13-15 ч 0.99), объём $10.5k в 08-19, °F. Проверка до первой ставки: правила маркета (KSFO, десятые °C из группы T,
+# только плановые, °F половина вверх, местный день) и прогон 39 дней 23.09-31.10 против итогов — расхождений 0 (sf_rule_check.py).
+# Пороги кошельков — по прежним городам, Сан-Франциско — отдельной строкой.
+CITIES = ("chicago", "atlanta", "austin", "miami", "dallas", "london", "san_francisco")
+NEW_CITIES = {"san_francisco": "2026-11-03"}
 THRESHOLD_CITIES = ("chicago", "atlanta", "austin", "miami", "dallas")   # порог PRD §9 п.16 — по 5 городам США; Лондон (°C) с 04.10 — отдельно
 # 10.10 (решение Alex): ещё 4 города только для llm_agy и llm_agy_nomem (agy, без OpenRouter); пороги п.18 и п.20 — по-прежнему
 # по 5 городам США, эти — отдельно; llm_agy_bet — только 5 городов США (его 4 условия и общий дневной предел записаны на них)
@@ -544,7 +550,7 @@ def agy_sigma(conn, city, day, hour):
     """Разброс ошибки максимума дня (корень из среднего квадрата) в блоке часов AGY_BLOCKS — по городам той же единицы."""
     unit = OBS_CITIES[city]["unit"]
     lo, hi = next(((a, b) for a, b in AGY_BLOCKS if a <= hour <= b), (hour, hour))
-    same = [c for c in ALL_CITIES if OBS_CITIES[c]["unit"] == unit]
+    same = [c for c in ALL_CITIES if OBS_CITIES[c]["unit"] == unit and c not in NEW_CITIES]   # 02.11: разброс agy — по прежним городам
     for w in (AGY_WALLET, MIX_FROM):
         es = [r[0] for r in conn.execute(f"""SELECT p.pred_max - d.actual_max FROM llm_hour_preds p
             JOIN weather_station_daily d ON d.city = p.city AND d.local_date = p.local_date
@@ -793,7 +799,7 @@ def prompt(conn, wallet, city, day, lnow, obs, hrs, mk, sun=None, now=None, cal=
         # 01.11 (заметка #109): с маркетов на 23.10 итог — только плановые сводки; SPECI видна в письме, но в максимум не идёт
         counts = routine_only(m, city, c, day)
         if counts:
-            mx = max(mx, round(f)) if mx is not None else round(f)
+            mx = max(mx, poly_round(f)) if mx is not None else poly_round(f)   # 02.11: половина вверх, как Polymarket (было round — к чётному)
         cl = " ".join(f"{x['cover']}{x.get('base') or ''}" for x in m.get("clouds") or [])
         dew = f"{to_unit(m['dewp'], c['unit']):.0f}{u}" if m.get("dewp") is not None else "-"
         o_lines.append(f"{t:%H:%M} temp {f:.1f}{u} dew {dew} wind {m.get('wdir')}/{m.get('wspd')}kt "
@@ -1023,6 +1029,8 @@ def run():
         with item_guard(city, conn):
             lnow = local_now(city, now)
             day = slot(lnow).date()
+            if day.isoformat() < NEW_CITIES.get(city, ""):
+                continue
             mk = markets(city, day)
             if not mk:
                 print(f"{city}: маркета на {day} нет")
