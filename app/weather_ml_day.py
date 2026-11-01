@@ -62,6 +62,11 @@ ML_DIR = DB_PATH.parent.parent / "ml"
 WALLET = "ml_day"
 WALLET_FAV = "ml_day_fav"
 WALLET_NOHIGH = "ml_day_nohigh"
+# 01.11 (Alex «сделай двойников», разбор недели): ml_day_conf — правило ml_day, но в час решения, где фаворит стоит ≥ CONF_SKIP
+# (доля от суммы цен) — рынок уверен, ставки нет (в следующий час решения — снова пробуем). Закрытые ставки ml_day с 06.10 при
+# фаворите ≥ 60¢ (утренний снимок): 34, −35.2%, обе половины октября в минусе; при 35-60¢ — 133, +12.1% (week_conf.py).
+WALLET_CONF = "ml_day_conf"
+CONF_SKIP = 0.60
 NOHIGH_HOURS = (12, 14)
 NOHIGH_BAND = (0.05, 0.25)   # цена лучшего покупателя «да» (настоящий стакан CLOB)
 NOHIGH_PREFILTER = (0.03, 0.35)   # 28.10: стакан смотрим только у вариантов с такой ценой Gamma (меньше запросов)
@@ -316,6 +321,10 @@ def bet(conn, city, day, now, mk, blend, wallet=WALLET, day_max_c=None, hour=Non
     from polyexec import simulate_buy, trading_stopped
     from weather_paper import cash
     best = None
+    if wallet == WALLET_CONF:
+        tot = sum(b["price"] for b in mk) or 1.0
+        if max(b["price"] for b in mk) / tot >= CONF_SKIP:
+            return None
     for b in mk:
         q = blend[b["label"]]
         if wallet == WALLET_NOHIGH:     # вариант целиком выше максимума с утра (границы маркета — в его единицах)
@@ -438,7 +447,7 @@ def run(dry=False):
                           json.dumps({b["label"]: b["price"] for b in mk})))
             conn.commit()
             res = None
-            for w in (WALLET, WALLET_FAV, WALLET_NOHIGH):
+            for w in (WALLET, WALLET_FAV, WALLET_NOHIGH, WALLET_CONF):
                 if not conn.execute("SELECT 1 FROM paper_trades WHERE wallet = ? AND city = ? AND local_date = ?", (w, city, d)).fetchone():
                     r = bet(conn, city, d, now, mk, blend, w, f["day_max_c"], lt.hour)
                     if r:

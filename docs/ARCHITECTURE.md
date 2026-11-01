@@ -224,6 +224,7 @@ $100 на кошелёк (`ml`, `mm_mk`, `mm` — $300, `copy` — $1000, `ml3` 
 | `ml5_p1o` | с 29.10 20:00: как `ml5_p1`, но П1 с 10-м признаком «середина варианта − замер obs_t к 08:00» (модели `data/ml/p1o_s*.txt`); колонки `p1o_model_p`, `v2o_model_p` |
 | `ml5_p1o_no` | с 29.10 20:00: «нет» на шансах `v2o_model_p` (NO_WALLETS): цена «да» 15-65¢ (`NO_BAND`), перевес «нет» ≥ 5 п.п., без потолка «цена + 1¢» (`NO_BAND_NOCAP`) |
 | `ml5_25` | с 26.10 03:30: правило `ml5` (чистая v5, перевес от 10 п.п.), но лучший вариант дешевле 25¢ — пропуск (`MIN_PRICE_BY_WALLET`) |
+| `ml5_conf` | с 01.11 23:00: правило `ml5`, но фаворит ≥ 60¢ (доля от суммы цен) — ставки нет (`CONF_SKIP`, как `ml3_conf`) |
 | `ml5_no` | с 21.10 17:00: двойник `ml3_no` — «нет» при перевесе ≥ 10 п.п. на чистой v5 (`ml5_model_p`) |
 | `ml3_cal` | смесь v3 с рынком, порог 3 п.п.; `ml3_cal15` / `ml3_cal30` — не дешевле 15¢ / «да» от 30¢; `ml3_cal_k` — Келли ×0.25 |
 | `ml3_city` | как `ml3_cal`, только лучшая половина городов за 45 дней (`CITY_PICK`) |
@@ -234,8 +235,10 @@ $100 на кошелёк (`ml`, `mm_mk`, `mm` — $300, `copy` — $1000, `ml3` 
 | `no_cheap` / `no_mid` / `no_big` | «нет» на 5-15¢ / 30-55¢ / 25-80¢ (`NO_BAND`) |
 | `copy` | повтор покупок 30 сильных трейдеров накануне дня маркета, за секунды |
 | `ml_day`, `ml_day_fav` | дневная модель 10/12/14 местного (§10) |
+| `ml_day_conf` | с 01.11: правило `ml_day`, но в час, где фаворит ≥ 60¢, ставки нет — пробует в следующий час (`WALLET_CONF`, `CONF_SKIP`) |
 | `llm_*` | LLM каждый час и agy (§10) |
 | `obs`, `obs_fast`, `obs_speci`, `obs_wethr`, `obs_fmi` | по замерам станций (§10) |
+| `obs_atis` | `weather_obs_atis.py` (крон :48, 15 мин): ATIS 11 аэропортов США (atis.info), правило `buy_dead`; 25.10-01.11 вхолостую, с 01.11 ставки (`OBS_ATIS_DRY=0` в кроне) |
 | `mm_ws_*`, `mm100`, `mm100f` | бот-мейкер (§10, страница /mm) |
 | выключены 14-15.10 (`RETIRED`) | main, main_mk, emos, emos_mk, mm, mm_mk, ml, ml_shift, ens, obs_rt |
 
@@ -326,7 +329,7 @@ weather-lab/
 прогнозы за 7 дней, утренний v3 (`lgbm_forecast`, `bias_stats`, `bet_summary`, `calibration`) → OpenRouter (`OPENROUTER_API_KEY`;
 Gemini напрямую в Google при `GEMINI_DIRECT`, отказ → OpenRouter; DeepSeek — провайдер StreamLake, `PROVIDER_DS`) →
 `llm_hour_preds`. Ставка — `bet()`: лучший перевес ≥ 5 п.п., 10-90¢ (и по цене покупки), $2. Лимит — `MONTH_LIMIT`.
-Без своих запросов: `llm_mix` (Gemini + v3 поровну, `mix_probs`), `llm_cal` (Gemini 35% + рынок, `CAL_EDGE`). Тетрадь и разбор часа
+Без своих запросов: `llm_mix` (Gemini + v3 поровну, `mix_probs`), `llm_mix5` (с 01.11 — то же с v5, `lgbm_rows(col='ml5_model_p')`), `llm_cal` (Gemini 35% + рынок, `CAL_EDGE`). Тетрадь и разбор часа
 выключены 13.10 (`NOTEBOOK_ON = False`). Заморозка кончилась 31.10; `llm_ds` выключен 01.11 (из `WALLETS` убран, запросов нет). «Максимум на сейчас» (`max_so_far`) — только плановые
 сводки (`weather_obs_live.routine_only`, с 01.11), SPECI в письме с пометкой.
 Страница **/llm** (`llm_page_data()`).

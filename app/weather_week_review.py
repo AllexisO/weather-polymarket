@@ -45,6 +45,8 @@ def live_days(since):
             out[(city, d)] = rs
     days = []
     for (city, d), rs in out.items():
+        if city not in OBS_CITIES:      # 01.11: город убран из списка (Чжэнчжоу 29.10) — его старые дни пропускаем
+            continue
         w = base.WIN.get((city, d))
         rs = sorted(rs, key=lambda r: r[3])
         if w is None or not any(r[3] == w for r in rs) or len(rs) < 3:

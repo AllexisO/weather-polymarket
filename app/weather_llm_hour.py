@@ -286,10 +286,11 @@ CAL_K = 30              # поправка по проверке уверенн�
 BIAS_BLOCKS = ((5, 9, "05-09"), (10, 13, "10-13"), (14, 19, "14-19"))
 
 
-def lgbm_rows(conn, city, day):
-    """Шансы главной модели v3 (LightGBM) по вариантам — первый быстрый снимок дня (weather_ml_fast, 08:00 местного): [(lo, hi, шанс)]."""
+def lgbm_rows(conn, city, day, col="ml3_model_p"):
+    """Шансы главной модели v3 (LightGBM) по вариантам — первый быстрый снимок дня (weather_ml_fast, 08:00 местного): [(lo, hi, шанс)].
+    col — колонка снимка: 01.11 llm_mix5 берёт v5 (ml5_model_p)."""
     try:
-        rows = conn.execute("""SELECT bucket_lo, bucket_hi, ml3_model_p FROM snapshots_fast WHERE city = ? AND local_date = ?
+        rows = conn.execute(f"""SELECT bucket_lo, bucket_hi, {col} FROM snapshots_fast WHERE city = ? AND local_date = ?
                                AND ts_utc = (SELECT MIN(ts_utc) FROM snapshots_fast WHERE city = ? AND local_date = ?)""",
                             (city, day.isoformat(), city, day.isoformat())).fetchall()
     except sqlite3.OperationalError:
@@ -429,11 +430,14 @@ def calibrate(probs, cal, mk, mx):
 # (после поправки уверенности) и утренние шансы LightGBM v3, смешивает поровну и ставит по тем же правилам, что LLM.
 # Веса 50/50 — без подбора (утром обе модели примерно равны: 44% и 42% на верный вариант); подбор по истории — когда она будет.
 MIX_WALLET, MIX_FROM, MIX_W = "llm_mix", "llm_gem", 0.5   # MIX_W — доля LLM
+# 01.11 (Alex «сделай все 4»): llm_mix5 — двойник llm_mix, отличие одно: утренний LightGBM — v5 (главная с 20.10), а не v3.
+# Офлайн 06-31.10 (data/research/_llm_review_1101/mix_v5.py): Gemini + v3 +0.090 к рынку, Gemini + v5 +0.087 — почти то же; судят деньги.
+MIX5_WALLET = "llm_mix5"
 
 
-def mix_probs(conn, city, day, mk, mx, probs):
+def mix_probs(conn, city, day, mk, mx, probs, col="ml3_model_p"):
     """Смесь шансов LLM и LightGBM по вариантам маркета; LightGBM ещё нет (до 08:00) — None."""
-    lg = {(lo, hi): p for lo, hi, p in lgbm_rows(conn, city, day)}
+    lg = {(lo, hi): p for lo, hi, p in lgbm_rows(conn, city, day, col)}
     s = sum(lg.get((b["lo"], b["hi"]), 0.0) for b in mk)
     if not probs or not s:
         return None
@@ -1109,6 +1113,19 @@ def run():
                                 conn.commit()
                                 mres = bet(conn, MIX_WALLET, city, day, now, mk, mp)
                                 print(f"{MIX_WALLET} {city} {lnow:%H:%M}: смесь Gemini + LightGBM{'; ' + mres if mres else ''}", flush=True)
+                        with item_guard(f"{city}/{MIX5_WALLET}", conn):
+                            mp5 = mix_probs(conn, city, day, mk, mx, probs, "ml5_model_p")
+                            if mp5 is None:
+                                print(f"{MIX5_WALLET} {city} {lnow:%H:%M}: прогноза v5 на сегодня нет — без ставки", flush=True)
+                            else:
+                                conn.execute("""INSERT OR REPLACE INTO llm_hour_preds (wallet, city, local_date, local_hour, ts_utc, model,
+                                    probs_json, market_json, max_so_far, reason, cost, tokens) VALUES (?,?,?,?,?,?,?,?,?,?,0,0)""",
+                                             (MIX5_WALLET, city, day.isoformat(), slot(lnow).hour, now.isoformat(), f"mix:{model}+lgbm_v5",
+                                              json.dumps(mp5), json.dumps({b["label"]: b["price"] for b in mk}), mx,
+                                              f"{MIX_W:.0%} Gemini + {1 - MIX_W:.0%} LightGBM v5"))
+                                conn.commit()
+                                m5 = bet(conn, MIX5_WALLET, city, day, now, mk, mp5)
+                                print(f"{MIX5_WALLET} {city} {lnow:%H:%M}: смесь Gemini + v5{'; ' + m5 if m5 else ''}", flush=True)
                         with item_guard(f"{city}/{CAL_WALLET}", conn):
                             cp = market_blend(probs, mk, mx) if probs else None
                             if cp:

@@ -120,6 +120,7 @@ PAPER_WALLETS = {
     "ml5": "v5 «от рынка» — сама модель",
     "ml5_cal30": "v5 смесь — не дешевле 30¢",
     "ml5_25": "v5 — не дешевле 25¢",
+    "ml5_conf": "v5 — без ставок при уверенном рынке",
     "ml5_31": "v5 с 31 листом",
     "ml5_31_cal": "v5 с 31 листом + рынок (смесь)",
     "ml5_31_mk": "v5 с 31 листом + рынок с поправкой",
@@ -133,6 +134,7 @@ PAPER_WALLETS = {
     "ml_day": "Дневная модель (10/12/14 ч)",
     "ml_day_fav": "Фавориты днём (дневная модель)",
     "ml_day_nohigh": "Против вариантов выше максимума (дневная модель)",
+    "ml_day_conf": "Дневная модель — без ставок при уверенном рынке",
     "fav": "Недооценённые фавориты",
     "ml3_city": "Смесь — лучшие города",
     "copy": "Повтор за сильными трейдерами",
@@ -197,6 +199,9 @@ WALLET_INFO = {
                "LightGBM в 10, 12 и 14 часов видит замеры с утра и цену рынка в этот час; смесь 35/65 с рынком, перевес от 3 п.п., одна ставка на город в день"),
     "ml_day_fav": ("Дневная модель", "Фавориты днём (дневная модель)",
                    "Правило fav днём: «да» на вариант за 50-95¢, который смесь дневной модели с рынком в 10/12/14 ч считает недооценённым; одна ставка на город в день"),
+    "ml_day_conf": ("Дневная модель", "Дневная модель — без ставок при уверенном рынке",
+                    "Правило ml_day (10/12/14 ч), но в час, где фаворит стоит 60¢ и дороже, ставки нет — пробует в следующий час (с 01.11): "
+                    "ставки ml_day при уверенном рынке в октябре −35.2% (34), при 35-60¢ +12.1% (133)"),
     "ml_day_nohigh": ("Дневная модель", "Против вариантов выше максимума (дневная модель)",
                       "В 12 и 14 ч «нет» на вариант выше уже измеренного максимума, если «да» стоит 5-25¢ и смесь дневной модели с рынком ниже цены на 3+ п.п.; одна ставка на город в день"),
     "ml5": ("Главная модель", "Главная модель — обучаемая v5 «от рынка»",
@@ -208,6 +213,9 @@ WALLET_INFO = {
                   "Двойник ml3_cal30 (с 20.10): то же правило «да» от 30¢, перевес от 3 п.п., но на смеси v5 с рынком"),
     "ml5_25": ("v5 «от рынка»", "v5 — не дешевле 25¢",
                "Правило ml5 (перевес от 10 п.п.), но лучший вариант дешевле 25¢ — пропуск (с 26.10): по сделкам плюс v5 — в ставках от 25¢"),
+    "ml5_conf": ("v5 «от рынка»", "v5 — без ставок при уверенном рынке",
+                 "Правило ml5 (перевес от 10 п.п.), но если фаворит стоит 60¢ и дороже — ставки нет (с 01.11, как ml3_conf у v3): "
+                 "ставки ml5 при уверенном рынке в октябре −29.8% (25), при 35-60¢ +20.5% (148)"),
     "ml5_31": ("v5 «от рынка»", "v5 с 31 листом",
                "Правило ml5 (перевес от 10 п.п.), но шанс — v5, обученная с 31 листом вместо 15 (с 27.10): на 05-10.2026 точнее v5 во всех 6 месяцах"),
     "ml5_cal_sz": ("v5 «от рынка»", "v5 + рынок — ставка по спору о центре",
@@ -264,6 +272,9 @@ WALLET_INFO = {
     "llm_agy_cal": ("LLM каждый час", "Gemini через Antigravity + рынок",
                     "Без своих запросов: шансы «Gemini через Antigravity» этого часа 35% + цена рынка 65%, ставка при перевесе от 10 п.п. — "
                     "как «Gemini + рынок», только на бесплатной Gemini. Только города в °F (США)"),
+    "llm_mix5": ("LLM каждый час", "LLM + LightGBM v5 — смесь",
+                 "Двойник «LLM + LightGBM — смесь»: шансы Gemini этого часа и утренний прогноз LightGBM поровну, но LightGBM — v5 "
+                 "(главная модель с 20.10), а не v3. Своих запросов нет, правила ставок те же"),
     "llm_skill": ("LLM каждый час", "Скилл: Gemini считает на Python",
                   "Раз в день в 08:10 местного Gemini через Antigravity работает как агент: читает правила (SKILL.md), сама считает "
                   "на Python по истории станции, прогнозам и их прошлым ошибкам и даёт шансы всех вариантов. 5 городов США. "
@@ -496,7 +507,7 @@ CITY_RU = {
     "wuhan": "Ухань", "zhengzhou": "Чжэнчжоу", "hong_kong": "Гонконг", "taipei": "Тайбэй",
 }
 WALLET_BADGE = {"ml3": "v3", "ml2": "v2", "ml": "v1", "ml_shift": "v1+", "mm": "MX", "emos": "EM", "main": "GI",
-                "mm_mk": "MX", "emos_mk": "EM", "main_mk": "GI", "ml3_mk": "v3", "ml3_cal": "v3+", "ml3_z": "v3Z", "ml3_no": "v3−", "ml3_cal_k": "v3$", "ml4": "v4", "ml4_cal": "v4+", "ml4e": "v4³", "ml4e_cal": "v4³+", "ens": "EN", "ml3_cal15": "v3+¢", "ml3_cal30": "v3+30", "no_cheap": "НЕТ", "fav": "ФАВ", "no_mid": "НЕТ½", "no_big": "НЕТ+", "techno": "ДА¢", "ml3_conf": "v3+У", "ml5_cal": "v5+", "ml5": "v5", "ml5_cal30": "v5+30", "ml5_25": "v5·25", "ml5_31": "v5³¹", "ml5_31_cal": "v5³¹+", "ml5_31_mk": "v5³¹п", "ml5_p1": "П1", "ml5_p1o": "П1з", "ml5_p1o_no": "П1−", "ml5_cal_ask": "v5+ask", "ml5_cal_sz": "v5+$", "ml5_no": "v5−", "no_cheap5": "НЕТ5", "no_mid5": "НЕТ½5", "no_big5": "НЕТ+5", "ml_day": "ДН", "ml_day_fav": "ДН★", "ml_day_nohigh": "ДН↓", "ml3_city": "v3+Г", "copy": "CP", "obs": "OB", "obs_fmi": "FI", "obs_fast": "OB+", "obs_rt": "OB⚡", "obs_wethr": "OBW", "obs_speci": "SP", "llm_gem": "LG", "llm_ds": "LD", "llm_gem_agy": "LGa", "llm_agy_p": "AGp", "llm_agy_cal": "AG+", "llm_skill": "SK"}
+                "mm_mk": "MX", "emos_mk": "EM", "main_mk": "GI", "ml3_mk": "v3", "ml3_cal": "v3+", "ml3_z": "v3Z", "ml3_no": "v3−", "ml3_cal_k": "v3$", "ml4": "v4", "ml4_cal": "v4+", "ml4e": "v4³", "ml4e_cal": "v4³+", "ens": "EN", "ml3_cal15": "v3+¢", "ml3_cal30": "v3+30", "no_cheap": "НЕТ", "fav": "ФАВ", "no_mid": "НЕТ½", "no_big": "НЕТ+", "techno": "ДА¢", "ml3_conf": "v3+У", "ml5_cal": "v5+", "ml5": "v5", "ml5_cal30": "v5+30", "ml5_25": "v5·25", "ml5_conf": "v5У", "ml_day_conf": "ДНУ", "ml5_31": "v5³¹", "ml5_31_cal": "v5³¹+", "ml5_31_mk": "v5³¹п", "ml5_p1": "П1", "ml5_p1o": "П1з", "ml5_p1o_no": "П1−", "ml5_cal_ask": "v5+ask", "ml5_cal_sz": "v5+$", "ml5_no": "v5−", "no_cheap5": "НЕТ5", "no_mid5": "НЕТ½5", "no_big5": "НЕТ+5", "ml_day": "ДН", "ml_day_fav": "ДН★", "ml_day_nohigh": "ДН↓", "ml3_city": "v3+Г", "copy": "CP", "obs": "OB", "obs_fmi": "FI", "obs_fast": "OB+", "obs_rt": "OB⚡", "obs_wethr": "OBW", "obs_speci": "SP", "llm_gem": "LG", "llm_ds": "LD", "llm_gem_agy": "LGa", "llm_agy_p": "AGp", "llm_agy_cal": "AG+", "llm_skill": "SK", "llm_mix5": "LM5"}
 # 14.10 (просьба Alex): группы — по модели, к которой относится кошелёк (MODEL_GROUP ниже)
 WALLET_GROUPS = ["v3 — варианты главной модели", "v5 «от рынка»", "Дневная модель", "v4", "v2", "Правила без модели (перекосы рынка)",
                  "Повтор за сильными трейдерами", "Живые замеры"]
@@ -1172,8 +1183,8 @@ def spark(rows, start=100.0, w=160, h=44):
 
 
 LLM_WALLETS = ("llm_gem", "llm_ds")   # LLM со своими запросами — вкладки страницы
-LLM_BET_WALLETS = (*LLM_WALLETS, "llm_mix", "llm_cal", "llm_agy", "llm_agy_bet", "llm_agy_nomem", "llm_gem_agy", "llm_agy_p", "llm_agy_cal", "llm_skill")   # 01.11: llm_gem_agy — двойник llm_gem через agy; 10.10: llm_agy_nomem — близнец без памяти; llm_agy_bet — ставку решает сама LLM; 09.10: llm_agy — Gemini через Antigravity CLI, только число   # 08.10: llm_cal — Gemini 35% + рынок 65%, перевес от 10 п.п.   # 06.10: и смесь Gemini + LightGBM (weather_llm_hour.MIX_WALLET) — карточки, ставки, деньги
-LLM_LIMIT = {"llm_gem": 13.5, "llm_ds": 4.0, "llm_mix": 0.0, "llm_cal": 0.0, "llm_agy": 0.0, "llm_agy_bet": 0.0, "llm_agy_nomem": 0.0, "llm_gem_agy": 0.0, "llm_agy_p": 0.0, "llm_agy_cal": 0.0, "llm_skill": 0.0}   # как weather_llm_hour.MONTH_LIMIT; у смеси своих запросов нет
+LLM_BET_WALLETS = (*LLM_WALLETS, "llm_mix", "llm_cal", "llm_agy", "llm_agy_bet", "llm_agy_nomem", "llm_gem_agy", "llm_agy_p", "llm_agy_cal", "llm_skill", "llm_mix5")   # 01.11: llm_gem_agy — двойник llm_gem через agy; 10.10: llm_agy_nomem — близнец без памяти; llm_agy_bet — ставку решает сама LLM; 09.10: llm_agy — Gemini через Antigravity CLI, только число   # 08.10: llm_cal — Gemini 35% + рынок 65%, перевес от 10 п.п.   # 06.10: и смесь Gemini + LightGBM (weather_llm_hour.MIX_WALLET) — карточки, ставки, деньги
+LLM_LIMIT = {"llm_gem": 13.5, "llm_ds": 4.0, "llm_mix": 0.0, "llm_cal": 0.0, "llm_agy": 0.0, "llm_agy_bet": 0.0, "llm_agy_nomem": 0.0, "llm_gem_agy": 0.0, "llm_agy_p": 0.0, "llm_agy_cal": 0.0, "llm_skill": 0.0, "llm_mix5": 0.0}   # как weather_llm_hour.MONTH_LIMIT; у смеси своих запросов нет
 
 
 def _smooth(pts):
@@ -1268,7 +1279,7 @@ def _llm_range(lab):
 LLM_V2_FROM = "2026-10-06T09:45:00+00:00"   # как weather_llm_hour.V2_FROM: с этого запуска — обучение v2 (LightGBM, ошибки, деньги, поправка шансов)
 LLM_KEY_LIMIT = 19.95  # всего внесено на OpenRouter: 08.10 баланс $16.70 после пополнения на $10 + потрачено $3.25 (было $10)
 LLM_CITIES = ("chicago", "atlanta", "austin", "miami", "dallas", "london", "nyc", "paris", "tokyo")   # как weather_llm_hour.ALL_CITIES (Лондон с 04.10; Нью-Йорк, Париж, Токио — только agy, с 10.10)
-LLM_MODEL_NAME = {"llm_gem": "Gemini 3.8 Flash", "llm_ds": "DeepSeek V4 Pro", "llm_mix": "Смесь Gemini + LightGBM", "llm_cal": "Gemini + рынок", "llm_agy": "Gemini через Antigravity", "llm_agy_bet": "Gemini ставит сама", "llm_agy_nomem": "Gemini без памяти", "llm_gem_agy": "Gemini (письмо llm_gem) через agy", "llm_agy_p": "agy — шансы сама", "llm_agy_cal": "agy + рынок", "llm_skill": "Скилл (agy + Python)"}
+LLM_MODEL_NAME = {"llm_gem": "Gemini 3.8 Flash", "llm_ds": "DeepSeek V4 Pro", "llm_mix": "Смесь Gemini + LightGBM", "llm_cal": "Gemini + рынок", "llm_agy": "Gemini через Antigravity", "llm_agy_bet": "Gemini ставит сама", "llm_agy_nomem": "Gemini без памяти", "llm_gem_agy": "Gemini (письмо llm_gem) через agy", "llm_agy_p": "agy — шансы сама", "llm_agy_cal": "agy + рынок", "llm_skill": "Скилл (agy + Python)", "llm_mix5": "Смесь Gemini + v5"}
 
 
 def _llm_fact_hourly(conn, city, day):
@@ -1484,7 +1495,7 @@ def llm_page_data(conn, key, city, day):
 
 
 LLM_VS_HOURS = (8, 10, 12, 14, 16, 18)
-LLM_VS_EXTRA = ("llm_mix", "llm_cal", "llm_agy", "llm_agy_nomem", "llm_gem_agy", "llm_agy_p", "llm_agy_cal", "llm_skill")   # 15.10 (Alex): остальные модели в «В течение дня»; llm_agy_bet шансов не пишет
+LLM_VS_EXTRA = ("llm_mix", "llm_cal", "llm_agy", "llm_agy_nomem", "llm_gem_agy", "llm_agy_p", "llm_agy_cal", "llm_skill", "llm_mix5")   # 15.10 (Alex): остальные модели в «В течение дня»; llm_agy_bet шансов не пишет
 
 
 def _bucket_score(bk, a):

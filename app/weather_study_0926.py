@@ -34,6 +34,8 @@ def load_days():
     out = []
     # fetchall: не держать открытый запрос к базе всё время сборки (иначе блокирует запись крона)
     for city, date, unit, qs in conn.execute("SELECT city, date, unit, qs FROM ml_preds_var_mkt ORDER BY date").fetchall():
+        if city not in OBS_CITIES:      # 01.11: город убран из списка (Чжэнчжоу 29.10) — его старые дни пропускаем (как weather_ml_skill)
+            continue
         w = WIN.get((city, date))
         if w is None:
             continue

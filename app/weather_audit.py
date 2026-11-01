@@ -170,7 +170,7 @@ def check_wallets(c, out, now):
     # кошельки по замерам
     orow = [dict(r) for r in c.execute("SELECT * FROM paper_obs_trades")] if \
         c.execute("SELECT 1 FROM sqlite_master WHERE name = 'paper_obs_trades'").fetchone() else []
-    for w in ("obs", "obs_fmi", "obs_fast", "obs_rt", "obs_wethr", "obs_speci"):
+    for w in ("obs", "obs_fmi", "obs_fast", "obs_rt", "obs_wethr", "obs_atis", "obs_speci"):
         rs = [r for r in orow if r.get("wallet", "obs") == w]
         bets = [r for r in rs if r["status"] in ("open", "won", "lost", "void")]
         closed = [r for r in bets if r["status"] != "open"]
@@ -333,9 +333,9 @@ def run(deep=False):
     for w in wallets:
         if w["key"] in wp.RETIRED:   # 15.10: выключенные 14.10 кошельки не ставят — их пустой счёт не требует решения
             continue
-        if w["key"] not in ("obs", "obs_fmi", "obs_fast", "obs_rt", "obs_wethr", "obs_speci") and w["cash"] < wp.STAKE and w["in_play"] < 1e-6:
+        if w["key"] not in ("obs", "obs_fmi", "obs_fast", "obs_rt", "obs_wethr", "obs_atis", "obs_speci") and w["cash"] < wp.STAKE and w["in_play"] < 1e-6:
             attention.append(f"{w['key']}: денег ${w['cash']:.2f} и нет открытых ставок — кошелёк остановился")
-        elif w["key"] not in ("obs", "obs_fmi", "obs_fast", "obs_rt", "obs_wethr", "obs_speci") and w["cash"] < wp.STAKE:
+        elif w["key"] not in ("obs", "obs_fmi", "obs_fast", "obs_rt", "obs_wethr", "obs_atis", "obs_speci") and w["cash"] < wp.STAKE:
             attention.append(f"{w['key']}: свободно ${w['cash']:.2f} — меньше ставки, новых ставок не делает")
     if data["gaps"]:
         attention.append("пропуски снимков: " + "; ".join(data["gaps"]))
