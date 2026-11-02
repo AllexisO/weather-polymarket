@@ -42,6 +42,8 @@ JOBS = [
     ("weather_ml_day_train", "Дневная модель — обучение и экзамен", "weather_ml_day.py --train", "05:45", 26 * 60, "weather_ml_day_train.log"),
     ("weather_llm_hour", "LLM-прогноз каждый час (llm_gem через OpenRouter и смеси llm_mix, llm_cal; llm_agy, llm_agy_nomem, llm_agy_p и двойник llm_gem_agy через agy, смеси llm_agy_cal и llm_mix5; llm_ds и llm_agy_bet выключены 01.11)", "weather_llm_hour.py", "каждый час в :56 (первый час дня — в :05)", 75, "weather_llm_hour.log"),
     ("weather_llm_skill", "Скилл agy с Python — кошелёк llm_skill (08:10 местного, 5 городов США)", "weather_llm_skill.py", "каждый час в :10", 75, "weather_llm_skill.log"),
+    # 02.11: запись для проверки скорости на часовых BTC (без ставок, отдельная база data/research/crypto/live.sqlite3), 3 дня — разбор заметкой
+    ("crypto_speed_rec", "Запись скорости BTC — поток Binance и стакан Polymarket с мс (часовые «вверх/вниз», без ставок)", "crypto_speed_rec.py", "каждый час в :59, живёт час", 75, "crypto_speed_rec.log"),
     # weather_obs_wethr — выключен 31.10 (заметка #59): подписка wethr.net отменена 15.10 (порог PRD §9 п.8 не прошёл), ключ до 01.11
     ("weather_obs_atis", "Живые замеры — ATIS (кошелёк obs_atis, atis.info, 11 городов США; до проверки — вхолостую)", "weather_obs_atis.py", "каждый час в :48, 15 мин", 75, "weather_obs_atis.log"),
     # weather_mm_ml, weather_mm_ws — выключены 27.10 (решение Alex): бот-мейкер целиком на «Не прошли»; weather_mm_settle снят 30.10 (заметка #122):
