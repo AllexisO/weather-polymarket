@@ -3496,7 +3496,10 @@ def _real_paper(conn, wallet, since, until=None):
     pnl, cost = sum(_pnl(r) for r in st), sum(r["stake"] + _fee(r) for r in st)
     sd = math.sqrt(sum(r["stake"] ** 2 * (1 - r["price"]) / r["price"] for r in st if r["price"] and 0 < r["price"] < 1 and r["stake"]))
     return {"wallet": wallet, "label": WALLET_INFO.get(wallet, (None, wallet))[1], "n": len(st), "won": sum(r["status"] == "won" for r in st),
-            "pnl": pnl, "roi": 100 * pnl / cost if cost else None, "open": sum(r["status"] == "open" for r in rs), "luck": luck(pnl, sd)}
+            "pnl": pnl, "roi": 100 * pnl / cost if cost else None, "open": sum(r["status"] == "open" for r in rs), "luck": luck(pnl, sd),
+            # 02.11 (блок «Сколько заработали» на /real): поставлено в закрытых, проиграли, сколько стоит в открытых
+            "staked": cost, "lost": sum(r["status"] == "lost" for r in st),
+            "open_cost": sum(r["stake"] + _fee(r) for r in rs if r["status"] == "open")}
 
 
 def _llm_accuracy(conn, wallet, since, until):
@@ -3606,7 +3609,21 @@ def _real_pool(conn, wallets, since, until, bank=100.0, frac=None, refill=False)
     st = [r for r in took if r["status"] in ("won", "lost", "void")]
     pnl, cost = sum(_pnl(r) for r in st), sum(r["stake"] + r["fee"] for r in st)
     op = [r for r in took if r["status"] in ("open", "resting")]
+    days = {}   # 02.11 (блок «Сколько заработали»): по дням маркета — закрытые и ждущие итога
+    for r in took:
+        d = days.setdefault(r["local_date"], {"day": r["local_date"], "n": 0, "won": 0, "lost": 0, "staked": 0.0, "pnl": 0.0, "open": 0, "open_cost": 0.0})
+        if r["status"] in ("won", "lost", "void"):
+            d["n"] += 1
+            d["won"] += r["status"] == "won"
+            d["lost"] += r["status"] == "lost"
+            d["staked"] += r["stake"] + r["fee"]
+            d["pnl"] += _pnl(r)
+        else:
+            d["open"] += 1
+            d["open_cost"] += r["stake"] + r["fee"]
     return {"n": len(st), "pnl": pnl, "roi": 100 * pnl / cost if cost else None, "cash": cash, "low": low, "skip": skip,
+            "staked": cost, "won": sum(r["status"] == "won" for r in st), "lost": sum(r["status"] == "lost" for r in st),
+            "days": [days[k] for k in sorted(days)],
             "open": len(op), "open_cost": sum(r["stake"] + r["fee"] for r in op), "rebuy": rebuy, "nofill": nofill,
             "max_stake": max((r["stake"] + r["fee"] for r in took), default=0.0),
             "refill_n": sum(r["status"] in ("won", "lost", "void") for r in refills), "refill_open": sum(r["status"] not in ("won", "lost", "void") for r in refills),
@@ -3643,6 +3660,7 @@ def real_page_data(conn):
                 (["итог выше первого банка"] if not ok_vs else []))
             c["progress"] = min(100, round(100 * p["refill_n"] / c["need_refill"]))
             c["paper"] = []
+            c["earned"] = {**{k: p[k] for k in ("n", "won", "lost", "staked", "pnl", "roi", "open", "open_cost")}, "who": "банк с докупками"}
             c["card"] = {"pnl": p["pnl"] if p["n"] else None, "note": f"с докупками, ставки с {c['since'][8:10]}.{c['since'][5:7]}",
                          "goal": (p["refill_n"], c["need_refill"], "закрытых докупок"),
                          "facts": [(money_str(p["refill_pnl"]) if p["refill_n"] else "—", "из них докупки", tn(p["refill_pnl"])),
@@ -3671,6 +3689,7 @@ def real_page_data(conn):
                                   "note": (f"собраны и подписаны, не отправлялись; не ушли бы: {rd[2]}"
                                            + (f" (последняя: {last[0]} {last[1]} — {last[2]})" if last else "")) if rd[0] else None})
             c["paper"] = [_real_paper(conn, w, c["since"], c["until"]) for w in c["wallets"]]
+            c["earned"] = {**{k: p[k] for k in ("n", "won", "lost", "staked", "pnl", "roi", "open", "open_cost", "days")}, "who": "один счёт $100"}
             facts = [(f"${p['cash']:.2f}", "свободно", "")]
             if c.get("frac"):
                 facts.append((f"${p['max_stake']:.2f}", "самая большая ставка", ""))
@@ -3712,6 +3731,8 @@ def real_page_data(conn):
             if not ok_acc:
                 need.append("точность выше рынка на 3+ п.п.")
             c["status_text"] = "проходит" if c["status"] == "pass" else "; ".join(need)
+            c["earned"] = {**{k: best[k] for k in ("n", "won", "lost", "staked", "pnl", "roi", "open", "open_cost")},
+                           "who": best["label"] if len(rows) > 1 else "кошелёк на бумаге"}
             c["progress"] = min(100, round(100 * best["n"] / c["need_n"]))
             c["best"] = best["label"]
             roi = f"{best['roi']:+.1f}%".replace("-", "−") if best["roi"] is not None else "—"
@@ -3767,6 +3788,7 @@ def real_page_data(conn):
                 ("go", "Решение о запуске. Только деньги, которые не нужны на жизнь; первый тест $50-100", ""))]
     return {"cands": out, "today": today.strftime("%d.%m"), "dry": dry, "cats": cats, "closed": [c for c in out if c["state"] == "closed"],
             "n_live": len(live_c), "n_waiting": len(waiting), "next": nxt, "pool": pool, "halt": halt, "ready": ready,
+            "live_c_earned": [c for c in live_c if c.get("earned")],
             "n_ready": sum(r[0] == "ok" for r in ready), "is_live": REAL_READY["go"]}
 
 

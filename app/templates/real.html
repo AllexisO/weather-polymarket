@@ -68,6 +68,31 @@
     </section>
     {% endfor %}
 
+    {# 02.11 (Alex: «сделай то же самое для Симуляции»): сколько заработал каждый кандидат — только закрытые ставки, с комиссией #}
+    {% set earn = live_c_earned %}
+    {% if earn %}
+    <section class="rl-sec">
+      <div class="sec-head"><h2>Сколько заработали</h2><span class="aside">на бумаге, только закрытые ставки, с комиссией; у каждого кандидата свои деньги — не складываются</span></div>
+      <div class="rl-card"><div class="tw"><table><thead><tr><th>Кандидат</th><th class="r">Закрыто</th><th class="r">Выиграли / проиграли</th><th class="r">Поставлено</th><th class="r">Итог</th><th class="r">Доходность</th><th class="r">Ждут итога</th></tr></thead><tbody>
+        {% for c in earn %}{% set e = c.earned %}<tr><td><a href="/real/{{ c.key }}">{{ c.short or c.name }}</a> <span class="faint">{{ e.who }}</span></td>
+          <td class="r num">{{ e.n }}</td><td class="r num">{{ e.won }} / {{ e.lost }}</td><td class="r num">${{ '%.2f' | format(e.staked) }}</td>
+          <td class="r num"><b class="{{ tone(e.pnl) }}">{{ money(e.pnl) if e.n else '—' }}</b></td>
+          <td class="r num">{{ ('%+.1f%%' | format(e.roi)) | replace('-', '−') if e.roi is not none else '—' }}</td>
+          <td class="r num">{% if e.open %}{{ e.open }} на ${{ '%.2f' | format(e.open_cost) }}{% else %}—{% endif %}</td></tr>{% endfor %}
+      </tbody></table></div></div>
+    </section>
+    {% if pool and pool.earned and pool.earned.days %}
+    <section class="rl-sec">
+      <div class="sec-head"><h2>Общий банк по дням</h2><span class="aside">{{ pool.short or pool.name }} · один счёт $100</span></div>
+      <div class="rl-card"><div class="tw"><table><thead><tr><th>День маркета</th><th class="r">Закрыто</th><th class="r">Выиграли / проиграли</th><th class="r">Поставлено</th><th class="r">Итог</th><th class="r">Ждут итога</th></tr></thead><tbody>
+        {% for d in pool.earned.days | reverse %}<tr><td>{{ dm(d.day) }}</td><td class="r num">{{ d.n }}</td><td class="r num">{{ d.won }} / {{ d.lost }}</td>
+          <td class="r num">${{ '%.2f' | format(d.staked) }}</td><td class="r num"><b class="{{ tone(d.pnl) }}">{{ money(d.pnl) if d.n else '—' }}</b></td>
+          <td class="r num">{% if d.open %}{{ d.open }} на ${{ '%.2f' | format(d.open_cost) }}{% else %}—{% endif %}</td></tr>{% endfor %}
+      </tbody></table></div></div>
+    </section>
+    {% endif %}
+    {% endif %}
+
     {% if closed %}
     <details class="rl-closed">
       <summary><h2>Решено — не прошли</h2><span class="rl-n">{{ closed | length }}</span></summary>
@@ -115,6 +140,23 @@
       <a class="rl-more" href="/real/dry">Подробнее <span aria-hidden="true">→</span></a>
       <div class="rl-when">Работает с <b>29.10</b> · настоящий счёт — на вкладке Live</div>
     </article>
+
+    {# 02.11 (Alex: «сколько мы вообще заработали»): итог закрытых ставок — real_exec.earned #}
+    {% if s and dry.earned %}{% set e = dry.earned %}
+    <section class="rl-sec">
+      <div class="sec-head"><h2>Сколько заработали</h2><span class="aside">только закрытые ставки, с комиссией</span></div>
+      <div class="rl-card">
+        <div class="rl-money"><b class="num {{ tone(e.pnl) }}">{{ money(e.pnl) }}</b>
+          <span>{% if e.roi is not none %}{{ ('%+.1f' | format(e.roi)) | replace('-', '−') }}% на поставленные ${{ '%.2f' | format(e.staked) }}{% endif %} · закрытых ставок {{ e.n }}: выиграли {{ e.won }}, проиграли {{ e.lost }} · ещё ждут итога {{ e.open_n }} на ${{ '%.2f' | format(e.open_cost) }}</span></div>
+        {% if (s.equity - dry.start - e.pnl) | abs < 0.01 %}<p class="muted">Счёт ${{ '%.2f' | format(s.equity) }} = ${{ '%.0f' | format(dry.start) }} старта {{ money(e.pnl) }} заработанного; открытые ставки в нём стоят по цене покупки — их итог добавится, когда маркеты закроются.</p>{% endif %}
+        <div class="tw"><table><thead><tr><th>День маркета</th><th class="r">Закрыто</th><th class="r">Выиграли / проиграли</th><th class="r">Поставлено</th><th class="r">Итог</th><th class="r">Ждут итога</th></tr></thead><tbody>
+          {% for d in e.days | reverse %}<tr><td>{{ dm(d.day) }}</td><td class="r num">{{ d.n }}</td><td class="r num">{{ d.won }} / {{ d.lost }}</td>
+            <td class="r num">${{ '%.2f' | format(d.staked) }}</td><td class="r num"><b class="{{ tone(d.pnl) }}">{{ money(d.pnl) if d.n else '—' }}</b></td>
+            <td class="r num">{% if d.open %}{{ d.open }} на ${{ '%.2f' | format(d.open_cost) }}{% else %}—{% endif %}</td></tr>{% endfor %}
+        </tbody></table></div>
+      </div>
+    </section>
+    {% endif %}
 
     {% if dry and dry.compare %}
     <section class="rl-sec">

@@ -231,10 +231,35 @@ def summary(c):
             "problems": [dict(r) for r in c.execute("SELECT problem, COUNT(*) n FROM main.real_ledger WHERE problem IS NOT NULL GROUP BY problem")],
             "last": [dict(r) for r in c.execute("""SELECT wallet, city, local_date, side, price, cost, status, latency_s, blocked, problem
                                                    FROM main.real_ledger ORDER BY id DESC LIMIT 10""")],
-            "mismatch": reconcile(c), "compare": compare(c),
+            "mismatch": reconcile(c), "compare": compare(c), "earned": earned(c),
             # 30.10 (новая /real): задержка решение → заявка (медиана, 90%) и последняя заявка, которая не ушла бы
             "lat": _lat(c), "problem_last": next((dict(r) for r in c.execute("""SELECT wallet, city, local_date, side, price, problem
                                                   FROM main.real_ledger WHERE problem IS NOT NULL ORDER BY id DESC LIMIT 1""")), None)}
+
+
+def earned(c):
+    """02.11 (Alex: «сколько мы вообще заработали»): итог закрытых ставок с начала (выплата − цена − комиссия), доходность на
+    поставленное в закрытых и по дням маркета; открытые — отдельно (итога ещё нет, в счёте стоят по цене покупки)."""
+    rows = c.execute("SELECT local_date, status, cost + COALESCE(fee, 0) spent, COALESCE(payout, 0) payout FROM main.real_ledger "
+                     "WHERE status IN ('open', 'won', 'lost') ORDER BY local_date").fetchall()
+    days = {}
+    for r in rows:
+        d = days.setdefault(r["local_date"], {"day": r["local_date"], "n": 0, "won": 0, "lost": 0, "open": 0, "staked": 0.0, "pnl": 0.0,
+                                              "open_cost": 0.0})
+        d[r["status"]] += 1
+        if r["status"] == "open":
+            d["open_cost"] += r["spent"]
+        else:
+            d["n"] += 1
+            d["staked"] += r["spent"]
+            d["pnl"] += r["payout"] - r["spent"]
+    closed = [r for r in rows if r["status"] != "open"]
+    staked = sum(r["spent"] for r in closed)
+    pnl = sum(r["payout"] - r["spent"] for r in closed)
+    return {"n": len(closed), "won": sum(r["status"] == "won" for r in closed), "lost": sum(r["status"] == "lost" for r in closed),
+            "staked": staked, "pnl": pnl, "roi": 100 * pnl / staked if staked else None,
+            "open_n": sum(r["status"] == "open" for r in rows), "open_cost": sum(r["spent"] for r in rows if r["status"] == "open"),
+            "days": list(days.values())}
 
 
 def _lat(c):
