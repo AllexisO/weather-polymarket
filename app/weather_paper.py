@@ -177,6 +177,7 @@ WALLETS = {"main": "model_p", "emos": "emos_model_p", "mm": "mm_model_p",
 # до понедельника недели решения; ставим в лучшей доле share городов (нужно ≥ min_days дней истории)
 CITY_PICK = {"ml3_city": {"source": "ml3_cal", "look": 45, "share": 0.5, "min_days": 15}}
 _CITY_PICK_CACHE = {}
+CITY_PICK_SAT_FROM = "2026-11-09"   # неделя, с которой отбор — по дням до субботы
 
 
 def city_pick(conn, wallet, local_date):
@@ -188,11 +189,15 @@ def city_pick(conn, wallet, local_date):
     week = (d - _td(days=d.weekday())).isoformat()
     key = (wallet, week)
     if key not in _CITY_PICK_CACHE:
-        since = (_date.fromisoformat(week) - _td(days=cfg["look"])).isoformat()
+        # 03.11: с недели 09.11 — дни до субботы включительно: ml_skill за воскресенье считается в понедельник 07:50 по
+        # Кишинёву, а первые ставки недели (Веллингтон) — ещё в воскресенье вечером; иначе пограничный город в одну неделю
+        # попадал в разные списки (ml3_city Веллингтон 02.11: 23-й из 47 без 01.11, 24-й с ним)
+        until = (_date.fromisoformat(week) - _td(days=1 if week >= CITY_PICK_SAT_FROM else 0)).isoformat()
+        since = (_date.fromisoformat(until) - _td(days=cfg["look"])).isoformat()
         gaps = {}
         try:
             rows = conn.execute("SELECT city, p_model, p_market FROM ml_skill WHERE model = ? AND date >= ? AND date < ?",
-                                (cfg["source"], since, week)).fetchall()
+                                (cfg["source"], since, until)).fetchall()
         except sqlite3.Error:
             rows = []
         for city, pm, pk in rows:

@@ -175,6 +175,8 @@ def trades_since(condition_id, since_ts, until_ts, page=500, max_pages=20):
                              params={"market": condition_id, "limit": page, "offset": i * page}, timeout=30).json()
         if not batch:
             break
+        if not isinstance(batch, list):   # 03.11: data-api иногда отвечает объектом ошибки — не считать неполный список
+            raise ValueError(f"data-api /trades: не список сделок — {str(batch)[:200]}")
         out += [t for t in batch if since_ts < t["timestamp"] <= until_ts]
         if min(t["timestamp"] for t in batch) <= since_ts:
             break

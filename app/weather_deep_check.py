@@ -275,8 +275,16 @@ def run(c, since):
         kind, x = _replay(w, fields[w], snaps[k])
         if w in wp.CITY_PICK and t["city"] not in wp.city_pick(c, w, t["local_date"])[0]:
             kind, x = "skip", "город сейчас не в лучшей половине"
+            if t["local_date"] < wp.CITY_PICK_SAT_FROM and t["status"] != "skip":
+                # 03.11 разобрано: до недели 09.11 список недели досчитывался в понедельник 07:50 (воскресенье в ml_skill),
+                # ранние города решались без него — ставка верна по данным на момент решения
+                sec["ok"] += 1
+                continue
         if t["status"] == "skip":
             why = t["reason"] or ""
+            if w in wp.CITY_PICK and t["local_date"] < wp.CITY_PICK_SAT_FROM and why.startswith("город сейчас не в лучшей половине"):
+                sec["ok"] += 1     # 03.11 разобрано — обратный случай (Циндао 02.11), см. выше
+                continue
             if kind == "bet":
                 sec["bad"].append(f"{tag}: записан пропуск («{why[:60]}»), а по снимку — ставка")
             elif x not in why:
