@@ -469,6 +469,27 @@ KNOWN_EMPTY = {"NWS forecaster note": "известно 15.10: полный те
 EMPTY_VALUES = {"", "none", "nan", "n/a", "null", "-", "unknown"}
 
 
+def check_deep(now):
+    """02.11 (Alex «данные как данные, но сама логика должна быть правильной»): глубокая проверка weather_deep_check за вчера
+    и сегодня — данные писем LLM против архивов и пересчёт каждого решения (LLM, кошельки моделей, дневная модель). Только вечером."""
+    import weather_deep_check as dc
+    since = (now.astimezone(ZoneInfo(TZ_HOME)).date() - timedelta(days=1)).isoformat()
+    c = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=30)
+    try:
+        res = dc.run(c, since)
+    finally:
+        c.close()
+    for name, what in dc.SECTIONS.items():
+        s = res.get(name, {"ok": 0, "bad": [], "warn": []})
+        if s["bad"]:
+            add("Данные и логика", False, f"{name}: {len(s['bad'])} расхождений", "; ".join(s["bad"][:5]),
+                "weather_deep_check.py — найти причину до ставок следующего дня")
+        elif s["warn"]:
+            add("Данные и логика", "warn", f"{name}: внимание {len(s['warn'])}", "; ".join(s["warn"][:5]), "weather_deep_check.py")
+        else:
+            add("Данные и логика", True, f"{name}: всё сходится", f"{what}; проверено {s['ok']} с {since}")
+
+
 def check_inputs(c, now):
     """Данные на входе не пустые и не застряли — то, чего не видно по «скрипт отработал без ошибок»:
     1) таблица с local_date перестала пополняться (> 2 дней), а работающий по крону скрипт её читает;
@@ -544,7 +565,8 @@ def main():
     with item_guard("check_notes"):
         check_notes(mode)
     c = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=30)
-    extra = {"morning": [(check_night_done, (c, now))], "midday": [(check_decisions, (c, now))]}.get(mode, [])
+    extra = {"morning": [(check_night_done, (c, now))], "midday": [(check_decisions, (c, now))],
+             "evening": [(check_deep, (now,))]}.get(mode, [])
     for fn, args in extra + [(check_cron, (c, now)), (check_db, (c,)), (check_models, (c, now)), (check_misc, (c, now)),
                              (check_bots, (c, now)), (check_stuck_bets, (c, now)), (check_logic, (c, now)), (check_inputs, (c, now)), (check_fastobs, (now,)), (check_backup, (now,))]:
         with item_guard(fn.__name__):
