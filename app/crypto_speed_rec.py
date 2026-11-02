@@ -30,6 +30,8 @@ GAMMA = "https://gamma-api.polymarket.com"
 ET = ZoneInfo("America/New_York")
 TAIL_S = 5
 Q = queue.Queue()
+# 02.11: токен в строках — номер: 0 «вверх», 1 «вниз» (полный номер токена — в markets; иначе ~5 ГБ в сутки)
+SIDE_OF = {}
 now_ms = lambda: int(time.time() * 1000)
 
 
@@ -77,14 +79,14 @@ def on_pm(raw, recv):
     for m in msgs if isinstance(msgs, list) else [msgs]:
         ev, srv = m.get("event_type"), int(m.get("timestamp") or 0)
         if ev == "book":
-            Q.put(("pm_book", (recv, srv, m["asset_id"], json.dumps(m.get("bids") or m.get("buys")),
+            Q.put(("pm_book", (recv, srv, SIDE_OF.get(m["asset_id"]), json.dumps(m.get("bids") or m.get("buys")),
                                json.dumps(m.get("asks") or m.get("sells")))))
         elif ev == "price_change":
             for ch in m.get("price_changes") or m.get("changes") or []:
-                Q.put(("pm_change", (recv, srv, ch.get("asset_id") or m.get("asset_id"), f(ch["price"]), f(ch["size"]), ch["side"],
+                Q.put(("pm_change", (recv, srv, SIDE_OF.get(ch.get("asset_id") or m.get("asset_id")), f(ch["price"]), f(ch["size"]), ch["side"],
                                      f(ch.get("best_bid")), f(ch.get("best_ask")))))
         elif ev == "last_trade_price":
-            Q.put(("pm_last", (recv, srv, m["asset_id"], f(m["price"]), f(m["size"]), m.get("side"))))
+            Q.put(("pm_last", (recv, srv, SIDE_OF.get(m["asset_id"]), f(m["price"]), f(m["size"]), m.get("side"))))
 
 
 def pm_loop(toks, end, stats):
@@ -177,6 +179,7 @@ def main():
         start = now.replace(minute=0, second=0, microsecond=0)
         cond, slug, up, down = market(start)
         end = time.time() + int(os.environ["REC_TEST_S"])
+    SIDE_OF.update({up: 0, down: 1})
     db = sqlite3.connect(CRYPTO_DB, timeout=30)
     schema(db)
     with db:

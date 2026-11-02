@@ -26,6 +26,7 @@ INVENTORY = DATA / "backup_inventory.json"
 # (11.10, решение Alex: data/books и скрипты/итоги исследований теперь в копии — books.sqlite3.zst, research.tar.zst)
 NOT_IN = [("data/research/research.sqlite3", "копия базы для исследований — пересоздаётся из базы"),
           ("data/research/bench/c.duckdb", "проба DuckDB для скорости — пересоздаётся"),
+          ("data/research/crypto/live.sqlite3", "запись скорости BTC 02-05.11 — пишется круглые сутки; копия один раз после записи (заметка #156)"),
           ("data/ml", "обученные модели — переобучаются каждую ночь (05:20)"),
           ("data/logs", "журналы скриптов"),
           ("app", "код — в GitHub (github.com/AllexisO/weather-polymarket)")]
