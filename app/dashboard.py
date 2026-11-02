@@ -3435,15 +3435,15 @@ REAL_CANDIDATES = [
     # ml_day добавлен 24.10 до первой ставки периода (Alex). Как один настоящий счёт — _real_pool.
     {"key": "pool", "name": "Общие $100 на 5 кошельков", "cat": "pool", "short": "Обычная ставка ~$2", "who": "главный кандидат", "featured": True, "wallets": ["fav", "ml5_cal", "ml5", "ml4e_cal", "ml_day"], "decide": "2026-11-21",
      "what": "fav, ml5_cal, ml5, ml4e_cal и ml_day ставят как обычно, но как с одного настоящего счёта $100: нет свободных денег — ставка пропускается; деньги возвращаются, когда Polymarket закрыл маркет; если кошельки покупают одну и ту же долю, следующая покупка идёт по стакану без уже купленного нами (5 лучших цен кончились — сколько купилось, меньше 5 долей — не купили). За 27.09-23.10 так вышло бы +$168 по закрытым ставкам (+13% на вложенное), но состав выбран, уже зная итог, — поэтому судим только новые дни.",
-     "rule": "ставки на дни 24.10-20.11: ≥ 150 закрытых и доходность на вложенное ≥ +5%", "since": "2026-10-24", "until": "2026-11-20",
-     "need_n": 150, "need_roi": 5.0, "then": "живые $100 на Polymarket рядом с бумажным общим банком (сначала §4 п.2-4 в docs/PRD.md)"},
+     "rule": "ставки на дни 24.10-20.11: ≥ 150 закрытых, доходность на вложенное ≥ +5% и шанс получить её удачей ≤ 5% (с 02.11, заметка #155)", "since": "2026-10-24", "until": "2026-11-20",
+     "need_n": 150, "need_roi": 5.0, "need_luck": 5.0, "then": "живые $100 на Polymarket рядом с бумажным общим банком (сначала §4 п.2-4 в docs/PRD.md)"},
     # 24.10 (Alex: «чем больше денег, тем дороже ставка»): тот же банк, ставка 2% от счёта. Проверка 27.09-23.10 (задним числом):
     # 2% +$184 против ~$2 +$168; 4% +$30, 6% +$61, 10% — банкрот; банк $500 +38%, $1000 +10%, $3000 −14% (не хватает стакана).
     {"key": "pool2", "name": "Общие $100 на 5 кошельков, ставка 2% от счёта", "cat": "pool", "short": "Ставка 2% от счёта", "who": "ставка растёт вместе со счётом", "wallets": ["fav", "ml5_cal", "ml5", "ml4e_cal", "ml_day"],
      "decide": "2026-11-21", "frac": 0.02,
      "what": "То же, что выше, но ставка растёт вместе со счётом: 2% от всех денег (свободные + в открытых ставках), не меньше 5 долей; каждая покупка — по стакану Polymarket в момент ставки (5 лучших цен). За 27.09-23.10 так вышло бы +$184 против +$168 у ставки ~$2, но свободных денег в худший момент оставалось $0.15; ставки 4-10% — хуже или банкротство.",
-     "rule": "ставки на дни 24.10-20.11: ≥ 150 закрытых и доходность на вложенное ≥ +5%; сравнение с банком выше — по итогу в $", "since": "2026-10-24",
-     "until": "2026-11-20", "need_n": 150, "need_roi": 5.0, "then": "живые $100 со ставкой 2% от счёта — если итог лучше, чем у ставки ~$2"},
+     "rule": "ставки на дни 24.10-20.11: ≥ 150 закрытых, доходность на вложенное ≥ +5% и шанс удачи ≤ 5% (с 02.11, заметка #155); сравнение с банком выше — по итогу в $", "since": "2026-10-24",
+     "until": "2026-11-20", "need_n": 150, "need_roi": 5.0, "need_luck": 5.0, "then": "живые $100 со ставкой 2% от счёта — если итог лучше, чем у ставки ~$2"},
     # 01.11 (разбор LLM, заметка #123, Alex «запускай, пускай будет»): тот же банк + ставки llm_mix. Порог записан до первой ставки.
     # Октябрь задним числом (data/research/_llm_review_1101/pool_mix.py): 06-17.10 +$134 против +$83 у банка, 18-31.10 +$153 против
     # +$189 (37 ставок банка пропущены без денег) — llm_mix во второй половине около нуля и занимает деньги.
@@ -3551,6 +3551,18 @@ def _pool_rebuy(r, taken, spend=None):
             "payout": sh * fp if r["status"] in ("won", "lost", "void") else None}
 
 
+def _luck_p(rows):
+    """02.11 (заметка #155, порог банка 21.11): шанс получить такой итог или лучше без перевеса, %. Без перевеса ставка выигрывает
+    с вероятностью = цене доли: ожидание итога = −комиссия, разброс √Σ доли²·p(1−p) (нормальное приближение; на банке 24.10-02.11
+    дало 21%, розыгрыш 20 000 раз — 20.7%)."""
+    rows = [r for r in rows if r["status"] in ("won", "lost") and r["shares"] and 0 < r["price"] < 1]
+    var = sum(r["shares"] ** 2 * r["price"] * (1 - r["price"]) for r in rows)
+    if not var:
+        return None
+    z = (sum(_pnl(r) for r in rows) + sum(r["fee"] or 0 for r in rows)) / math.sqrt(var)
+    return 100 * 0.5 * math.erfc(z / math.sqrt(2))
+
+
 def _real_pool(conn, wallets, since, until, bank=100.0, frac=None, refill=False):
     """Общий банк как один настоящий счёт: ставки кошельков по времени; нет свободных денег — пропуск; деньги возвращаются
     в settled_at (когда Polymarket закрыл маркет); повторная покупка той же доли — по стакану без уже купленного (_pool_rebuy).
@@ -3623,7 +3635,7 @@ def _real_pool(conn, wallets, since, until, bank=100.0, frac=None, refill=False)
             d["open_cost"] += r["stake"] + r["fee"]
     return {"n": len(st), "pnl": pnl, "roi": 100 * pnl / cost if cost else None, "cash": cash, "low": low, "skip": skip,
             "staked": cost, "won": sum(r["status"] == "won" for r in st), "lost": sum(r["status"] == "lost" for r in st),
-            "days": [days[k] for k in sorted(days)],
+            "days": [days[k] for k in sorted(days)], "luck_p": _luck_p(st),
             "open": len(op), "open_cost": sum(r["stake"] + r["fee"] for r in op), "rebuy": rebuy, "nofill": nofill,
             "max_stake": max((r["stake"] + r["fee"] for r in took), default=0.0),
             "refill_n": sum(r["status"] in ("won", "lost", "void") for r in refills), "refill_open": sum(r["status"] not in ("won", "lost", "void") for r in refills),
@@ -3700,6 +3712,13 @@ def real_page_data(conn):
             c["card"] = {"pnl": p["pnl"] if p["n"] else None, "note": f"закрытые ставки с {c['since'][8:10]}.{c['since'][5:7]}",
                          "goal": (p["n"], c["need_n"], "закрытых ставок"), "facts": facts}
             ok_n, ok_roi = p["n"] >= c["need_n"], p["roi"] is not None and p["roi"] >= c["need_roi"]
+            # 02.11 (заметка #155, Alex «давай», до итога 21.11): ещё и шанс получить такой итог удачей ≤ need_luck %
+            ok_luck = not c.get("need_luck") or (p["luck_p"] is not None and p["luck_p"] <= c["need_luck"])
+            if c.get("need_luck"):
+                c["rows"].insert(2, {"label": "Шанс получить такой итог удачей", "value": f"{p['luck_p']:.0f}%" if p["luck_p"] is not None else "—",
+                                     "tone": "pos" if ok_luck else "neg", "note": f"нужно ≤ {c['need_luck']:.0f}%: без перевеса ставка выигрывает с вероятностью = цене"})
+                facts.append((f"{p['luck_p']:.0f}%" if p["luck_p"] is not None else "—", f"шанс удачи (нужно ≤ {c['need_luck']:.0f}%)", "pos" if ok_luck else "neg"))
+            ok_roi = ok_roi and ok_luck
             ok_vs = True
             if c.get("base"):   # 01.11 pool_mix: ещё и итог выше первого банка за те же дни
                 base = _real_pool(conn, c["base"], c["since"], c["until"])
@@ -3710,7 +3729,9 @@ def real_page_data(conn):
             c["status"] = "pass" if ok_n and ok_roi and ok_vs else ("wait" if not ok_n else "bad")
             c["status_text"] = "проходит" if c["status"] == "pass" else "; ".join(
                 ([f"ещё {c['need_n'] - p['n']} закрытых ставок"] if not ok_n else []) +
-                ([f"доходность {p['roi']:+.1f}% → нужно ≥ +5%" if p["roi"] is not None else "доходность ≥ +5%"] if not ok_roi else []) +
+                ([f"доходность {p['roi']:+.1f}% → нужно ≥ +5%" if p["roi"] is not None else "доходность ≥ +5%"]
+                 if not (p["roi"] is not None and p["roi"] >= c["need_roi"]) else []) +
+                ([f"шанс удачи {p['luck_p']:.0f}% → нужно ≤ {c['need_luck']:.0f}%" if p["luck_p"] is not None else "шанс удачи"] if not ok_luck else []) +
                 (["итог выше первого банка"] if not ok_vs else []))
             c["progress"] = min(100, round(100 * p["n"] / c["need_n"]))
         else:
