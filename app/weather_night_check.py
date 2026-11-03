@@ -216,8 +216,12 @@ def check_models(c, now):
     from weather_cities import OBS_CITIES
     y = (now - timedelta(days=1)).date().isoformat()
     y_end = date.fromisoformat(y) + timedelta(days=1)
+    # 03.11: weather_station_obs идёт раз в 6 ч (00:30/06:30/12:30/18:30) — Америку за вчера грузит только в 12:30; до него
+    # «нет: atlanta, miami, nyc…» — ложная тревога. Ждём факт, только если загрузка была уже после конца дня + 3 ч.
+    r = c.execute("SELECT finished_at FROM job_runs WHERE job = 'weather_station_obs'").fetchone()
+    last_obs = datetime.fromisoformat(r[0]) if r and r[0] else now
     due = {city for city, cfg in OBS_CITIES.items()
-           if (now.astimezone(ZoneInfo(cfg["tz"])) - timedelta(hours=3)).date() >= y_end}
+           if (min(now, last_obs).astimezone(ZoneInfo(cfg["tz"])) - timedelta(hours=3)).date() >= y_end}
     have = {r[0] for r in c.execute("SELECT city FROM weather_station_daily WHERE local_date = ?", (y,))}
     miss = sorted(due - have)
     later = len(OBS_CITIES) - len(due)

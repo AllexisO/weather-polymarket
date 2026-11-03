@@ -204,14 +204,30 @@ def check_maker(c):
 
 
 def check_trades(c, since):
-    rows = c.execute("""SELECT wallet, city, local_date, side, price, market_p, placed_at, snapshot_ts FROM paper_trades
+    rows = c.execute("""SELECT wallet, city, local_date, side, price, market_p, placed_at, snapshot_ts, bucket_lo FROM paper_trades
                         WHERE status IN ('open', 'won', 'lost', 'void') AND local_date >= ? AND price IS NOT NULL AND market_p IS NOT NULL""",
                      (since,)).fetchall()
     import weather_paper as wp
     taker_models = set(wp.WALLETS) - set(wp.YES_BAND)
-    stale = [f"{w} {ci} {d[8:]}.{d[5:7]}: купили по {100 * p:.0f}¢, в снимке {100 * mk:.0f}¢" for w, ci, d, sd, p, mk, pa, ts in rows
-             if w in taker_models | set(wp.NO_WALLETS) and abs(p - mk) > 0.15 and (pa or ts) >= STALE_FROM]
-    cheap = [f"{w} {ci} {d[8:]}.{d[5:7]}: «да» по {100 * p:.1f}¢" for w, ci, d, sd, p, mk, pa, ts in rows
+    # 03.11: market_p — середина; при широком разрыве (Веллингтон 30.10: 13¢/44¢, середина 28.5¢) покупка по цене продажи
+    # снимка — не устаревший снимок. Сверяем с ценой продажи того же снимка («нет» — 1 − покупка), где она записана.
+    def ask_of(ci, d, ts, lo, sd):
+        for t, cols in (("snapshots_fast", "best_ask, best_bid"), ("snapshots", "best_ask, NULL")):
+            r = c.execute(f"SELECT {cols} FROM {t} WHERE city = ? AND local_date = ? AND ts_utc = ? AND bucket_lo IS ?",
+                          (ci, d, ts, lo)).fetchone()
+            if r:
+                a = r[0] if (sd or "yes") == "yes" else (1 - r[1] if r[1] is not None else None)
+                return a
+        return None
+    stale = []
+    for w, ci, d, sd, p, mk, pa, ts, lo in rows:
+        if w not in taker_models | set(wp.NO_WALLETS) or abs(p - mk) <= 0.15 or (pa or ts) < STALE_FROM:
+            continue
+        a = ask_of(ci, d, ts, lo, sd) if ts else None
+        if a is None or abs(p - a) > 0.15:
+            stale.append(f"{w} {ci} {d[8:]}.{d[5:7]}: купили по {100 * p:.0f}¢, в снимке "
+                         + (f"{100 * mk:.0f}¢" if a is None else f"продажа {100 * a:.0f}¢"))
+    cheap = [f"{w} {ci} {d[8:]}.{d[5:7]}: «да» по {100 * p:.1f}¢" for w, ci, d, sd, p, mk, pa, ts, _ in rows
              if w in taker_models and (sd or "yes") == "yes" and p < wp.YES_MIN - 1e-9 and (pa or ts) >= max(wp.YES_MIN_FROM, CHEAP_FROM)]
     add("Логика", "warn" if stale else True, "Настоящая цена покупки близка к цене снимка (±15 п.п.)",
         short(stale) if stale else f"ставок {len(rows)}", "снимок цены устарел — решение принято по чужой цене" if stale else "")
