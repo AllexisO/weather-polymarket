@@ -9,6 +9,8 @@ from collections import defaultdict
 
 import requests
 
+import data_api
+
 TRADERS = {"HondaCivic": None, "ShyGuy1": None, "OnlyLuckNoBrain": None, "0X3573": None, "WeatherHK": None}
 if len(__import__("sys").argv) > 1:  # имена из командной строки
     TRADERS = dict.fromkeys(__import__("sys").argv[1:])
@@ -40,7 +42,7 @@ def band(p):
 final = {}
 for name in TRADERS:
     a = wallet(name)
-    t = js("https://data-api.polymarket.com/trades", user=a, limit=500) if a else None
+    t = data_api.fetch("trades", {"user": a}, max_rows=500, max_pages=1) if a else None   # 03.11: Data API v2
     w = [x for x in (t or []) if "temperature" in (x.get("title") or "").lower() and x["side"] == "BUY"]
     need = sorted({x["conditionId"] for x in w} - set(final))
     for i in range(0, len(need), 20):

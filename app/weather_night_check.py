@@ -154,7 +154,7 @@ def check_db(c):
 def check_services():
     probes = [
         ("Polymarket (маркеты)", "https://gamma-api.polymarket.com/events", {"limit": 1}),
-        ("Polymarket (сделки)", "https://data-api.polymarket.com/trades", {"limit": 1}),
+        ("Polymarket (сделки)", "https://data-api.polymarket.com/v2/trades", {"limit": 1}),
         ("Polymarket (стакан)", "https://clob.polymarket.com/time", None),
         ("Open-Meteo", "https://api.open-meteo.com/v1/forecast", {"latitude": 51.5, "longitude": 0, "daily": "temperature_2m_max", "forecast_days": 1}),
         ("METAR (Iowa Mesonet)", "https://mesonet.agron.iastate.edu/json/network.py", {"network": "FI__ASOS"}),
@@ -174,7 +174,7 @@ def check_services():
                 except requests.RequestException as e:
                     fails.append(f"не отвечает: {type(e).__name__}")
                     continue
-                if r.status_code < 500:
+                if r.status_code < 400:     # 03.11: раньше < 500 — 410 «Data API v1 выключен» проходил как «работает»
                     break
                 fails.append(f"ответ {r.status_code}")
             else:

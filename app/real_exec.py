@@ -64,15 +64,12 @@ _halt = {"at": 0.0, "why": None}
 
 def exchange_halted(timeout=15):
     """None — биржа торгует; иначе причина. Ответ кешируется на 60 с (tick — каждые 20 с; страница /real — timeout 3 с)."""
-    import json
     import time
-    import urllib.request   # не requests: функцию зовёт и сайт (/real), а в его контейнере requests нет
     if time.time() - _halt["at"] < 60:
         return _halt["why"]
     try:
-        req = urllib.request.Request("https://data-api.polymarket.com/trades?limit=20", headers={"User-Agent": "weather-lab"})
-        with urllib.request.urlopen(req, timeout=timeout) as f:
-            last = max(t["timestamp"] for t in json.load(f))
+        import data_api      # 03.11: Data API v2 (v1 выключен — с 02.11 ~22:30 UTC заявки блокировались «нет ответа»)
+        last = max(t["timestamp"] for t in data_api.fetch("trades", {}, limit=20, max_rows=20, max_pages=1, timeout=timeout))
         age = (time.time() - last) / 60
         why = f"биржа стоит: последняя сделка на Polymarket {age:.0f} мин назад (> {HALT_MIN})" if age > HALT_MIN else None
     except Exception as e:

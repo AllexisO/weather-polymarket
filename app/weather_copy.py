@@ -25,12 +25,13 @@ from zoneinfo import ZoneInfo
 
 import requests
 
+import data_api
+
 from polyexec import simulate_buy, trading_stopped
 from weather_paper import start_balance
 from weather_edge import CITIES, GAMMA, parse_bucket
 
 DB_PATH = Path(os.environ.get("POLY_LAB_DB", Path(__file__).parent.parent / "data" / "db" / "polymarket_lab.sqlite3"))
-DATA_API = "https://data-api.polymarket.com"
 WALLET = "copy"
 STAKE = 2.0
 SLIP = 0.02
@@ -134,26 +135,13 @@ def main():
         # на проверке через 0.5 мин +1.0%, 1 мин +0.1%, 2.5 мин −1.1%, 5 мин −2.3%)
         # 2026-09-30 (проверка проекта): ночью сбор сделок нагружает тот же API — «Too Many Requests»; две повторные
         # попытки с паузой, прежде чем пропустить трейдера
-        data = None
-        for attempt in range(3):
-            try:
-                data = requests.get(f"{DATA_API}/trades", params={"user": w, "limit": 50}, timeout=20).json()
-            except (requests.RequestException, ValueError) as e:
-                if attempt == 2:
-                    print(f"{w[:10]}: ошибка — {e}")
-                    return w, []
-                time.sleep(2 * (attempt + 1))
-                continue
-            if isinstance(data, dict) and "Too Many Requests" in str(data.get("error", "")) and attempt < 2:
-                time.sleep(2 * (attempt + 1))
-                continue
-            break
-        # 2026-09-27: Data API иногда отвечает объектом-ошибкой ({"error": ...}) вместо списка сделок —
-        # раньше скрипт падал на первом таком трейдере и не проверял остальных; теперь пропускаем только его
-        if not isinstance(data, list):
-            print(f"{w[:10]}: Polymarket ответил не списком сделок — {str(data)[:150]}")
+        # 03.11: Data API v2 (data_api.py; v1 выключен) — повторы при 429/5xx внутри; ошибка — пропускаем только этого трейдера
+        try:
+            data = data_api.fetch("trades", {"user": w}, limit=50, max_rows=50, max_pages=1, timeout=20)
+        except data_api.DataApiError as e:
+            print(f"{w[:10]}: ошибка — {e}")
             return w, []
-        return w, [t for t in data if isinstance(t, dict)]
+        return w, data
 
     from concurrent.futures import ThreadPoolExecutor
     with ThreadPoolExecutor(8) as pool:

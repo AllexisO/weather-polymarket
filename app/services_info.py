@@ -14,7 +14,7 @@ SERVICES = [
          "apis": ["clob.polymarket.com/book, /prices-history"], "mode": "live", "key": None, "price": "бесплатно",
          "scripts": "polyexec, weather_paper, weather_obs_live, weather_obs_rt, weather_price_history"},
         {"name": "Polymarket — сделки и трейдеры", "site": "https://polymarket.com", "what": "все сделки погоды с кошельками, сделки трейдеров для повтора",
-         "apis": ["data-api.polymarket.com/trades, /activity"], "mode": "live", "key": None, "price": "бесплатно",
+         "apis": ["data-api.polymarket.com/v2/trades, /v2/activity (v1 выключен 02.11, общий доступ — data_api.py)"], "mode": "live", "key": None, "price": "бесплатно",
          "scripts": "weather_trades_history, weather_copy"},
         {"name": "Polymarket — живой поток", "site": "https://polymarket.com", "what": "стаканы и сделки в реальном времени: гонка после замера, свои стаканы, повтор за секунды",
          "apis": ["wss ws-subscriptions-clob …/ws/market", "wss ws-live-data (сделки)"], "mode": "live", "key": None, "price": "бесплатно",

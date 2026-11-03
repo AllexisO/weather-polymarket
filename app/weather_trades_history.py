@@ -32,11 +32,12 @@ from zoneinfo import ZoneInfo
 
 import requests
 
+import data_api
+
 from weather_cities import OBS_CITIES
 from weather_edge import GAMMA, month_day_year_slug, parse_bucket
 
 DB_PATH = Path(os.environ.get("POLY_LAB_DB", Path(__file__).parent.parent / "data" / "db" / "polymarket_lab.sqlite3"))
-DATA_API = "https://data-api.polymarket.com"
 
 
 def get(url, params):
@@ -67,19 +68,9 @@ def load_event(city, cfg, d):
         outcomes = json.loads(m["outcomes"])
         finals.append((m["conditionId"], city, d.isoformat(), rng[0], rng[1],
                        float(json.loads(m["outcomePrices"])[outcomes.index("Yes")])))
-    trades, offset = [], 0
-    while True:
-        batch = get(f"{DATA_API}/trades", {"eventId": ev["id"], "limit": 500, "offset": offset})
-        # 2026-09-27: Data API иногда отвечает объектом-ошибкой вместо списка — день не отмечаем загруженным,
-        # он догрузится следующей ночью (раньше такой ответ ронял весь запуск)
-        if batch and not isinstance(batch, list):
-            raise requests.RequestException(f"Polymarket ответил не списком сделок: {str(batch)[:150]}")
-        if not batch:
-            break
-        trades += batch
-        offset += 500
-        if len(batch) < 500:
-            break
+    # 03.11: Data API v2 (data_api.py; v1 выключен — 410 с 02.11 ~22:30 UTC). Ошибка или неполный список — DataApiError,
+    # день не отмечаем загруженным, догрузится следующей ночью. Лондон 30.10: v2 — 2797 сделок, как было в базе.
+    trades = data_api.fetch("trades", {"event_id": ev["id"]}, need_all=True, pause=0.2)
     rows = [(t["transactionHash"], t["conditionId"], t["asset"], t["outcome"], t["side"], float(t["price"]),
              float(t["size"]), int(t["timestamp"]), city, d.isoformat()) for t in trades]
     wallets = [(t["transactionHash"], t["asset"], int(t["timestamp"]), float(t["price"]), float(t["size"]), t["side"],

@@ -14,6 +14,8 @@ from pathlib import Path
 
 import requests
 
+import data_api
+
 from weather_cities import OBS_CITIES, poly_round
 from weather_edge import parse_bucket
 
@@ -45,7 +47,7 @@ def main():
               + "  ".join(f"{s} {statistics.median(v):.1f}" for s, v in d.items() if s != "лучший"))
     # сравнение с HighTempTation
     try:
-        acts = requests.get("https://data-api.polymarket.com/activity", params={"user": HTT, "type": "TRADE", "limit": 500}, timeout=30).json()
+        acts = data_api.fetch("activity", {"user": HTT, "type": "TRADE"}, max_rows=500, max_pages=1)   # 03.11: Data API v2
     except (requests.RequestException, ValueError) as e:
         print(f"HighTempTation: data-api недоступен — {e}")
         return
@@ -99,7 +101,7 @@ def race(c, since):
         t0 = datetime.fromisoformat(o).timestamp()
         arrive = (tb or ts) + (lat or 0)
         try:
-            tr = requests.get("https://data-api.polymarket.com/trades", params={"market": cid, "limit": 500}, timeout=30).json()
+            tr = data_api.fetch("trades", {"condition": cid}, max_rows=500, max_pages=1)
         except (requests.RequestException, ValueError):
             continue
         cheap = sorted((t["timestamp"], (t["price"] if t["outcome"] == "No" else 1 - t["price"]) * t["size"]) for t in tr

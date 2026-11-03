@@ -112,7 +112,7 @@ flowchart LR
 |---|---|---|---|
 | Polymarket Gamma | `gamma-api.polymarket.com` | список маркетов, варианты, итоги | — |
 | Polymarket CLOB | `clob.polymarket.com` | живой стакан (исполнение ставок), история цен | — |
-| Polymarket Data API | `data-api.polymarket.com` | настоящие сделки (хранит ~30 дней) | — |
+| Polymarket Data API | `data-api.polymarket.com/v2` (v1 выключен 02.11 ~22:30 UTC; все скрипты — через `data_api.py`: курсор вместо offset, поля v2 → прежние имена) | настоящие сделки (хранит ~30 дней) | — |
 | Polymarket WS | `wss://ws-live-data.polymarket.com` | сделки в реальном времени (copier) | — |
 | Open-Meteo | `api.`, `ensemble-api.`, `previous-runs-api.`, `historical-forecast-api.open-meteo.com` | 16 погодных моделей, ансамбли, история прогнозов | ~10 тыс. вызовов/сутки, крон тратит 5-6 тыс. |
 | Iowa Mesonet | `mesonet.agron.iastate.edu` | METAR — факт температуры (как у Polymarket) | — |

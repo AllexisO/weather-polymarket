@@ -111,23 +111,13 @@ def pol_trades(db, cid, since):
                   size REAL, ts INTEGER, PRIMARY KEY (condition_id, tx, idx, side, price, size, ts))""")
     last = db.execute("SELECT MAX(ts) FROM mm_ext_trades WHERE condition_id = ?", (cid,)).fetchone()[0] or 0
     stop = max(last, since)
-    offset, rows, complete = 0, [], False
-    while offset <= 100000:
-        try:
-            got = requests.get("https://data-api.polymarket.com/trades", params={"market": cid, "limit": 500, "offset": offset}, timeout=60).json()
-        except (requests.RequestException, ValueError):
-            break
-        if not isinstance(got, list):
-            break
-        rows += [(cid, t.get("transactionHash"), int(t.get("outcomeIndex", 0)), t["side"], float(t["price"]), float(t["size"]),
-                  int(t["timestamp"])) for t in got if int(t["timestamp"]) >= since]
-        if not got or min(int(t["timestamp"]) for t in got) <= stop or len(got) < 500:
-            complete = True
-            break
-        offset += 500
-        time.sleep(0.3)
-    if not complete:
-        raise RuntimeError(f"сделки маркета {cid[:10]} скачаны не до конца — пересчёт в следующий раз")
+    import data_api     # 03.11: Data API v2 (v1 выключен), страницы по курсору
+    try:
+        got = data_api.fetch("trades", {"condition": cid}, since_ts=stop, max_pages=200, need_all=True, timeout=60, pause=0.3)
+    except data_api.DataApiError as e:
+        raise RuntimeError(f"сделки маркета {cid[:10]} скачаны не до конца — пересчёт в следующий раз ({e})") from e
+    rows = [(cid, t.get("transactionHash"), int(t.get("outcomeIndex", 0)), t["side"], float(t["price"]), float(t["size"]),
+             int(t["timestamp"])) for t in got if int(t["timestamp"]) >= since]
     with db:
         db.executemany("INSERT OR IGNORE INTO mm_ext_trades VALUES (?,?,?,?,?,?,?)", rows)
     out = []

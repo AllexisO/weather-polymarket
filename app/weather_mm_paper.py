@@ -53,7 +53,6 @@ SEL = [(0.00, 0.10, "0-6"), (0.00, 0.10, "12-15"), (0.00, 0.10, "15-18"), (0.10,
 METAR_CACHE = MM_DB.parent / "mm_metar_minutes.json"
 POL_CACHE = MM_DB.parent / "mm_pol_markets.json"
 POLIGARCH = "0xb40e89677d59665d5188541ad860450a6e2a7cc9"
-DATA_API = "https://data-api.polymarket.com"
 OWN_CACHE = MM_DB.parent / "mm_own_markets.json"
 OWN_TOP, OWN_MIN_DAYS, OWN_MIN_VOL24 = 40, 7, 5000.0
 
@@ -139,22 +138,15 @@ def pol_markets():
     except (OSError, ValueError):
         pass
     start, end, cids = int(time.time()) - 7 * 86400, int(time.time()), {}
-    for _ in range(80):
-        try:
-            got = requests.get(f"{DATA_API}/activity", params={"user": POLIGARCH, "limit": 500, "start": start, "end": end,
-                                                                "sortBy": "TIMESTAMP", "sortDirection": "DESC"}, timeout=60).json()
-        except (requests.RequestException, ValueError):
-            break
-        if not isinstance(got, list) or not got:
-            break
-        for a in got:
-            if a.get("type") == "TRADE" and "temperature" not in (a.get("title") or "").lower():
-                cids[a["conditionId"]] = a.get("title")
-        mn = min(a["timestamp"] for a in got)
-        end = mn - 1 if mn < end else end - 1
-        if len(got) < 500:
-            break
-        time.sleep(0.4)
+    import data_api     # 03.11: Data API v2 (v1 выключен), страницы по курсору
+    try:
+        got = data_api.fetch("activity", {"user": POLIGARCH, "start": start, "end": end}, since_ts=start, max_pages=80,
+                             timeout=60, pause=0.4)
+    except data_api.DataApiError:
+        got = []
+    for a in got:
+        if a.get("type") == "TRADE" and "temperature" not in (a.get("title") or "").lower():
+            cids[a["conditionId"]] = a.get("title")
     out = []
     for cid in cids:
         try:

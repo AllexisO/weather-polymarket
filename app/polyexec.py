@@ -138,7 +138,6 @@ def final_price(event_slug, bucket, side, parse_bucket, cache):
 # Симуляция это честно учитывает: исполнение — только по реальным
 # сделкам ПОСЛЕ постановки заявки, с учётом очереди перед нами.
 
-DATA_API = "https://data-api.polymarket.com"
 
 
 def place_limit(market, token, budget, max_price):
@@ -168,19 +167,11 @@ def place_limit(market, token, budget, max_price):
 
 
 def trades_since(condition_id, since_ts, until_ts, page=500, max_pages=20):
-    """Все сделки маркета (оба исхода) в интервале, по времени по возрастанию."""
-    out = []
-    for i in range(max_pages):
-        batch = requests.get(f"{DATA_API}/trades",
-                             params={"market": condition_id, "limit": page, "offset": i * page}, timeout=30).json()
-        if not batch:
-            break
-        if not isinstance(batch, list):   # 03.11: data-api иногда отвечает объектом ошибки — не считать неполный список
-            raise ValueError(f"data-api /trades: не список сделок — {str(batch)[:200]}")
-        out += [t for t in batch if since_ts < t["timestamp"] <= until_ts]
-        if min(t["timestamp"] for t in batch) <= since_ts:
-            break
-    return sorted(out, key=lambda t: t["timestamp"])
+    """Все сделки маркета (оба исхода) в интервале, по времени по возрастанию. 03.11: Data API v2 (data_api.py; v1 выключен);
+    ошибка или неполный список — DataApiError (ValueError), заявка проверяется в следующий запуск."""
+    import data_api
+    batch = data_api.fetch("trades", {"condition": condition_id}, limit=page, since_ts=since_ts, max_pages=max_pages, need_all=True)
+    return sorted((t for t in batch if since_ts < t["timestamp"] <= until_ts), key=lambda t: t["timestamp"])
 
 
 def maker_filled(trades, limit, queue_ahead, want):
