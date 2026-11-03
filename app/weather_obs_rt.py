@@ -29,6 +29,8 @@ from zoneinfo import ZoneInfo
 
 import requests
 
+import decision_books
+
 from polyexec import fee_for, fee_params, simulate_buy, trading_stopped
 from weather_cities import OBS_CITIES
 from weather_edge import GAMMA, month_day_year_slug, parse_bucket
@@ -408,6 +410,8 @@ def buy_dead(conn, city, cfg, day, mx, prev, t_obs, markets, src, wallet=WALLET,
         print(f"{wallet}: {city} {day} сводка {t_obs:%H:%M}Z → максимум {mx}, вариант {rng[0]}..{rng[1]} мёртв; через {lag:.1f} мин "
               + (f"купили {r['shares']:.1f} «нет» по {r['avg']:.3f}" if filled else "не купили"), flush=True)
     conn.commit()
+    if res:   # 03.11: стакан всех вариантов города — после всех покупок по сводке, чтобы не задерживать гонку
+        decision_books.record(conn, wallet, city, day.isoformat(), res[0][0][0], "no")
 
 
 def check_watch(conn, books, watch, wallet=WALLET):

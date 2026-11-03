@@ -52,6 +52,7 @@ import numpy as np
 import pandas as pd
 import requests
 
+import decision_books
 import weather_ml as ml
 import weather_ml_q as mq
 from jobmark import item_guard, mark
@@ -370,6 +371,7 @@ def bet(conn, city, day, now, mk, blend, wallet=WALLET, day_max_c=None, hour=Non
                   + ("" if filled else f"; не исполнилось: {f['reason']}"),
                   f["shares"], f["fee"], f["book"], b["m"].get("conditionId"), tok, now.isoformat(), side))
     conn.commit()
+    decision_books.record(conn, wallet, city, day, b["lo"], side)   # 03.11: стакан всех вариантов города
     return (f"купили {side} {b['label']} {f['shares']:.1f} долей по {f['avg'] * 100:.1f}¢ (смесь {q * 100:.0f}%)" if filled
             else f"не купили {side} {b['label']}: {f['reason']}")
 

@@ -783,6 +783,9 @@ def predict(run, day_s=None, dry=False):
         q = probs[b["bucket"]]
         tok = json.loads(b["m"]["clobTokenIds"])[0]
         f = {"shares": 0, "reason": "проба (--dry)"} if dry else simulate_buy(b["m"], tok, STAKE, q - dl.EDGE / 2)
+        if not dry:   # 03.11: стакан всех вариантов города (decision_books.py), своё короткое соединение
+            import decision_books
+            decision_books.record(None, f"diary:{run}", city, d.isoformat(), b.get("lo"), "yes")
         rec["bet"] = {"bucket": b["bucket"], "p_ai": round(q, 3), "ask": b["ask"], "shares": f["shares"],
                       "cost": f.get("cost"), "fee": f.get("fee"), "avg": f.get("avg"), "book": f.get("book"),
                       "reason": f.get("reason"), "token": tok, "condition_id": b["m"].get("conditionId")}

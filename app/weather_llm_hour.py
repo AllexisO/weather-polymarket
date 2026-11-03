@@ -36,6 +36,7 @@ from zoneinfo import ZoneInfo
 
 import requests
 
+import decision_books
 from jobmark import item_guard
 from polyexec import simulate_buy, trading_stopped
 from weather_cities import OBS_CITIES, poly_round
@@ -652,6 +653,7 @@ def agy_bet_place(conn, city, day, now, mk, mx, ans):
         return "отказ кода: торговля остановлена (STOP)"
     tok = json.loads(b["m"]["clobTokenIds"])[0 if side == "yes" else 1]
     f = simulate_buy(b["m"], tok, stake, min(maxp, MAX_PRICE))
+    decision_books.record(conn, AGY_BET_WALLET, city, day.isoformat(), b["lo"], side)   # 03.11: стакан всех вариантов города
     if f["shares"] <= 0:
         return f"не купили {side} {b['label']}: {f['reason']}"
     if not MIN_PRICE <= f["avg"] <= MAX_PRICE:
@@ -999,6 +1001,7 @@ def bet(conn, wallet, city, day, now, mk, probs, edge=EDGE):
     # 11.10 (аудит, решение Alex «исправить сейчас»): предел цены — шанс − половина ПОРОГА; с 08.10 по 11.10 здесь стояла
     # половина перевеса этой ставки (имя edge затиралось), то есть середина между ценой и шансом — строже задуманного
     f = simulate_buy(b["m"], tok, STAKE, q - edge / 2)
+    decision_books.record(conn, wallet, city, day.isoformat(), b["lo"], side)   # 03.11: стакан всех вариантов города
     if f["shares"] <= 0:
         return f"не купили {side} {b['label']}: {f['reason']}"
     if not MIN_PRICE <= f["avg"] <= MAX_PRICE:   # 10.10: Gamma дала устаревшие 28¢, в стакане было 1.9¢ — правило 10-90¢ по настоящей цене

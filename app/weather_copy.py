@@ -26,6 +26,7 @@ from zoneinfo import ZoneInfo
 import requests
 
 import data_api
+import decision_books
 
 from polyexec import simulate_buy, trading_stopped
 from weather_paper import start_balance
@@ -112,6 +113,7 @@ def try_copy(conn, w, t, now, source="опрос"):
          "open" if filled else "nofill", reason, ex["shares"] if filled else 0.0,
          ex["fee"] if filled else 0.0, ex["book"], side))
     conn.commit()
+    decision_books.record(conn, WALLET, city, d.isoformat(), bucket[0], side)   # 03.11: стакан всех вариантов города
     print(f"{city} {d}: {'купили' if filled else 'не купили'} — {reason}", flush=True)
     return filled
 

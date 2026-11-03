@@ -30,6 +30,7 @@
 weather_edge.py и weather_poly_resolve.py.
 """
 
+import decision_books
 from jobmark import item_guard
 import json
 import math
@@ -723,6 +724,7 @@ def place(conn, now, only=None):
                              m["conditionId"], json.loads(m["clobTokenIds"])[0], datetime.now().astimezone().isoformat()),
                         )
                         conn.commit()
+                        decision_books.record(conn, wallet, city, d["local_date"], b["bucket_lo"], "yes")
                         print(f"{wallet}: {city} {d['local_date']} своя заявка на {label} по {lim['limit']*100:.1f}¢, "
                               f"{lim['shares']:.1f} долей, в очереди перед нами {lim['queue_ahead']:.0f}")
                         continue
@@ -775,6 +777,8 @@ def place(conn, now, only=None):
                          datetime.now(timezone.utc).isoformat()),
                     )
                     conn.commit()
+                    # 03.11: стакан всех вариантов города при первой за день попытке кошелька (decision_books.py)
+                    decision_books.record(conn, wallet, city, d["local_date"], b["bucket_lo"], "no" if no_side else "yes")
                     placed += filled
                     if filled:
                         print(f"{wallet}: {city} {d['local_date']} купили {ex['shares']:.1f} долей {label} по {ex['avg']:.3f} "

@@ -56,6 +56,7 @@
 96-97°F). Ставка по 5-минутке там бы проиграла.
 """
 
+import decision_books
 from jobmark import item_guard
 import json
 import math
@@ -549,6 +550,7 @@ def _buy_no(conn, wallet, city, cfg, today, m, rng, bid, obs_max, obs_time, now,
          reason, ex["shares"] if filled else 0.0, ex["fee"] if filled else 0.0, ex["book"], routine_max),
     )
     conn.commit()
+    decision_books.record(conn, wallet, city, today.isoformat(), rng[0], "no")   # 03.11: стакан всех вариантов города
     if filled:
         print(f"{wallet}: {city} {today} {why} — бакет "
               f"{rng[0]}..{rng[1]} ещё стоит {bid:.2f}; купили {ex['shares']:.1f} долей No по {ex['avg']:.3f} "
