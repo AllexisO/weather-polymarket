@@ -12,7 +12,7 @@ SERVICES = [
          "scripts": "weather_edge, weather_poly_resolve, weather_sharp_rank"},
         {"name": "Polymarket — цены и стаканы", "site": "https://polymarket.com", "what": "цены, стаканы заявок, история цен — исполнение виртуальных ставок",
          "apis": ["clob.polymarket.com/book, /books, /prices-history"], "mode": "live", "key": None, "price": "бесплатно",
-         "scripts": "polyexec, weather_paper, weather_obs_live, weather_obs_rt, weather_price_history, decision_books (стаканы всех вариантов в момент решения)"},
+         "scripts": "polyexec, weather_paper, weather_obs_live, weather_obs_rt, weather_price_history, decision_books (стаканы всех вариантов в момент решения), weather_book_rec (все стаканы каждую минуту)"},
         {"name": "Polymarket — сделки и трейдеры", "site": "https://polymarket.com", "what": "все сделки погоды с кошельками, сделки трейдеров для повтора",
          "apis": ["data-api.polymarket.com/v2/trades, /v2/activity (v1 выключен 02.11, общий доступ — data_api.py)"], "mode": "live", "key": None, "price": "бесплатно",
          "scripts": "weather_trades_history, weather_copy"},
