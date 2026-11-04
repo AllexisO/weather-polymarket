@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+{% block title %}{{ d.j.label }} — скрипт — weather-lab{% endblock %}
+{% block content %}
+{#
+  03.11 (Alex): страница одного скрипта — состояние, как работает (шапка файла), расписание (строка крона), запуски за 24 ч / 7 дней,
+  история последних 40 запусков, вывод последнего запуска, хвост лога, исправленные ошибки и свои данные скрипта (JOB_EXTRA).
+  Данные — job_detail() (dashboard.py).
+#}
+{% include "_sys_style.html" %}
+{% set j = d.j %}
+<div class="bk">
+  <div class="crumb"><a href="/system">Система</a> / <a href="/system/jobs">Скрипты</a></div>
+  <div class="top">
+    <h1>{{ j.label }} <span class="st {{ j.state }}">{{ words[j.state] }}</span></h1>
+    <p><code>{{ j.script }}</code> · {{ j.cron | join(' · ') if j.cron else j.sched }}{% if j.ok_when %} ·
+      {{ 'последняя запись в лог' if j.kind == 'service' else 'последний успех' }} {{ j.ok_when }} ({{ j.ok_ago }}){% endif %}</p>
+  </div>
+
+  {% if j.err and j.state in ('fail', 'partial') %}
+  <section class="sec"><div class="box" style="border-color: rgba(244,167,127,.6)"><b class="bad">Что не так:</b> {{ j.err }}</div></section>
+  {% endif %}
+  {% if j.kind == 'stray' %}
+  <section class="sec"><div class="box">Этот скрипт есть в кроне, но не описан в <code>app/jobs_info.py</code> — сайт не знает, как проверять, что
+    он работает. Нужно добавить строку в <code>JOBS</code> или <code>SERVICE_SCRIPTS</code>.</div></section>
+  {% endif %}
+
+  {% if d.flow %}{% include "_flow_book_rec.html" %}{% endif %}
+
+  {% if d.stats %}
+  <section class="sec">
+    <h2>Запуски</h2>
+    <div class="kpis">
+      {% for name, s in d.stats.items() %}
+      <div class="kpi"><h3>За {{ name }}</h3><div class="v">{{ s.n }}</div>
+        <div class="s">ошибок <b class="{{ 'bad' if s.fail else '' }}">{{ s.fail }}</b> · с пропусками {{ s.partial }}</div></div>
+      {% endfor %}
+      {% set s = d.stats['24 ч'] %}
+      <div class="kpi"><h3>Длительность (24 ч)</h3><div class="v">{{ '%.0f' | format(s.avg) if s.avg is not none else '—' }} с</div>
+        <div class="s">самый долгий {{ '%.0f' | format(s.max) if s.max is not none else '—' }} с</div></div>
+      {% if s.om %}<div class="kpi"><h3>Open-Meteo (24 ч)</h3><div class="v">{{ s.om }}</div><div class="s">запросов</div></div>{% endif %}
+    </div>
+  </section>
+  {% endif %}
+
+  {% if d.extra %}
+  {% set x = d.extra %}
+  <section class="sec">
+    <h2>Что делает сейчас</h2>
+    {% if x.hint %}<p class="hint">{{ x.hint }}</p>{% endif %}
+    {% if x.note %}<div class="box mut">{{ x.note }}</div>{% endif %}
+    {% if x.kpis %}
+    <div class="kpis">
+      {% for k in x.kpis %}<div class="kpi"><h3>{{ k.title }}</h3><div class="v {{ k.tone }}">{{ k.v }}</div>{% if k.sub %}<div class="s">{{ k.sub }}</div>{% endif %}</div>{% endfor %}
+    </div>
+    {% endif %}
+    {% for t in x.tables or [] if t.rows %}
+    <h3 style="margin:18px 0 8px;font-size:13px;font-weight:600;color:var(--bk-muted);text-transform:uppercase;letter-spacing:.05em">{{ t.title }}</h3>
+    <div class="box tw">
+      <table class="t">
+        <tr>{% for c in t.cols %}<th>{{ c }}</th>{% endfor %}</tr>
+        {% for r in t.rows %}{% set ri = loop.index0 %}<tr>{% for v in r %}<td class="{{ 'n' if loop.first }}{{ ' bad' if t.bad_rows and ri in t.bad_rows and loop.index0 == t.bad_col }}">{{ v }}</td>{% endfor %}</tr>{% endfor %}
+      </table>
+    </div>
+    {% endfor %}
+  </section>
+  {% endif %}
+
+  {% if d.doc %}
+  <section class="sec">
+    <h2>Как работает</h2>
+    <p class="hint">Описание из шапки файла скрипта.</p>
+    <div class="box"><pre class="doc">{{ d.doc }}</pre></div>
+  </section>
+  {% endif %}
+
+  <section class="sec">
+    <h2>Расписание</h2>
+    <div class="box">
+      {% if d.cron_raw %}{% for c in d.cron_raw %}<div><code>{{ c }}</code></div>{% endfor %}
+      <p class="hint" style="margin:8px 0 0">Строка крона (минута, час, день, месяц, день недели) — время сервера (Кишинёв).</p>
+      {% else %}<span class="mut">В кроне не найден: {{ j.sched }}</span>{% endif %}
+    </div>
+  </section>
+
+  {% if d.runs %}
+  <section class="sec">
+    <h2>Последние запуски <span class="cnt">{{ d.runs | length }}</span></h2>
+    {% if d.chart %}<div class="box" style="margin-bottom:10px">{{ d.chart | safe }}</div>{% endif %}
+    <div class="box tw">
+      <table class="t">
+        <tr><th>Закончился</th><th>Итог</th><th>Длился</th><th>Пропусков</th><th>Open-Meteo</th></tr>
+        {% for r in d.runs %}
+        <tr><td class="n">{{ r.when }}</td>
+          <td>{% if r.rc == 0 %}<span class="good">в порядке</span>{% elif r.rc in (124, 137, 143) %}<span class="bad">остановлен по времени</span>{% else %}<span class="bad">ошибка, код {{ r.rc }}</span>{% endif %}</td>
+          <td>{{ '%.0f' | format(r.dur) if r.dur is not none else '—' }} с</td><td class="{{ 'bad' if r.ie else 'mut' }}">{{ r.ie }}</td><td class="mut">{{ r.om }}</td></tr>
+        {% endfor %}
+      </table>
+    </div>
+  </section>
+  {% endif %}
+
+  {% if d.output %}
+  <section class="sec">
+    <h2>Вывод последнего запуска</h2>
+    <div class="term-box"><div class="term-bar"><span>job_log.output — хвост вывода</span></div><pre class="term-pre">{{ d.output }}</pre></div>
+  </section>
+  {% endif %}
+
+  <section class="sec">
+    <h2>Лог</h2>
+    {% if d.tail %}
+    <div class="term-box"><div class="term-bar"><span><code>data/logs/{{ d.log }}</code> — последние 250 строк</span>
+      <span><span id="logwhen">обновлён {{ d.log_when }}</span> · <button type="button" id="logbtn" class="lbtn" aria-pressed="true">● живой</button></span></div>
+      <pre class="term-pre" id="logpre">{{ d.tail }}</pre></div>
+    <style>
+      .lbtn { background: transparent; border: 1px solid var(--bk-line); color: var(--bk-pos); border-radius: 999px; padding: 1px 9px; font: inherit; font-size: 12.5px; cursor: pointer; }
+      .lbtn[aria-pressed="false"] { color: var(--bk-muted); }
+    </style>
+    <script>
+    /* 03.11 (Alex): живой лог — раз в 5 с новый хвост (/system/jobs/<key>/log), пока вкладка открыта; прокрутка вниз, только если
+       уже были внизу (читаешь выше — не дёргаем); «живой» — пауза */
+    (function () {
+      var pre = document.getElementById('logpre'), when = document.getElementById('logwhen'), btn = document.getElementById('logbtn');
+      var live = true, last = pre.textContent;
+      pre.scrollTop = pre.scrollHeight;
+      btn.addEventListener('click', function () { live = !live; btn.setAttribute('aria-pressed', live); btn.textContent = live ? '● живой' : '❚❚ пауза'; });
+      function tick() {
+        if (!live || document.hidden) return;
+        fetch('/system/jobs/{{ d.j.key }}/log', {cache: 'no-store'}).then(function (r) { return r.ok ? r.json() : null; }).then(function (x) {
+          if (!x || x.tail === null) return;
+          when.textContent = 'обновлён ' + x.when;
+          if (x.tail === last) return;
+          var bottom = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 40;
+          pre.textContent = x.tail; last = x.tail;
+          if (bottom) pre.scrollTop = pre.scrollHeight;
+        }).catch(function () {});
+      }
+      setInterval(tick, 5000);
+    })();
+    </script>
+    {% else %}<div class="box mut">{% if d.log %}Файла <code>data/logs/{{ d.log }}</code> нет или он пуст.{% else %}У этого скрипта нет своего лога (пишет в журнал контейнера).{% endif %}</div>{% endif %}
+  </section>
+
+  {% if d.fixes %}
+  <section class="sec">
+    <h2>Исправленные ошибки</h2>
+    <div class="box tw"><table class="t"><tr><th>Когда</th><th>Что исправлено</th></tr>
+      {% for f in d.fixes %}<tr><td class="n">{{ f.when }}</td><td>{{ f.note }}</td></tr>{% endfor %}</table></div>
+  </section>
+  {% endif %}
+</div>
+{% endblock %}

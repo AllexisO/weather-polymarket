@@ -1,0 +1,51 @@
+{#
+  03.11 (Alex): общие стили страниц «Система» (/system, /system/jobs, /system/jobs/<key>) — палитра и плашки как на /status.
+  Оформление можно доработать (Gemini, GEMINI.md); данные — dashboard.py (system_page_data, jobs_list, job_detail).
+#}
+<style>
+  body:has(.bk) .main-col { background: #0A0A0B; }
+  body:has(.bk) main { max-width: 1040px; }
+  .bk {
+    --bk-card: #1C1C1E; --bk-raise: #262628; --bk-line: #2E2E31; --bk-text: #F4F4F5; --bk-muted: #A1A1AA; --bk-faint: #71717A;
+    --bk-accent: #FFD58A; --bk-accent-bg: rgba(255, 213, 138, .14); --bk-pos: #A3E39A; --bk-pos-bg: rgba(163, 227, 154, .13);
+    --bk-neg: #F4A77F; --bk-neg-bg: rgba(244, 167, 127, .13); --bk-lav: #D3DDFB; --bk-lav-bg: rgba(211, 221, 251, .12);
+    --bk-gold: #FFD58A; --bk-gold-bg: rgba(255, 213, 138, .14);
+    --bk-font: "Onest", -apple-system, "Segoe UI", Roboto, sans-serif;
+    color: var(--bk-text); font-family: var(--bk-font); font-size: 15px; line-height: 1.55;
+  }
+  .bk a { color: var(--bk-accent); text-underline-offset: 3px; }
+  .crumb { font-size: 13.5px; margin-bottom: 10px; } .crumb a { color: var(--bk-muted); text-decoration: none; } .crumb a:hover { color: var(--bk-accent); }
+  .top { margin-bottom: 22px; }
+  .top h1 { margin: 0; font-size: 26px; font-weight: 700; letter-spacing: -.02em; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .top p { margin: 4px 0 0; color: var(--bk-muted); font-size: 14px; max-width: 760px; }
+  .sec { margin: 0 0 28px; }
+  .sec h2 { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; font-size: 18px; font-weight: 600; }
+  .sec h2 .cnt { font-size: 13px; font-weight: 600; color: var(--bk-muted); background: var(--bk-raise); border-radius: 999px; padding: 1px 9px; }
+  .hint { color: var(--bk-muted); font-size: 13.5px; margin: -4px 0 12px; }
+  .box { background: var(--bk-card); border: 1px solid var(--bk-line); border-radius: 16px; padding: 16px 18px; }
+  .st { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; padding: 3px 10px; border-radius: 999px; white-space: nowrap; }
+  .st::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+  .st.ok { background: var(--bk-pos-bg); color: var(--bk-pos); }
+  .st.late, .st.partial { background: var(--bk-gold-bg); color: var(--bk-gold); }
+  .st.fail { background: var(--bk-neg-bg); color: var(--bk-neg); }
+  .st.unknown, .st.quiet { background: var(--bk-raise); color: var(--bk-muted); }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; }
+  .kpi { background: var(--bk-card); border: 1px solid var(--bk-line); border-radius: 14px; padding: 14px 16px; }
+  .kpi h3 { margin: 0 0 6px; font-size: 13px; font-weight: 600; color: var(--bk-muted); }
+  .kpi .v { font-size: 21px; font-weight: 600; line-height: 1.2; font-variant-numeric: tabular-nums; }
+  .kpi .s { margin-top: 4px; font-size: 12.5px; color: var(--bk-muted); }
+  table.t { width: 100%; border-collapse: collapse; font-size: 13.5px; font-variant-numeric: tabular-nums; }
+  table.t th { text-align: left; color: var(--bk-faint); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; padding: 8px 10px; border-bottom: 1px solid var(--bk-line); }
+  table.t td { padding: 8px 10px; border-bottom: 1px solid var(--bk-line); vertical-align: top; }
+  table.t tr:last-child td { border-bottom: 0; }
+  .tw { overflow-x: auto; padding: 4px 6px; }
+  .n { white-space: nowrap; }
+  .mut { color: var(--bk-muted); } .bad { color: var(--bk-neg); } .good { color: var(--bk-pos); }
+  code { font: 12.5px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--bk-muted); background: var(--bk-raise); border-radius: 6px; padding: 1px 6px; word-break: break-all; }
+  .doc { white-space: pre-wrap; font-size: 14px; line-height: 1.6; margin: 0; font-family: var(--bk-font); color: var(--bk-text); }
+  .term-box { background: #0B0C0E; border: 1px solid var(--bk-line); border-radius: 14px; overflow: hidden; }
+  .term-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 14px; background: #121316; border-bottom: 1px solid var(--bk-line); font-size: 13px; color: var(--bk-muted); }
+  .term-pre { margin: 0; padding: 14px; font: 12.5px/1.45 ui-monospace, Menlo, Consolas, monospace; color: #A3E39A; white-space: pre-wrap; word-break: break-word;
+    max-height: 460px; overflow: auto; }
+  @media (max-width: 720px) { .term-pre { max-height: 340px; } }
+</style>

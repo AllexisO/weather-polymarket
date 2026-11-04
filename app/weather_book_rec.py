@@ -8,7 +8,8 @@ POST /books CLOB пачками по 50; на каждый вариант — д
 Без повторов: строка пишется, только если стакан изменился с прошлой минуты (за минуту меняется ~55%) — информация та же, что у
 записи всех подряд: стакан на любую минуту = последняя строка варианта не позже этой минуты. Чтобы отличить «не изменился» от
 «не получили», каждая минута — строка в rounds, а варианты, чей стакан в эту минуту не получен, — в missing.
-Список вариантов — Gamma, раз в 30 мин (новые дни, закрытые убираем).
+Список вариантов — Gamma, раз в 10 мин (новые дни, закрытые убираем); вариант без стакана 3 минуты подряд — маркет закрылся,
+убираем сразу (иначе до обновления списка ~100 «не получено» в минуту).
 
 Где: data/booklog/books_ГГГГ-ММ.sqlite3 (месяц по UTC; в начале каждого файла — полный стакан всех вариантов, файл читается сам
 по себе). Не рабочая база (иначе гигабайты в ней и «database is locked» у крона) и не ночная копия (решение Alex 03.11: диск
@@ -38,7 +39,8 @@ BOOK_DIR = Path(os.environ.get("BOOK_DIR", "/data/booklog"))
 JOB = "weather_book_rec"
 DEPTH = 30
 BATCH = 50
-REFRESH_S = 1800
+REFRESH_S = 600
+GONE_AFTER = 3   # стакана нет 3 минуты подряд — маркет закрылся (день в городе кончился), убираем до обновления списка
 END_MIN, END_SEC = 55, 10
 
 
@@ -145,7 +147,7 @@ def run():
         end = now + timedelta(minutes=int(os.environ["BOOK_REC_MIN"]))
     db, month = open_month(now)
     idx, last = {}, {}
-    mk, t_mk = {}, 0.0
+    mk, t_mk, gone = {}, 0.0, {}
     alive = {}
     stats = {"rounds": 0, "rows": 0, "missing": 0}
     print(f"{JOB}: запись до {end:%H:%M:%S} UTC → {BOOK_DIR}/books_{month}.sqlite3", flush=True)
@@ -165,6 +167,9 @@ def run():
             new, failed = markets()
             if new or not mk:
                 mk = new
+                for t in mk:   # убранный, но Gamma ещё считает открытым — ещё одна минута на проверку (сбой сети ≠ закрытие)
+                    if gone.get(t, 0) >= GONE_AFTER:
+                        gone[t] = GONE_AFTER - 1
             t_mk = time.time()
             print(f"{cur:%H:%M} список вариантов: {len(mk)}" + (f", Gamma не ответила по {failed} город-дням" if failed else ""), flush=True)
         toks = sorted(mk)
@@ -175,7 +180,9 @@ def run():
             b = got.get(tok)
             if b is None:
                 miss.append((ts, i))
+                gone[tok] = gone.get(tok, 0) + 1
                 continue
+            gone.pop(tok, None)
             a, bd = levels(b.get("asks"), False), levels(b.get("bids"), True)
             if last.get(tok) == (a, bd):
                 continue
@@ -193,6 +200,8 @@ def run():
                 last.pop(tok, None)
             print(f"{cur:%H:%M} не записано — {e}", flush=True)
             continue
+        for tok in [t for t in mk if gone.get(t, 0) >= GONE_AFTER]:
+            mk.pop(tok)
         stats["rounds"] += 1
         stats["rows"] += len(rows)
         stats["missing"] += len(miss)

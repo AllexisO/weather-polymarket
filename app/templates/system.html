@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}Система — weather-lab{% endblock %}
+{% block content %}
+{#
+  03.11 (Alex): «Система» — карточки «Скрипты», «Сервисы», «Бэкап» с самым коротким итогом; клик — своя страница.
+  Данные — system_page_data() (dashboard.py).
+#}
+{% include "_sys_style.html" %}
+<style>
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr)); gap: 12px; }
+  a.card { display: flex; flex-direction: column; gap: 10px; background: var(--bk-card); border: 1px solid var(--bk-line); border-radius: 18px;
+    padding: 20px 22px; color: var(--bk-text); text-decoration: none; transition: border-color .15s; min-width: 0; }
+  a.card:hover { border-color: var(--bk-muted); }
+  a.card.warn { border-color: rgba(255, 213, 138, .55); } a.card.badc { border-color: rgba(244, 167, 127, .6); }
+  .card .hd { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .card .nm { font-size: 18px; font-weight: 600; }
+  .card .big { font-size: 30px; font-weight: 700; letter-spacing: -.02em; line-height: 1.1; font-variant-numeric: tabular-nums; }
+  .card .big small { font-size: 14px; font-weight: 500; color: var(--bk-muted); margin-left: 6px; letter-spacing: 0; }
+  .card ul { margin: 0; padding-left: 18px; font-size: 13.5px; color: var(--bk-muted); }
+  .card .ln { font-size: 13.5px; color: var(--bk-muted); } .card .ln b { color: var(--bk-text); font-weight: 600; }
+  .card .go { margin-top: auto; font-size: 13.5px; color: var(--bk-accent); }
+</style>
+<div class="bk">
+  <div class="top">
+    <h1>Система</h1>
+    <p>Всё, что работает за кулисами: скрипты крона, внешние сервисы и подписки, резервные копии. Нажмите на карточку — откроется
+      подробная страница.</p>
+  </div>
+
+  {% set jc = jobs.counts %}
+  {% set bad = jc.fail + jc.partial + jc.late %}
+  <div class="cards">
+    <a class="card{{ ' badc' if jc.fail else (' warn' if bad else '') }}" href="/system/jobs">
+      <div class="hd"><span class="nm">Скрипты</span>
+        {% if jc.fail %}<span class="st fail">ошибка: {{ jc.fail }}</span>{% elif bad %}<span class="st late">внимание: {{ bad }}</span>{% else %}<span class="st ok">все работают</span>{% endif %}</div>
+      <div class="big">{{ jc.ok }}<small>из {{ jobs.total }} работают</small></div>
+      {% if jobs.problems %}
+      <ul>{% for j in jobs.problems[:4] %}<li>{{ j.label }} — {{ words[j.state] if words is defined else j.state }}</li>{% endfor %}</ul>
+      {% else %}<div class="ln">Проблем нет · проверено в {{ jobs.checked }}</div>{% endif %}
+      <span class="go">Все скрипты →</span>
+    </a>
+
+    {# 04.11: схема «Кто что записывает» — /system/flows #}
+    <a class="card" href="/system/flows">
+      <div class="hd"><span class="nm">Кто что записывает</span><span class="st ok">● живая</span></div>
+      <div class="ln">Источник → скрипт → таблица: откуда каждый скрипт берёт данные, куда пишет и пишет ли прямо сейчас.</div>
+      <span class="go">Схема записи →</span>
+    </a>
+
+    <a class="card{{ ' warn' if svc.soon else '' }}" href="/services">
+      <div class="hd"><span class="nm">Сервисы</span>{% if svc.soon %}<span class="st late">скоро конец подписки</span>{% else %}<span class="st ok">в порядке</span>{% endif %}</div>
+      <div class="big">{{ svc.n }}<small>сервисов, {{ svc.live }} по расписанию</small></div>
+      <div class="ln">Подписок: <b>{{ svc.subs }}</b>{% if svc.soon %} · заканчиваются за 14 дней: <b>{{ svc.soon | join(', ') }}</b>{% endif %}</div>
+      <span class="go">Сервисы и подписки →</span>
+    </a>
+
+    {% set bs = backup.state %}
+    <a class="card{{ '' if bs and bs.ok else ' badc' }}" href="/backup">
+      <div class="hd"><span class="nm">Бэкап</span>{% if bs and bs.ok %}<span class="st ok">копия свежая</span>{% else %}<span class="st fail">нет свежей копии</span>{% endif %}</div>
+      {% if bs %}
+      <div class="big">{{ '%.0f' | format(bs.age_h) }} ч<small>назад, {{ bs.at.strftime('%d.%m %H:%M') }}</small></div>
+      <div class="ln">{% if backup.hist %}Размер <b>{{ backup.gb(backup.hist[0].bytes) }}</b> · {% endif %}следующая через <b>{{ '%.0f' | format(bs.next_in_h) }} ч</b> ({{ bs.next.strftime('%H:%M') }})</div>
+      {% else %}<div class="ln">Итога копии нет (data/backup_status.json)</div>{% endif %}
+      <span class="go">Копии, размеры, восстановление →</span>
+    </a>
+  </div>
+</div>
+{% endblock %}

@@ -56,3 +56,115 @@ JOBS = [
 
 # имя файла скрипта -> key (у ночного обучения они разные)
 KEY_BY_SCRIPT = {script: key for key, _l, script, _s, _a, _log in JOBS}
+
+# 03.11 (Alex: «много скриптов, которые я не вижу»): страница «Система → Скрипты» (/system/jobs) — группы и служебные
+# скрипты крона без отметки запуска (их состояние — по времени последней записи в лог). Новый скрипт в кроне без строки
+# здесь или в JOBS — на странице в группе «Нет в списке» (сверка с data/night/crontab.txt).
+GROUPS = [
+    ("Ставки и кошельки", ["weather_paper", "weather_ml_fast", "weather_fast_dry", "weather_real_dry", "weather_pool_refill",
+                           "weather_ml_day", "weather_llm_hour", "weather_llm_skill", "weather_obs_live", "weather_obs_atis",
+                           "weather_fastobs", "weather_copy_live", "weather_copy"]),
+    ("Данные: цены, прогнозы, замеры", ["weather_edge", "weather_poly_resolve", "weather_station_obs", "weather_multimodel",
+                                        "weather_ml_data", "weather_ens", "weather_pws_live", "weather_trades_history",
+                                        "weather_price_history", "weather_sharp_rank"]),
+    ("Модели: обучение и оценка", ["weather_ml_train", "weather_ml_day_train", "weather_ml_skill"]),
+    ("Запись без ставок (для проверок)", ["weather_book_rec", "weather_fresh_live", "crypto_speed_rec"]),
+    ("Проверки и служебные", ["weather_alerts", "weather_audit", "weather_night_check", "weather_logic_check", "weather_research",
+                              "db_watchdog", "backup_db", "agy_runner"]),
+]
+
+# key, подпись, скрипт, расписание, max_age_min, log — как JOBS, но без job_runs: «жив» = лог обновлялся не позже max_age_min
+SERVICE_SCRIPTS = [
+    ("db_watchdog", "Сторож базы — останавливает зависшие запуски, если база занята", "db_watchdog.sh", "каждые 2 мин", None, "db_watchdog.log"),   # пишет в лог, только когда вмешивается
+    ("backup_db", "Ночная копия всех баз на другой диск (personal_data)", "backup_db.sh", "03:10", 26 * 60, "backup_db.log"),
+    ("agy_runner", "Мост к Antigravity — отправляет письма LLM-кошельков llm_agy* и забирает ответы", "agy_runner.py", "каждую минуту", None, "agy_runner.log"),   # пишет в лог, только когда есть письма
+]
+
+# шапки служебных скриптов — сайт видит только app/ и data/, а эти файлы лежат в корне проекта (при правке шапки — поправь здесь)
+SERVICE_DOCS = {
+    "db_watchdog": """Сторож базы (2026-09-27, требование Alex: «если зависло — сразу откинуть»).
+Крон каждые 2 минуты. Проверяет, что в базу можно писать (app/db_check.py, ждёт до 20 с).
+3 неудачи подряд (~6 мин) — снимает виновника:
+  1) останавливает скрипты крона (collector), идущие дольше 10 минут, — по одному, с самого долгого, после каждого проверяя,
+     освободилась ли база;
+  2) если не помогло — перезапускает слушатель (copier) и сайт (dashboard);
+  3) пишет data/ALERT_DB_LOCKED — сайт показывает красную плашку 24 часа.
+Лог: data/logs/db_watchdog.log (пишется только при проблемах).""",
+    "backup_db": """Резервная копия всех баз weather-lab (2026-10-02): база на одном SSD без зеркала — копия на другом физическом диске
+(пул personal_data, HDD). Крон каждую ночь в 03:10.
+Как: VACUUM INTO из базы, открытой только на чтение, — целостная копия на один момент; проверка копии (PRAGMA quick_check);
+сжатие zstd (~в 4 раза). Хранение: последние 7 дней + копии воскресений за 4 недели. Итог — data/backup_status.json.
+Плюс архивы data/research (без копии базы для исследований), data/ml и ключи .env (права 600).
+Не входит — список на странице «Бэкап» (в том числе data/booklog — стаканы каждую минуту).
+Подробности и история копий — страница «Бэкап».""",
+    "agy_runner": """Обработчик писем LLM-кошельков llm_agy* (09.10): Gemini через Antigravity CLI (agy).
+agy стоит на сервере (~/.local/bin/agy, вход по аккаунту Google), а не в контейнере. Поэтому:
+  weather_llm_hour.py (контейнер) кладёт письмо в data/agy/queue/<город>_<дата>_<час>.txt →
+  этот скрипт (крон сервера раз в минуту) отдаёт его agy и пишет ответ в data/agy/done/<то же>.json →
+  weather_llm_hour.py забирает ответ, считает шансы и ставит.
+Исчерпан лимит Google — пауза на час (data/agy/paused_until): письма сразу получают ответ PAUSED.
+Вторая очередь data/agy/skill_queue — письма кошелька llm_skill (agy с Python в изолированном контейнере, 3-5 мин), только когда
+основная очередь пуста. Лог — data/logs/agy_runner.log, пишется только когда есть письма.""",
+}
+
+# файл в кроне → key, когда крон зовёт обёртку, а не сам скрипт
+CRON_ALIAS = {"night_check.sh": "weather_night_check"}
+
+# 04.11 (Alex «оживить, чтобы было видно, что и как записываем»): схема «Кто что записывает» на /system/flows —
+# откуда скрипт берёт данные и куда пишет. Сверено с кодом 04.11 (INSERT/REPLACE INTO и адреса API в каждом скрипте).
+# Меняешь, куда пишет скрипт, — поправь здесь. Таблица без префикса — рабочая база; «файл:…» — отдельный файл (FLOW_FILES).
+FLOW_SOURCES = {
+    "gamma": "Polymarket · маркеты", "clob": "Polymarket · стаканы", "data": "Polymarket · сделки",
+    "ws": "Polymarket · поток сделок", "om": "Open-Meteo", "iem": "Iowa Mesonet (METAR)",
+    "awc": "aviationweather / NOAA", "fast": "JMA · DWD · FMI · KNMI · HKO", "cwop": "CWOP (народные станции)",
+    "atis": "ATIS", "openrouter": "OpenRouter (LLM)", "agy": "Antigravity (Gemini)", "binance": "Binance", "db": "рабочая база",
+}
+FLOW_FILES = {   # «файл:имя» -> (подпись, путь от /data)
+    "файл:fast_dry": ("fast_dry.sqlite3", "db/fast_dry.sqlite3"),
+    "файл:fastobs": ("fastobs.sqlite3", "db/fastobs.sqlite3"),
+    "файл:booklog": ("booklog (месяц)", "booklog"),
+    "файл:pws": ("pws.sqlite3", "db/pws.sqlite3"),
+    "файл:research": ("research.sqlite3", "research/research.sqlite3"),
+    "файл:crypto": ("crypto/live.sqlite3", "research/crypto/live.sqlite3"),
+    "файл:backup": ("копии на personal_data", None),
+    "файл:agy": ("data/agy (письма)", "agy"),
+    "файл:ml": ("data/ml (модели)", "ml"),
+}
+FLOWS = {   # key -> (источники, куда пишет)
+    "weather_edge": (["gamma", "om", "awc"], ["snapshots"]),
+    "weather_multimodel": (["om"], ["mm_forecasts", "snapshots"]),
+    "weather_ml_fast": (["gamma", "awc", "db"], ["snapshots_fast"]),
+    "weather_poly_resolve": (["gamma"], ["weather_poly_outcomes"]),
+    "weather_paper": (["clob", "db"], ["paper_trades", "decision_books"]),
+    "weather_real_dry": (["clob", "db"], ["real_dry"]),
+    "weather_pool_refill": (["clob", "db"], ["pool_refill"]),
+    "weather_fast_dry": (["gamma", "clob", "awc"], ["файл:fast_dry"]),
+    "weather_fresh_live": (["om"], ["fresh_hres_live"]),
+    "weather_obs_live": (["awc", "fast", "clob"], ["paper_obs_trades", "metar_seen", "weather_poly_outcomes", "decision_books"]),
+    "weather_obs_atis": (["atis", "awc", "clob"], ["metar_seen_src"]),
+    "weather_fastobs": (["fast", "awc"], ["файл:fastobs", "paper_obs_trades"]),
+    "weather_copy_live": (["ws"], ["paper_trades"]),
+    "weather_copy": (["data", "clob"], ["paper_trades", "decision_books"]),
+    "weather_ml_day": (["clob", "awc", "db"], ["ml_day_preds", "paper_trades", "decision_books"]),
+    "weather_llm_hour": (["openrouter", "agy", "om", "awc", "clob"], ["llm_hour_preds", "paper_trades", "decision_books"]),
+    "weather_llm_skill": (["agy", "clob", "db"], ["llm_hour_preds", "paper_trades"]),
+    "weather_ens": (["om"], ["ens_forecasts"]),
+    "weather_station_obs": (["iem"], ["station_obs", "weather_station_daily"]),
+    "weather_ml_data": (["om", "iem"], ["ml_fcst_vars"]),
+    "weather_pws_live": (["cwop"], ["файл:pws"]),
+    "weather_trades_history": (["data"], ["poly_trades", "poly_trades_days", "poly_trade_wallets", "poly_market_final"]),
+    "weather_price_history": (["clob"], ["price_history", "price_history_days", "weather_poly_outcomes"]),
+    "weather_sharp_rank": (["gamma", "db"], ["sharp_wallets"]),
+    "weather_ml_train": (["db"], ["ml_train_log", "файл:ml"]),
+    "weather_ml_day_train": (["db"], ["ml_day_exam", "файл:ml"]),
+    "weather_ml_skill": (["db"], ["ml_skill"]),
+    "weather_book_rec": (["gamma", "clob"], ["файл:booklog"]),
+    "crypto_speed_rec": (["binance", "gamma", "clob"], ["файл:crypto"]),
+    "weather_alerts": (["db"], ["alerts"]),
+    "weather_audit": (["db"], ["audit_log"]),
+    "weather_night_check": (["db"], ["night_check"]),
+    "weather_logic_check": (["db", "gamma"], ["logic_check", "logic_rules"]),
+    "weather_research": (["db"], ["файл:research"]),
+    "backup_db": (["db"], ["файл:backup"]),
+    "agy_runner": (["agy"], ["файл:agy"]),
+}

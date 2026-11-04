@@ -3401,6 +3401,544 @@ def backup_page(request: Request):
     return TEMPLATES.TemplateResponse("backup.html", {"request": request, **backup_page_data()})
 
 
+# ---- 03.11 (Alex): «Система» — Сервисы, Бэкап, Скрипты (/system, /system/jobs, /system/jobs/<key>) ----
+CRONTAB = DB_PATH.parent.parent / "night" / "crontab.txt"
+LOGS = DB_PATH.parent.parent / "logs"
+STATE_WORD = {"ok": "работает", "late": "опаздывает", "fail": "ошибка", "partial": "с пропусками", "unknown": "нет данных",
+              "quiet": "пишет только при деле"}
+
+
+def _cron_lines():
+    """Строки крона weather-lab (data/night/crontab.txt — копия установленного крона): [(расписание, имя файла, аргументы, лог)]."""
+    out = []
+    try:
+        lines = CRONTAB.read_text().splitlines()
+    except OSError:
+        return out
+    for s in (x.strip() for x in lines):
+        if not s or s.startswith("#") or "weather-lab" not in s:
+            continue
+        parts = s.split(None, 5)
+        if len(parts) < 6:
+            continue
+        cmd = parts[5]
+        m = re.search(r"([\w.-]+\.(?:py|sh))((?:\s+(?!>)[^\s>]+)*)", cmd.split(" collector ", 1)[-1])
+        lg = re.search(r">>\s*\S*?logs/([\w.-]+)", cmd)
+        if m:
+            out.append((" ".join(parts[:5]), m.group(1), m.group(2).strip(), lg.group(1) if lg else None))
+    return out
+
+
+def _cron_human(sched):
+    mi, h, dom, mon, dow = sched.split()
+    if sched == "* * * * *":
+        return "каждую минуту"
+    if mi.startswith("*/") and h == "*":
+        return f"каждые {mi[2:]} мин"
+    days = "" if dow == "*" else " (" + ", ".join({"1": "пн", "2": "вт", "3": "ср", "4": "чт", "5": "пт", "6": "сб", "0": "вс", "7": "вс"}.get(d, d)
+                                                   for d in dow.split(",")) + ")"
+    if h == "*":
+        return f"каждый час в " + ", ".join(f":{int(x):02d}" for x in mi.split(",")) + days
+    if h.startswith("*/"):
+        return f"каждые {h[2:]} ч в :{int(mi):02d}" + days
+    if "-" in h:
+        a, b = h.split("-")
+        return f"каждый час {int(a):02d}:{int(mi):02d}-{int(b):02d}:{int(mi):02d}" + days
+    return ", ".join(f"{int(x):02d}:{int(mi):02d}" for x in h.split(",")) + days
+
+
+def _log_tail(log, n=200):
+    if not log:
+        return None, None
+    p = LOGS / log
+    try:
+        st = p.stat()
+        with open(p, "rb") as f:
+            f.seek(max(0, st.st_size - 80000))
+            lines = f.read().decode("utf-8", "replace").splitlines()[1:] if st.st_size > 80000 else \
+                f.read().decode("utf-8", "replace").splitlines()
+    except OSError:
+        return None, None
+    return "\n".join(lines[-n:]), datetime.fromtimestamp(st.st_mtime, timezone.utc)
+
+
+def _script_doc(script, key):
+    """Описание скрипта — шапка файла (docstring модуля) из app/; служебные из корня — jobs_info.SERVICE_DOCS."""
+    import ast
+    from jobs_info import SERVICE_DOCS
+    if key in SERVICE_DOCS:
+        return SERVICE_DOCS[key]
+    f = Path(__file__).parent / script.split()[0]
+    try:
+        return ast.get_docstring(ast.parse(f.read_text()))
+    except (OSError, SyntaxError, ValueError):
+        return None
+
+
+def jobs_list(conn):
+    """Все скрипты: из jobs_info.JOBS (состояние как на /status), служебные SERVICE_SCRIPTS (по логу) и строки крона,
+    которых нет ни там, ни там («Нет в списке»)."""
+    from jobs_info import CRON_ALIAS, GROUPS, JOBS, SERVICE_SCRIPTS
+    h = system_health(conn)
+    now = datetime.now(timezone.utc)
+    script_of = {x[0]: x[2].split()[0] for x in JOBS}
+    # обёртка в кроне (night_check.sh) → файл скрипта из JOBS, аргументы обёртки (morning / midday) — к нему же
+    cron = [(s, script_of.get(CRON_ALIAS[f], f) if f in CRON_ALIAS else f, "" if f in CRON_ALIAS else a, lg)
+            for s, f, a, lg in _cron_lines()]
+    claimed = {tuple(x[2].split(None, 1)) for x in JOBS if len(x[2].split(None, 1)) == 2}   # (файл, аргументы) с отдельной строкой
+    by_key = {}
+    for j in h["jobs"]:
+        j = dict(j)
+        name, _sp, args = j["script"].partition(" ")
+        # строка крона того же файла: аргументы совпали, или у скрипта их нет, а строку не забрал другой (weather_audit.py --deep)
+        j["cron_raw"] = [f"{s}  {f} {a}".strip() for s, f, a, _l in cron if f == name and (a == args or (not args and (f, a) not in claimed))]
+        j["cron"] = [_cron_human(x.split("  ")[0]) for x in j["cron_raw"]]
+        j["kind"] = "job"
+        by_key[j["key"]] = j
+    for key, label, script, sched, max_age, log in SERVICE_SCRIPTS:
+        _t, mt = _log_tail(log, 1)
+        j = {"key": key, "label": label, "script": script, "sched": sched, "kind": "service", "ok_ago": _ago(mt, now) if mt else None,
+             "ok_when": _when(mt, now.astimezone(VIEWER_TZ)) if mt else None, "runs": None, "fails": None, "err": None,
+             "cron": [_cron_human(s) for s, f, _a, _l in cron if f == script]}
+        if max_age is None:
+            j["state"] = "quiet"
+        elif mt is None:
+            j["state"] = "unknown"
+        else:
+            j["state"] = "ok" if now - mt <= timedelta(minutes=max_age) else "late"
+        by_key[key] = j
+    known = {j["script"].split()[0] for j in by_key.values()}
+    stray = [{"key": f.removesuffix(".py").removesuffix(".sh"), "label": "нет описания в jobs_info.py", "script": f + (" " + a if a else ""),
+              "sched": _cron_human(s), "kind": "stray", "state": "unknown", "cron": [_cron_human(s)], "ok_ago": None, "ok_when": None,
+              "runs": None, "fails": None, "err": None}
+             for s, f, a, _l in cron if f not in known]
+    groups, seen = [], set()
+    for title, keys in GROUPS:
+        items = [by_key[k] for k in keys if k in by_key]
+        seen.update(k for k in keys)
+        groups.append({"title": title, "jobs": items})
+    rest = [j for k, j in by_key.items() if k not in seen]
+    if rest:
+        groups.append({"title": "Без группы", "jobs": rest})
+    if stray:
+        groups.append({"title": "Нет в списке (есть в кроне, нет в jobs_info.py)", "jobs": stray})
+    all_j = [j for g in groups for j in g["jobs"]]
+    counts = {s: sum(j["state"] == s for j in all_j) for s in STATE_WORD}
+    return {"groups": groups, "counts": counts, "total": len(all_j), "checked": h["checked"],
+            "problems": [j for j in all_j if j["state"] in ("fail", "partial", "late")]}
+
+
+def _kpi(title, v, sub="", tone=""):
+    return {"title": title, "v": v, "sub": sub, "tone": tone}
+
+
+def _num(n):
+    return f"{n:,}".replace(",", " ")
+
+
+def book_rec_stats(conn):
+    """weather_book_rec: файл месяца, минуты за сутки, разрывы, сколько получено/изменилось."""
+    d = DB_PATH.parent.parent / "booklog"
+    files = sorted(d.glob("books_*.sqlite3"))
+    if not files:
+        return {"note": "Файлов записи ещё нет (data/booklog)."}
+    f = files[-1]
+    now = datetime.now(timezone.utc)
+    size = sum(x.stat().st_size for x in d.glob("books_*.sqlite3*"))
+    disk = sum(x.stat().st_blocks * 512 for x in d.glob("books_*.sqlite3*"))
+    try:
+        c = sqlite3.connect(f"file:{f}?mode=ro", uri=True, timeout=5)
+        since = int((now - timedelta(days=1)).timestamp())
+        ts = [r[0] for r in c.execute("SELECT ts FROM rounds WHERE ts >= ? ORDER BY ts", (since,))]
+        last = c.execute("SELECT ts, n_tokens, n_got, n_changed, secs FROM rounds ORDER BY ts DESC LIMIT 15").fetchall()
+        agg = c.execute("SELECT COUNT(*), SUM(n_changed), SUM(n_tokens - n_got), AVG(secs), MIN(ts) FROM rounds").fetchone()
+        tok = c.execute("SELECT COUNT(*), COUNT(DISTINCT city) FROM tokens").fetchone()
+        c.close()
+    except sqlite3.Error as e:
+        return {"note": f"Файл {f.name} не открылся: {e}"}
+    vt = now.astimezone(VIEWER_TZ)
+    t = lambda x: _when(datetime.fromtimestamp(x, timezone.utc), vt)
+    gaps = [(a, b) for a, b in zip(ts, ts[1:]) if b - a > 60]
+    gap_min = sum((b - a) // 60 - 1 for a, b in gaps)
+    days = max((now.timestamp() - agg[4]) / 86400, 1 / 24) if agg[4] else None
+    age = now.timestamp() - last[0][0] if last else None
+    return {
+        "hint": f"Файл data/booklog/{f.name}" + (f", запись с {t(agg[4])}" if agg[4] else "")
+                + ". Стакан на любую минуту = последняя строка варианта не позже этой минуты.",
+        "kpis": [
+            _kpi("Последняя минута", t(last[0][0]) if last else "—", f"{age:.0f} с назад" if age is not None else "", "bad" if age and age > 180 else ""),
+            _kpi("Минут за сутки", f"{len(ts)} из 1440", f"пропущено минут: {gap_min}", "bad" if gap_min else ""),
+            _kpi("Вариантов сейчас", last[0][1] if last else tok[0], f"{tok[1]} городов · за месяц {tok[0]}"),
+            _kpi("Строк стаканов", _num(agg[1] or 0), f"минут {agg[0]} · не получено {agg[2] or 0}"),
+            _kpi("Размер", _size(size), f"на диске {_size(disk)}" + (f" · ~{_size(disk / days)} в день" if days else "")),
+            _kpi("Минута пишется за", f"{agg[3]:.1f} с" if agg[3] else "—", "в среднем")],
+        "tables": [{"title": "Последние минуты", "cols": ["Минута", "Вариантов", "Получено", "Изменилось", "Время"],
+                    "rows": [[t(r[0]), r[1], r[2], r[3], f"{r[4]} с"] for r in last], "bad_col": 2,
+                    "bad_rows": [i for i, r in enumerate(last) if r[2] < r[1]]}]
+                  + ([{"title": "Разрывы за сутки", "cols": ["С", "По", "Пропущено минут"],
+                       "rows": [[t(a), t(b), (b - a) // 60 - 1] for a, b in gaps[-10:]]}] if gaps else [])}
+
+
+def book_rec_live():
+    """04.11 (Alex «оживить»): живая схема записи стаканов — последние 60 минут (rounds), что изменилось в последнюю минуту
+    по городам (поиск по ключу вариант+минута, ~1400 точечных чтений), размер файла. Читает файл месяца только на чтение."""
+    d = DB_PATH.parent.parent / "booklog"
+    files = sorted(d.glob("books_*.sqlite3"))
+    if not files:
+        return None
+    f = files[-1]
+    c = sqlite3.connect(f"file:{f}?mode=ro", uri=True, timeout=5)
+    try:
+        rr = c.execute("SELECT ts, n_tokens, n_got, n_changed, secs FROM rounds ORDER BY ts DESC LIMIT 60").fetchall()[::-1]
+        cities = c.execute("""SELECT t.city, COUNT(*) FROM tokens t JOIN books b ON b.token = t.idx AND b.ts = ?
+                              GROUP BY t.city ORDER BY 2 DESC""", (rr[-1][0],)).fetchall() if rr else []
+    finally:
+        c.close()
+    vt = lambda x: datetime.fromtimestamp(x, VIEWER_TZ).strftime("%H:%M")
+    size = sum(x.stat().st_size for x in d.glob(f"{f.name}*"))
+    now = time.time()
+    return {"file": f.name, "size": _size(size), "bytes": size, "now": int(now),
+            "last": {"ts": rr[-1][0], "hm": vt(rr[-1][0]), "ago": int(now - rr[-1][0]), "tokens": rr[-1][1], "got": rr[-1][2],
+                     "changed": rr[-1][3], "secs": rr[-1][4]} if rr else None,
+            "strip": [{"ts": r[0], "hm": vt(r[0]), "tokens": r[1], "got": r[2], "changed": r[3], "secs": r[4]} for r in rr],
+            "cities": [{"city": CITY_RU.get(x, x), "n": n} for x, n in cities[:8]], "n_cities": len(cities)}
+
+
+def _since_rows(conn, sql, args, hours):
+    """Строки, где время (первый столбец — ISO с разными поясами) не старше hours."""
+    lim = datetime.now(timezone.utc) - timedelta(hours=hours)
+    return [r for r in conn.execute(sql, args) if r[0] and (_dt(r[0]) or lim) >= lim]
+
+
+# кошельки, которые ставят другие скрипты (их ставки — на страницах тех скриптов)
+NOT_PAPER = ("copy", "llm_", "ml_day", "diary", "obs")
+
+
+def paper_stats(conn):
+    """weather_paper (и быстрый запуск weather_ml_fast — та же функция place): за 24 ч по кошелькам — ставки, «не купили», пропуски
+    и самая частая причина пропуска; расчёт ставок за 24 ч."""
+    rows = _since_rows(conn, """SELECT COALESCE(placed_at, snapshot_ts), wallet, status, stake, reason, city FROM paper_trades
+                               WHERE local_date >= ?""", ((date.today() - timedelta(days=4)).isoformat(),), 24)
+    by = {}
+    for _t, w, st, stake, reason, city in rows:
+        if w.startswith(NOT_PAPER):
+            continue
+        x = by.setdefault(w, {"bet": 0, "nofill": 0, "skip": 0, "why": {}, "staked": 0.0})
+        if st in ("open", "won", "lost", "resting", "void") and (stake or 0) > 0:
+            x["bet"] += 1
+            x["staked"] += stake or 0
+        elif st == "nofill":
+            x["nofill"] += 1
+        elif st == "skip":
+            x["skip"] += 1
+            k = re.split(r"[:(—]", reason or "без причины")[0].strip()[:70]
+            x["why"][k] = x["why"].get(k, 0) + 1
+    st = [r for r in _since_rows(conn, "SELECT settled_at, status, COALESCE(payout, 0) - stake - COALESCE(fee, 0), wallet FROM paper_trades "
+                                 "WHERE settled_at IS NOT NULL AND local_date >= ?", ((date.today() - timedelta(days=5)).isoformat(),), 24)
+          if not r[3].startswith(NOT_PAPER)]
+    won = sum(1 for r in st if r[1] == "won")
+    pnl = sum(r[2] for r in st if r[1] in ("won", "lost"))
+    tot = {k: sum(x[k] for x in by.values()) for k in ("bet", "nofill", "skip")}
+    return {"hint": "За последние 24 часа — кошельки утренних ставок (их ставит weather_paper каждые 2 ч и быстрый снимок weather_ml_fast); "
+                    "copy, LLM, ml_day и замеры ставят свои скрипты.",
+            "kpis": [_kpi("Новых ставок", tot["bet"], f"кошельков со ставками: {sum(1 for x in by.values() if x['bet'])}"),
+                     _kpi("Не купили", tot["nofill"], "сигнал был, цена ушла / нет продавцов"),
+                     _kpi("Пропусков", tot["skip"], "нет перевеса, цена вне полосы и т. п."),
+                     _kpi("Рассчитано ставок", len(st), f"выиграли {won} · итог ${pnl:+.2f}", "good" if pnl > 0 else ("bad" if pnl < 0 else ""))],
+            "tables": [{"title": "По кошелькам", "cols": ["Кошелёк", "Ставок", "Поставлено", "Не купили", "Пропусков", "Частая причина пропуска"],
+                        "rows": [[w, x["bet"], f"${x['staked']:.2f}", x["nofill"], x["skip"],
+                                  (lambda k: f"{k} ({x['why'][k]})")(max(x["why"], key=x["why"].get)) if x["why"] else "—"]
+                                 for w, x in sorted(by.items(), key=lambda kv: (-kv[1]["bet"], kv[0]))]}]}
+
+
+def fast_dry_stats(conn):
+    """weather_fast_dry: своя база data/db/fast_dry.sqlite3 — холостые ставки банка в 08:00 и счёт «Вхолостую» (real_ledger)."""
+    f = DB_PATH.parent / "fast_dry.sqlite3"
+    try:
+        c = sqlite3.connect(f"file:{f}?mode=ro", uri=True, timeout=5)
+        pt = _since_rows(c, "SELECT COALESCE(placed_at, snapshot_ts), wallet, status, stake, reason FROM paper_trades WHERE local_date >= ?",
+                         ((date.today() - timedelta(days=3)).isoformat(),), 24)
+        led = _since_rows(c, "SELECT built_at, wallet, city, status, blocked, problem, cost, latency_s FROM real_ledger ORDER BY built_at DESC LIMIT 400",
+                          (), 24 * 7)
+        tot = c.execute("SELECT status, COUNT(*) FROM real_ledger GROUP BY 1").fetchall()
+        c.close()
+    except sqlite3.Error as e:
+        return {"note": f"data/db/fast_dry.sqlite3 не открылась: {e}"}
+    by = {}
+    for _t, w, st, stake, _r in pt:
+        x = by.setdefault(w, {"bet": 0, "nofill": 0, "skip": 0})
+        x["bet" if st in ("open", "won", "lost") and (stake or 0) > 0 else ("nofill" if st == "nofill" else "skip")] += 1
+    day = [r for r in led if (_dt(r[0]) or datetime.min.replace(tzinfo=timezone.utc)) >= datetime.now(timezone.utc) - timedelta(hours=24)]
+    why = {}
+    for r in led:
+        if r[3] in ("blocked", "bad"):
+            k = (r[4] or r[5] or "?")[:90]
+            why[k] = why.get(k, 0) + 1
+    lat = sorted(r[7] for r in day if r[7] is not None)
+    vt = datetime.now(VIEWER_TZ)
+    return {"hint": "Своя база data/db/fast_dry.sqlite3 (рабочая — только на чтение): ставки банка в 08:00 по живому стакану и заявки счёта «Вхолостую».",
+            "kpis": [_kpi("Холостых ставок за 24 ч", sum(x["bet"] for x in by.values()), f"не купили {sum(x['nofill'] for x in by.values())} · пропусков {sum(x['skip'] for x in by.values())}"),
+                     _kpi("Заявок за 24 ч", len(day), f"собрано и подписано: {sum(1 for r in day if r[3] not in ('blocked', 'bad'))}"),
+                     _kpi("Заблокировано / с ошибкой за 24 ч", sum(1 for r in day if r[3] in ("blocked", "bad")), "предел риска, биржа, сборка заявки",
+                          "bad" if any(r[3] in ("blocked", "bad") for r in day) else ""),
+                     _kpi("Задержка заявки (медиана)", f"{lat[len(lat) // 2]:.0f} с" if lat else "—", "от решения до подписанной заявки"),
+                     _kpi("Заявок всего", sum(n for _s, n in tot), " · ".join(f"{s} {n}" for s, n in tot))],
+            "tables": [{"title": "Холостые ставки за 24 ч по кошелькам", "cols": ["Кошелёк", "Ставок", "Не купили", "Пропусков"],
+                        "rows": [[w, x["bet"], x["nofill"], x["skip"]] for w, x in sorted(by.items())]},
+                       {"title": "Почему заблокировано или не собрано (7 дней)", "cols": ["Причина", "Раз"],
+                        "rows": sorted(([k, n] for k, n in why.items()), key=lambda r: -r[1])},
+                       {"title": "Последние заявки", "cols": ["Когда", "Кошелёк", "Город", "Итог", "Сумма", "Причина"],
+                        "rows": [[_when(_dt(r[0]), vt) if _dt(r[0]) else r[0], r[1], r[2], r[3], f"${r[6]:.2f}" if r[6] else "—", r[4] or r[5] or ""]
+                                 for r in led[:15]]}]}
+
+
+def ml_train_stats(conn):
+    """weather_ml_train: последние обучения — данные, проверки, экзамен (logloss модели / рынка / смеси, меньше — лучше)."""
+    if not table_exists(conn, "ml_train_log"):
+        return {"note": "Таблицы ml_train_log нет."}
+    rows = conn.execute("SELECT trained_at, ok, details FROM ml_train_log WHERE details NOT LIKE '%\"dry_run\": true%' "
+                        "ORDER BY trained_at DESC LIMIT 10").fetchall()
+    if not rows:
+        return {"note": "Обучений ещё не было."}
+    vt = datetime.now(VIEWER_TZ)
+    ds = [json.loads(r[2] or "{}") for r in rows]
+    last, prev = ds[0], (ds[1] if len(ds) > 1 else {})
+    ex = last.get("exam") or {}
+    bad_checks = [c for c in last.get("checks") or [] if not c.get("ok")]
+    va, vp = (last.get("exam_all") or {}).get("versions") or {}, (prev.get("exam_all") or {}).get("versions") or {}
+    ll_m = (last.get("exam_all") or {}).get("ll_market")
+    f3 = lambda v: f"{v:.4f}" if isinstance(v, (int, float)) else "—"
+    return {"hint": "Экзамен — дни после обучения, которые модель не видела; logloss: меньше — точнее. «Смесь» — модель + рынок (так ставят кошельки *_cal).",
+            "kpis": [_kpi("Последнее обучение", _when(_dt(rows[0][0]), vt), f"{'прошло' if rows[0][1] else 'с ошибкой'} · {last.get('duration_s', 0):.0f} с",
+                          "" if rows[0][1] else "bad"),
+                     _kpi("Данных", _num((last.get("data") or {}).get("rows", 0)), f"новых город-дней {(last.get('data') or {}).get('new_rows', '—')} · "
+                          f"последний день {(last.get('data') or {}).get('last', '—')}"),
+                     _kpi("Проверки перед обучением", f"{len(last.get('checks') or []) - len(bad_checks)} из {len(last.get('checks') or [])}",
+                          "; ".join(c["title"] for c in bad_checks) or "все прошли", "bad" if bad_checks else "good"),
+                     _kpi("Экзамен v3: модель / рынок / смесь", f"{f3(ex.get('ll_model'))} / {f3(ex.get('ll_market'))} / {f3(ex.get('ll_blend'))}",
+                          f"{ex.get('from', '')} — {ex.get('to', '')}, {ex.get('n', 0)} дней")],
+            "tables": [{"title": "Экзамен по версиям (последнее обучение и прошлое)", "cols": ["Версия", "Модель", "Прошлое", "Смесь", "Прошлое", "Рынок"],
+                        "rows": [[x.get("name", k), f3(x.get("ll_model")), f3((vp.get(k) or {}).get("ll_model")), f3(x.get("ll_blend")),
+                                  f3((vp.get(k) or {}).get("ll_blend")), f3(ll_m)] for k, x in va.items()]},
+                       {"title": "Последние обучения", "cols": ["Когда", "Итог", "Длилось", "Данных", "Новых", "v3 модель", "v3 смесь", "Рынок"],
+                        "rows": [[_when(_dt(r[0]), vt), "прошло" if r[1] else "ошибка", f"{d.get('duration_s', 0):.0f} с",
+                                  _num((d.get("data") or {}).get("rows", 0)), (d.get("data") or {}).get("new_rows", "—"),
+                                  f3((d.get("exam") or {}).get("ll_model")), f3((d.get("exam") or {}).get("ll_blend")), f3((d.get("exam") or {}).get("ll_market"))]
+                                 for r, d in zip(rows, ds)]},
+                       {"title": "Проверки перед обучением", "cols": ["", "Проверка", "Подробно"],
+                        "rows": [["✓" if c.get("ok") else "✗", c.get("title"), c.get("detail")] for c in last.get("checks") or []]}]}
+
+
+JOB_EXTRA = {"weather_book_rec": book_rec_stats, "weather_paper": paper_stats, "weather_ml_fast": paper_stats,
+             "weather_fast_dry": fast_dry_stats, "weather_ml_train": ml_train_stats}
+
+
+def job_detail(conn, key):
+    lst = jobs_list(conn)
+    j = next((x for g in lst["groups"] for x in g["jobs"] if x["key"] == key), None)
+    if j is None:
+        return None
+    from jobs_info import JOBS, SERVICE_SCRIPTS
+    log = next((x[5] for x in list(JOBS) + list(SERVICE_SCRIPTS) if x[0] == key), None)
+    if log is None:
+        log = next((lg for _s, f, _a, lg in _cron_lines() if f == j["script"].split()[0]), None)
+    now = datetime.now(timezone.utc)
+    vt = now.astimezone(VIEWER_TZ)
+    out = {"j": j, "doc": _script_doc(j["script"], key), "log": log, "runs": [], "stats": None, "output": None, "fixes": []}
+    out["cron_raw"] = j.get("cron_raw") or [f"{s}  {f} {a}".strip() for s, f, a, _l in _cron_lines() if f == j["script"].split()[0]]
+    from jobs_info import CRON_ALIAS
+    alias = [f for f, k in CRON_ALIAS.items() if k == key]
+    if alias:   # показать настоящие строки крона обёртки
+        out["cron_raw"] = [f"{s}  {f} {a}".strip() for s, f, a, _l in _cron_lines() if f in alias]
+    tail, mt = _log_tail(log, 250)
+    out["tail"], out["log_when"] = tail, (_when(mt, vt) if mt else None)
+    if j["kind"] == "job" and table_exists(conn, "job_log"):
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(job_log)")]
+        ie = "item_errors" if "item_errors" in cols else "0"
+        op = "output" if "output" in cols else "NULL"
+        rows = conn.execute(f"SELECT started_at, finished_at, rc, duration_s, om_calls, {ie}, {op} FROM job_log WHERE job = ? "
+                            "ORDER BY finished_at DESC LIMIT 40", (key,)).fetchall()
+        out["runs"] = [{"when": _when(_dt(r[1]), vt) if _dt(r[1]) else r[1], "rc": r[2], "dur": r[3], "om": r[4] or 0, "ie": r[5] or 0}
+                       for r in rows]
+        out["output"] = next((r[6] for r in rows if r[6]), None)
+        st = {}
+        for name, days in (("24 ч", 1), ("7 дней", 7)):
+            a = conn.execute(f"SELECT COUNT(*), SUM(rc != 0), SUM({ie} > 0), AVG(duration_s), MAX(duration_s), SUM(om_calls) FROM job_log "
+                             "WHERE job = ? AND finished_at >= ?", (key, (now - timedelta(days=days)).isoformat())).fetchone()
+            st[name] = {"n": a[0], "fail": a[1] or 0, "partial": a[2] or 0, "avg": a[3], "max": a[4], "om": a[5] or 0}
+        out["stats"] = st
+        out["chart"] = _bars_svg([(r["when"][-5:], r["dur"] or 0, f"{r['when']}: {r['dur'] or 0:.0f} с, код {r['rc']}")
+                                  for r in reversed(out["runs"][:30])], lambda v: f"{v:.0f} с") if out["runs"] else None
+    if table_exists(conn, "error_fixes"):
+        out["fixes"] = [{"when": _when(_dt(r[0]), vt) if _dt(r[0]) else r[0], "note": r[1]} for r in conn.execute(
+            "SELECT fixed_at, note FROM error_fixes WHERE job = ? ORDER BY fixed_at DESC LIMIT 15", (key,))]
+    if key == "weather_book_rec":
+        try:
+            out["flow"] = book_rec_live()
+        except Exception:   # noqa: BLE001 — схема не должна ронять страницу
+            out["flow"] = None
+    if key in JOB_EXTRA:
+        try:
+            out["extra"] = JOB_EXTRA[key](conn)
+        except Exception as e:   # noqa: BLE001 — свои данные не должны ронять страницу скрипта
+            out["extra"] = {"note": f"Данные скрипта не собрались: {type(e).__name__}: {e}"}
+    return out
+
+
+def _flow_outs_live(conn, outs):
+    """Сколько строк в таблицах рабочей базы (max(rowid) — мгновенно; у WITHOUT ROWID — нет) и размер отдельных файлов."""
+    from jobs_info import FLOW_FILES
+    data = DB_PATH.parent.parent
+    res = {}
+    for o in outs:
+        if o.startswith("файл:"):
+            rel = FLOW_FILES[o][1]
+            if not rel:
+                res[o] = {"n": None, "bytes": None}
+                continue
+            p = data / rel
+            if rel == "booklog":   # файл текущего месяца
+                fs = sorted(p.glob("books_*.sqlite3"))
+                p = fs[-1] if fs else None
+            elif p.is_dir():   # папка писем / моделей: только «пишет / не пишет», без размера
+                res[o] = {"n": None, "bytes": None}
+                continue
+            b = sum(x.stat().st_size for x in p.parent.glob(p.name + "*")) if p and p.exists() else None
+            res[o] = {"n": None, "bytes": b}
+        else:
+            try:
+                n = conn.execute(f"SELECT MAX(rowid) FROM {o}").fetchone()[0]
+            except sqlite3.Error:   # WITHOUT ROWID (poly_trades, price_history): счёт строк — секунды, не считаем
+                n = None
+            res[o] = {"n": n, "bytes": None}
+    return res
+
+
+def flows_live(conn):
+    """04.11: живая часть схемы «Кто что записывает» — по скрипту «пишет сейчас» (лог или отметка запуска не старше 90 с),
+    «недавно» (15 мин), по таблице — строк / размер файла. Сайт сравнивает с прошлым опросом и показывает прирост."""
+    from jobs_info import FLOWS, JOBS, SERVICE_SCRIPTS
+    now = datetime.now(timezone.utc)
+    vt = now.astimezone(VIEWER_TZ)
+    runs = {r[0]: _dt(r[1]) for r in conn.execute("SELECT job, finished_at FROM job_runs")} if table_exists(conn, "job_runs") else {}
+    logs = {x[0]: x[5] for x in list(JOBS) + list(SERVICE_SCRIPTS)}
+    jobs = {}
+    for key in FLOWS:
+        t = [x for x in (runs.get(key),) if x]
+        if logs.get(key) and (LOGS / logs[key]).exists():
+            t.append(datetime.fromtimestamp((LOGS / logs[key]).stat().st_mtime, timezone.utc))
+        last = max(t) if t else None
+        age = (now - last).total_seconds() if last else None
+        jobs[key] = {"act": "now" if age is not None and age <= 90 else ("recent" if age is not None and age <= 900 else "idle"),
+                     "when": _when(last, vt) if last else None, "age": int(age) if age is not None else None}
+    outs = sorted({o for _s, oo in FLOWS.values() for o in oo})
+    return {"now": int(now.timestamp()), "hm": vt.strftime("%H:%M:%S"), "jobs": jobs, "outs": _flow_outs_live(conn, outs)}
+
+
+def flows_data(conn):
+    """Схема «Кто что записывает» (/system/flows): группы скриптов как на /system/jobs, у каждого — источники (FLOW_SOURCES)
+    и куда пишет (таблица рабочей базы или отдельный файл FLOW_FILES)."""
+    from jobs_info import FLOW_FILES, FLOW_SOURCES, FLOWS
+    lst = jobs_list(conn)
+    out_label = lambda o: FLOW_FILES[o][0] if o in FLOW_FILES else o
+    groups, writers = [], {}
+    for g in lst["groups"]:
+        rows = []
+        for j in g["jobs"]:
+            if j["key"] not in FLOWS:
+                continue
+            srcs, outs = FLOWS[j["key"]]
+            for o in outs:
+                writers.setdefault(o, []).append(j["label"])
+            rows.append({"key": j["key"], "label": j["label"], "script": j["script"], "state": j["state"],
+                         "srcs": [{"id": x, "label": FLOW_SOURCES.get(x, x)} for x in srcs],
+                         "outs": [{"id": o, "label": out_label(o), "file": o.startswith("файл:")} for o in outs]})
+        if rows:
+            groups.append({"title": g["title"], "rows": rows})
+    used = {x["id"] for g in groups for r in g["rows"] for x in r["srcs"]}
+    return {"groups": groups, "sources": [{"id": k, "label": v} for k, v in FLOW_SOURCES.items() if k in used],
+            "n_writers": {o: len(w) for o, w in writers.items()}, "live": flows_live(conn), "counts": lst["counts"]}
+
+
+def system_page_data(conn):
+    from services_info import SERVICES, SUBSCRIPTIONS
+    lst = jobs_list(conn)
+    b = backup_page_data()
+    today = datetime.now(VIEWER_TZ).date()
+    soon = [x["name"] for x in SUBSCRIPTIONS if x.get("ends") and 0 <= (date.fromisoformat(x["ends"]) - today).days <= 14]
+    return {"jobs": lst, "backup": b,
+            "svc": {"n": sum(len(items) for _, items in SERVICES), "live": sum(i["mode"] == "live" for _, items in SERVICES for i in items), "subs": len(SUBSCRIPTIONS), "soon": soon}}
+
+
+@app.get("/system", response_class=HTMLResponse)
+def system_page(request: Request):
+    conn = db()
+    try:
+        d = system_page_data(conn)
+    finally:
+        conn.close()
+    return TEMPLATES.TemplateResponse("system.html", {"request": request, "words": STATE_WORD, **d})
+
+
+@app.get("/system/flows", response_class=HTMLResponse)
+def flows_page(request: Request):
+    conn = db()
+    try:
+        d = flows_data(conn)
+    finally:
+        conn.close()
+    return TEMPLATES.TemplateResponse("flows.html", {"request": request, "d": d, "words": STATE_WORD})
+
+
+@app.get("/system/flows/live")
+def flows_live_json():
+    """Живая часть схемы «Кто что записывает» (раз в 10 с со страницы)."""
+    conn = db()
+    try:
+        return flows_live(conn)
+    finally:
+        conn.close()
+
+
+@app.get("/system/jobs", response_class=HTMLResponse)
+def jobs_page(request: Request):
+    conn = db()
+    try:
+        d = jobs_list(conn)
+    finally:
+        conn.close()
+    return TEMPLATES.TemplateResponse("jobs.html", {"request": request, "d": d, "words": STATE_WORD})
+
+
+@app.get("/system/jobs/{key}/log")
+def job_log_tail(key: str):
+    """Хвост лога скрипта для живого обновления страницы (JSON: tail, when)."""
+    from jobs_info import JOBS, SERVICE_SCRIPTS
+    log = next((x[5] for x in list(JOBS) + list(SERVICE_SCRIPTS) if x[0] == key), None)
+    if log is None:
+        raise HTTPException(404, "нет такого скрипта")
+    tail, mt = _log_tail(log, 250)
+    return {"tail": tail, "when": _when(mt, datetime.now(VIEWER_TZ)) + mt.astimezone(VIEWER_TZ).strftime(":%S") if mt else None}
+
+
+@app.get("/system/jobs/weather_book_rec/live")
+def book_rec_live_json():
+    """Данные живой схемы записи стаканов (раз в 5 с со страницы скрипта)."""
+    return book_rec_live() or {}
+
+
+@app.get("/system/jobs/{key}", response_class=HTMLResponse)
+def job_page(request: Request, key: str):
+    conn = db()
+    try:
+        d = job_detail(conn, key)
+    finally:
+        conn.close()
+    if d is None:
+        raise HTTPException(404, "нет такого скрипта")
+    return TEMPLATES.TemplateResponse("job.html", {"request": request, "d": d, "words": STATE_WORD, "size": _size})
+
+
 @app.get("/services", response_class=HTMLResponse)
 def services_page(request: Request):
     """05.10 (просьба Alex): все внешние сервисы и подписки — список в services_info.py; расход OpenRouter — живой из базы."""

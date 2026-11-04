@@ -1,0 +1,162 @@
+{% extends "base.html" %}
+{% block title %}Кто что записывает — weather-lab{% endblock %}
+{% block content %}
+{#
+  04.11 (Alex «оживить, чтобы было видно, что и как записываем»): схема источник → скрипт → таблица по группам /system/jobs.
+  Связи — jobs_info.FLOWS (сверены с кодом), данные — flows_data() / flows_live() в dashboard.py; живая часть раз в 10 с
+  с /system/flows/live: скрипт пишет сейчас → по трубам бегут точки; таблица выросла → «+N». Оформление можно доработать (Gemini).
+#}
+{% include "_sys_style.html" %}
+<style>
+  .grp { margin: 0 0 22px; }
+  .grp h2 { font-size: 15px; font-weight: 600; color: var(--bk-muted); margin: 0 0 8px; text-transform: uppercase; letter-spacing: .05em; }
+  .list { background: var(--bk-card); border: 1px solid var(--bk-line); border-radius: 16px; overflow: hidden; }
+  .fr { display: grid; grid-template-columns: minmax(0, 1fr) 56px minmax(0, 1.25fr) 56px minmax(0, 1.1fr); align-items: center; padding: 12px 16px; transition: opacity .2s; }
+  .fr + .fr { border-top: 1px solid var(--bk-line); }
+  .fr.dim { opacity: .28; }
+  .cs { display: flex; flex-wrap: wrap; gap: 5px; }
+  .cs.r { justify-content: flex-start; }
+  .ch { font-size: 12.5px; background: var(--bk-raise); color: var(--bk-muted); border: 1px solid transparent; border-radius: 999px; padding: 2px 9px; cursor: pointer; white-space: nowrap; transition: border-color .2s, background .3s; }
+  .ch:hover, .ch.sel { border-color: var(--bk-accent); color: var(--bk-text); }
+  .ch.tb { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; }
+  .ch .n { color: var(--bk-faint); margin-left: 5px; font-family: var(--bk-font); font-variant-numeric: tabular-nums; }
+  .ch .up { color: var(--bk-pos); margin-left: 5px; font-weight: 600; font-family: var(--bk-font); }
+  .ch.grew { background: var(--bk-pos-bg); }
+  .tube { position: relative; height: 4px; margin: 0 6px; border-radius: 2px; background: var(--bk-line); overflow: hidden; }
+  .fr.recent .tube { background: rgba(163, 227, 154, .28); }
+  .fr.bad .tube { background: rgba(244, 167, 127, .45); }
+  .dot { position: absolute; top: 0; left: -8px; width: 8px; height: 4px; border-radius: 2px; background: var(--bk-pos); animation: flowx 1s linear forwards; }
+  @keyframes flowx { from { left: -8px; } to { left: 100%; } }
+  .sn { display: block; color: var(--bk-text); text-decoration: none; background: var(--bk-raise); border: 1px solid var(--bk-line); border-radius: 12px; padding: 8px 11px; min-width: 0; transition: border-color .3s, box-shadow .3s; }
+  .sn:hover { border-color: var(--bk-muted); }
+  .fr.now .sn { border-color: var(--bk-pos); box-shadow: 0 0 0 3px var(--bk-pos-bg); }
+  .fr.bad .sn { border-color: rgba(244, 167, 127, .6); }
+  .sn .l { font-weight: 600; font-size: 13.5px; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .sn .m { display: flex; justify-content: space-between; gap: 8px; margin-top: 3px; font-size: 12px; color: var(--bk-muted); }
+  .sn .m code { font-size: 11.5px; padding: 0 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; word-break: normal; }
+  .sn .w { white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .fr.now .sn .w { color: var(--bk-pos); }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; font-size: 13px; color: var(--bk-muted); margin: 0 0 18px; }
+  .legend i { display: inline-block; width: 22px; height: 4px; border-radius: 2px; vertical-align: middle; margin-right: 6px; background: var(--bk-line); }
+  .legend i.now { background: var(--bk-pos); } .legend i.rec { background: rgba(163, 227, 154, .28); } .legend i.bad { background: rgba(244, 167, 127, .45); }
+  .filt { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 18px; align-items: center; }
+  .filt .lb { font-size: 13px; color: var(--bk-muted); margin-right: 4px; }
+  #fl-sel { font-size: 13px; color: var(--bk-muted); margin: -8px 0 16px; min-height: 1.2em; }
+  #fl-sel a { cursor: pointer; }
+  @media (max-width: 900px) {
+    .fr { grid-template-columns: 1fr; gap: 6px; padding: 12px 14px; }
+    .tube { height: 12px; width: 4px; margin: 0 0 0 18px; }
+    .dot { left: 0; top: -8px; width: 4px; height: 8px; animation-name: flowy; }
+    @keyframes flowy { from { top: -8px; } to { top: 100%; } }
+  }
+</style>
+<div class="bk">
+  <div class="crumb"><a href="/system">← Система</a></div>
+  <div class="top">
+    <h1>Кто что записывает <span class="st ok" id="fl-st">● живая</span></h1>
+    <p>Каждая строка — скрипт: слева, откуда он берёт данные; справа, куда пишет (таблица рабочей базы или отдельный файл) и сколько там
+      записей. Пока скрипт пишет, по трубам бегут точки; выросла таблица — рядом «+N». Нажмите на источник или таблицу — останутся только
+      скрипты, которые с ними работают; на скрипт — его страница. Обновляется раз в 10 с, сейчас <span id="fl-hm">{{ d.live.hm }}</span>.</p>
+  </div>
+  <div class="legend">
+    <span><i class="now"></i>пишет сейчас (последние 90 с)</span><span><i class="rec"></i>писал за последние 15 мин</span>
+    <span><i></i>ждёт своего времени</span><span><i class="bad"></i>ошибка или опаздывает</span>
+    <span>Сейчас пишут: <b id="fl-cnt" style="color:var(--bk-text)">—</b></span>
+  </div>
+  <div class="filt"><span class="lb">Источники:</span>
+    {% for s in d.sources %}<span class="ch" data-f="{{ s.id }}">{{ s.label }}</span>{% endfor %}
+  </div>
+  <div id="fl-sel"></div>
+
+  {% for g in d.groups %}
+  <section class="grp">
+    <h2>{{ g.title }} · {{ g.rows | length }}</h2>
+    <div class="list">
+      {% for r in g.rows %}
+      <div class="fr{{ ' bad' if r.state in ('fail', 'late', 'partial') else '' }}" data-key="{{ r.key }}"
+           data-f="{{ (r.srcs | map(attribute='id') | list + r.outs | map(attribute='id') | list) | join(' ') }}">
+        <div class="cs">{% for s in r.srcs %}<span class="ch" data-f="{{ s.id }}">{{ s.label }}</span>{% endfor %}</div>
+        <div class="tube"></div>
+        <a class="sn" href="/system/jobs/{{ r.key }}">
+          <span class="l" title="{{ r.label }}">{{ r.label }}</span>
+          <span class="m"><code>{{ r.script }}</code><span class="w">{% if r.state in ('fail', 'late', 'partial') %}<span class="bad">{{ words[r.state] }}</span>{% endif %}</span></span>
+        </a>
+        <div class="tube"></div>
+        <div class="cs r">{% for o in r.outs %}<span class="ch{{ '' if o.file else ' tb' }}" data-f="{{ o.id }}" data-o="{{ o.id }}"
+            title="{{ 'отдельный файл' if o.file else 'таблица рабочей базы' }}{% if d.n_writers[o.id] > 1 %} · пишут {{ d.n_writers[o.id] }} скрипта{% endif %}">{{ o.label }}<span class="n"></span><span class="up"></span></span>{% endfor %}</div>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+  {% endfor %}
+</div>
+<script>
+(function () {
+  var live = {{ d.live | tojson }}, prev = null, skew = Date.now() / 1000 - live.now, sel = null;
+  var rows = Array.prototype.slice.call(document.querySelectorAll('.fr'));
+  function fmt(n) { return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ' '); }
+  function size(b) { return b >= 1e9 ? (b / 1e9).toFixed(2) + ' ГБ' : b >= 1e6 ? (b / 1e6).toFixed(0) + ' МБ' : (b / 1e3).toFixed(0) + ' КБ'; }
+  function ago(s) { return s < 90 ? s + ' с назад' : s < 5400 ? Math.round(s / 60) + ' мин назад' : null; }
+  function shoot(tube, n, delay) {
+    for (var i = 0; i < n; i++) {
+      var d = document.createElement('span'); d.className = 'dot'; d.style.animationDelay = (delay + i * 0.16) + 's';
+      d.addEventListener('animationend', function () { this.remove(); }); tube.appendChild(d);
+    }
+  }
+  function render(x) {
+    if (!x || !x.jobs) return;
+    skew = Date.now() / 1000 - x.now;
+    document.getElementById('fl-hm').textContent = x.hm;
+    var grew = {}, cnt = 0;
+    Object.keys(x.outs).forEach(function (o) {
+      var v = x.outs[o], p = prev && prev.outs[o];
+      var d = p ? (v.n != null && p.n != null ? v.n - p.n : (v.bytes != null && p.bytes != null ? v.bytes - p.bytes : 0)) : 0;
+      if (d > 0) grew[o] = d;
+      document.querySelectorAll('.ch[data-o="' + o + '"]').forEach(function (c) {
+        c.querySelector('.n').textContent = v.n != null ? fmt(v.n) : (v.bytes != null ? size(v.bytes) : '');
+        c.title = c.title.split(' · запис')[0] + (v.n != null ? ' · записей ≈ ' + fmt(v.n) + ' (номер последней)' : '');
+        var up = c.querySelector('.up');
+        if (d > 0) { up.textContent = '+' + (v.n != null ? fmt(d) : size(d)); c.classList.add('grew'); }
+        else if (prev) { up.textContent = ''; c.classList.remove('grew'); }
+      });
+    });
+    rows.forEach(function (r) {
+      var j = x.jobs[r.dataset.key]; if (!j) return;
+      var outs = r.querySelectorAll('[data-o]'), mine = Array.prototype.some.call(outs, function (c) { return grew[c.dataset.o]; });
+      r.classList.toggle('now', j.act === 'now');
+      r.classList.toggle('recent', j.act === 'recent');
+      if (j.act === 'now') cnt++;
+      var w = r.querySelector('.w');
+      if (!w.querySelector('.bad')) w.textContent = j.act === 'now' ? 'пишет' : (j.age != null && ago(j.age)) || (j.when || '—');
+      // точки — скрипт пишет сейчас, или недавно и его таблица выросла с прошлого опроса
+      if (j.act === 'now' || (j.act === 'recent' && mine)) {
+        var t = r.querySelectorAll('.tube');
+        shoot(t[0], 3, 0); shoot(t[1], mine ? 4 : 2, 0.9);
+      }
+    });
+    document.getElementById('fl-cnt').textContent = cnt + ' из ' + rows.length;
+    prev = x;
+  }
+  function filt(f, label) {
+    sel = sel === f ? null : f;
+    document.querySelectorAll('.ch').forEach(function (c) { c.classList.toggle('sel', sel !== null && c.dataset.f === sel); });
+    var n = 0;
+    rows.forEach(function (r) { var on = !sel || (' ' + r.dataset.f + ' ').indexOf(' ' + sel + ' ') >= 0; r.classList.toggle('dim', !on); if (on) n++; });
+    document.getElementById('fl-sel').innerHTML = sel ? 'Работают с «' + label + '»: ' + n + ' · <a id="fl-clr">показать все</a>' : '';
+    var c = document.getElementById('fl-clr'); if (c) c.onclick = function () { filt(sel); };
+  }
+  document.querySelectorAll('.ch[data-f]').forEach(function (c) {
+    c.addEventListener('click', function () { filt(c.dataset.f, c.firstChild.textContent.trim()); });
+  });
+  render(live);
+  setInterval(function () {
+    var age = Date.now() / 1000 - skew - (prev ? prev.now : 0), st = document.getElementById('fl-st');
+    st.className = 'st ' + (age > 45 ? 'late' : 'ok'); st.textContent = age > 45 ? 'нет связи с сайтом' : '● живая';
+  }, 1000);
+  setInterval(function () {
+    if (document.hidden) return;
+    fetch('/system/flows/live', {cache: 'no-store'}).then(function (r) { return r.ok ? r.json() : null; }).then(render).catch(function () {});
+  }, 10000);
+})();
+</script>
+{% endblock %}

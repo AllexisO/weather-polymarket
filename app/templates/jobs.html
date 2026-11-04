@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Скрипты — weather-lab{% endblock %}
+{% block content %}
+{#
+  03.11 (Alex: «много скриптов, которые я не вижу»): все скрипты крона по группам — состояние, расписание, последний успех;
+  клик — страница скрипта. Данные — jobs_list() (dashboard.py): jobs_info.JOBS + SERVICE_SCRIPTS + сверка с data/night/crontab.txt.
+#}
+{% include "_sys_style.html" %}
+<style>
+  .grp { margin: 0 0 22px; }
+  .grp h2 { font-size: 15px; font-weight: 600; color: var(--bk-muted); margin: 0 0 8px; text-transform: uppercase; letter-spacing: .05em; }
+  .list { background: var(--bk-card); border: 1px solid var(--bk-line); border-radius: 16px; overflow: hidden; }
+  /* 03.11 (Alex): таблица — название, файл, расписание, последний запуск, состояние — отдельными колонками */
+  .jr { display: grid; grid-template-columns: minmax(0, 1fr) 210px 150px 125px 118px; gap: 4px 18px; padding: 12px 18px; align-items: center; }
+  a.jr { color: var(--bk-text); text-decoration: none; }
+  .jr + .jr { border-top: 1px solid var(--bk-line); }
+  a.jr:hover { background: var(--bk-raise); }
+  .jr.hd { padding-top: 10px; padding-bottom: 10px; font-size: 11.5px; font-weight: 600; color: var(--bk-faint); text-transform: uppercase; letter-spacing: .05em; }
+  .jr .nm { font-weight: 600; font-size: 14.5px; line-height: 1.4; }
+  .jr .err { display: block; font-size: 12.5px; font-weight: 400; color: var(--bk-neg); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .jr .fl code { white-space: nowrap; word-break: normal; display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; }
+  .jr .sc, .jr .ago { font-size: 13px; color: var(--bk-muted); font-variant-numeric: tabular-nums; }
+  @media (max-width: 900px) {
+    .jr { grid-template-columns: minmax(0, 1fr) auto; }
+    .jr.hd { display: none; }
+    .jr .fl, .jr .sc { grid-column: 1; }
+    .jr .ago { grid-column: 1; }
+    .jr .stc { grid-column: 2; grid-row: 1; }
+  }
+</style>
+<div class="bk">
+  <div class="crumb"><a href="/system">← Система</a></div>
+  <div class="top">
+    <h1>Скрипты</h1>
+    <p>Все скрипты по расписанию (крон) и постоянные процессы: работает ли, когда последний раз отработал, как часто запускается.
+      Нажмите на скрипт — описание, история запусков, лог и его данные. Проверено в {{ d.checked }}.</p>
+  </div>
+  <div class="kpis" style="margin-bottom:24px">
+    <div class="kpi"><h3>Всего</h3><div class="v">{{ d.total }}</div></div>
+    <div class="kpi"><h3>Работают</h3><div class="v good">{{ d.counts.ok }}</div><div class="s">+ {{ d.counts.quiet }} пишут лог только при деле</div></div>
+    <div class="kpi"><h3>Опаздывают / с пропусками</h3><div class="v{{ ' bad' if d.counts.late + d.counts.partial else '' }}">{{ d.counts.late + d.counts.partial }}</div></div>
+    <div class="kpi"><h3>С ошибкой</h3><div class="v{{ ' bad' if d.counts.fail else '' }}">{{ d.counts.fail }}</div></div>
+  </div>
+  {% for g in d.groups if g.jobs %}
+  <section class="grp">
+    <h2>{{ g.title }} · {{ g.jobs | length }}</h2>
+    <div class="list">
+      <div class="jr hd"><span>Что делает</span><span>Файл</span><span>Расписание</span><span>Последний раз</span><span>Состояние</span></div>
+      {% for j in g.jobs %}
+      <a class="jr" href="/system/jobs/{{ j.key }}">
+        <div class="nm">{{ j.label }}{% if j.err and j.state in ('fail', 'partial') %}<span class="err" title="{{ j.err }}">{{ j.err }}</span>{% endif %}</div>
+        <div class="fl"><code title="{{ j.script }}">{{ j.script }}</code></div>
+        <div class="sc">{{ j.cron | join(' · ') if j.cron else j.sched }}</div>
+        <div class="ago" title="{{ 'последняя запись в лог' if j.kind == 'service' else 'последний успешный запуск' }}">{{ j.ok_when or '—' }}</div>
+        <div class="stc"><span class="st {{ j.state }}">{{ words[j.state] }}</span></div>
+      </a>
+      {% endfor %}
+    </div>
+  </section>
+  {% endfor %}
+</div>
+{% endblock %}

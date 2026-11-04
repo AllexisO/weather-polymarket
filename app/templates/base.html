@@ -351,8 +351,8 @@
       <div class="side-group-label">Инструменты</div>
       {{ navlink('/status', 'Здоровье системы', 'status', path == '/status', nc.alerts if nc.alerts else none, 'bad' if nc.alerts else '') }}
       {{ navlink('/events', 'События', 'news', path == '/events') }}
-      {{ navlink('/services', 'Сервисы', 'plug', path == '/services') }}
-      {{ navlink('/backup', 'Бэкап', 'database', path == '/backup') }}
+      {# 03.11 (Alex): Сервисы и Бэкап — внутри «Системы» вместе со списком скриптов #}
+      {{ navlink('/system', 'Система', 'sliders', path.startswith('/system') or path in ('/services', '/backup')) }}
       {{ navlink('/notes', 'Заметки', 'notes', path == '/notes', nc.notes if nc.notes else none, 'warn' if nc.notes else '') }}
       {{ navlink('/audit', 'Проверка', 'target', path == '/audit', ('ok' if nc.audit == 0 else nc.audit) if nc.audit is not none else none, 'good' if nc.audit == 0 else ('bad' if nc.audit else '')) }}
      </div>
