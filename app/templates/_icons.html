@@ -82,6 +82,10 @@
 <line x1="5" y1="5" x2="19" y2="19"/><line x1="19" y1="5" x2="5" y2="19"/>
 {%- endmacro %}
 
+{% macro book() -%}
+<path d="M4 5.5A1.5 1.5 0 0 1 5.5 4H11v16H5.5A1.5 1.5 0 0 1 4 18.5z"/><path d="M20 5.5A1.5 1.5 0 0 0 18.5 4H13v16h5.5a1.5 1.5 0 0 0 1.5-1.5z"/>
+{%- endmacro %}
+
 {#
   Диспетчер: render(name, cls) -> <svg class="icon {{cls}}">...</svg>
   aria-hidden, т.к. иконка всегда стоит рядом с видимым текстом заголовка/пункта меню.
@@ -107,6 +111,7 @@
 {%- elif name == 'notes' %}{{ notes_icon() }}
 {%- elif name == 'plug' %}{{ plug() }}
 {%- elif name == 'database' %}{{ database() }}
+{%- elif name == 'book' %}{{ book() }}
 {%- endif %}
 </svg>
 {%- endmacro %}

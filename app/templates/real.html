@@ -18,6 +18,7 @@
 <article class="rl-card{% if c.featured %} rl-featured rl-wide{% endif %}">
   <div class="rl-head"><div><h3>{{ c.short or c.name }}</h3>{% if c.who %}<div class="rl-who">{{ c.who }}</div>{% endif %}</div>
     <span class="rl-chip {{ c.state }}">{{ c.chip }}</span></div>
+  {% if c.curve %}<div class="rl-split{% if not c.featured %} stack{% endif %}"><div class="rl-left">{% endif %}
   <div class="rl-money">{% if c.card.pnl is not none %}<b class="num {{ tone(c.card.pnl) }}">{{ money(c.card.pnl) }}</b>{% else %}<b class="num">—</b>{% endif %}<span>{{ c.card.note }}</span></div>
   {% if c.card.goal %}{% set g = c.card.goal %}{% set on = [30, (30 * g[0] / g[1]) | round | int] | min %}
   <div class="rl-goal">
@@ -30,9 +31,31 @@
       <td class="r num {{ tone(r.pnl) }}">{{ money(r.pnl) if r.n else '—' }}</td><td class="r num">{{ ('%+.1f%%' | format(r.roi)) | replace('-', '−') if r.roi is not none else '—' }}</td></tr>{% endfor %}
   </tbody></table></div>
   {% else %}
-  <div class="rl-facts">{% for v, l, t in c.card.facts %}<div><b class="num {{ t }}">{{ v }}</b><span>{{ l }}</span></div>{% endfor %}</div>
+  <div class="rl-facts{% if c.curve and c.card.facts | length == 4 %} two{% endif %}">{% for v, l, t in c.card.facts %}<div><b class="num {{ t }}">{{ v }}</b><span>{{ l }}</span></div>{% endfor %}</div>
   {% endif %}
   <a class="rl-more" href="/real/{{ c.key }}">Подробнее <span aria-hidden="true">→</span></a>
+  {% if c.curve %}{% set ch = c.curve %}
+  </div>
+  <div class="rl-curve" data-viz>
+    <div class="rl-row"><span>{% if c.cat == 'pool' %}Счёт после каждой закрытой ставки{% else %}$100 + закрытые ставки{% if c.paper | length > 1 %} · {{ c.best }}{% endif %}{% endif %}</span><span class="num">сейчас <b class="{{ tone(ch.last.v - 100) }}">${{ '%.2f' | format(ch.last.v) }}</b></span></div>
+    <svg class="viz" viewBox="0 0 {{ ch.w }} {{ ch.h }}" role="img" aria-label="Счёт: со $100 до ${{ '%.2f' | format(ch.last.v) }}"
+      data-pts='{{ ch.points | map(attribute="x") | list | tojson }}' data-ys='{{ ch.points | map(attribute="y") | list | tojson }}'
+      data-vs='{{ ch.points | map(attribute="v") | list | tojson }}' data-ts='{{ ch.points | map(attribute="t") | list | tojson }}'>
+      <defs><linearGradient id="rl-area-{{ c.key }}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFD58A" stop-opacity=".22"/><stop offset="1" stop-color="#FFD58A" stop-opacity="0"/></linearGradient></defs>
+      <g class="grid">{% for t in ch.ticks %}<line x1="{{ ch.L }}" x2="{{ ch.R }}" y1="{{ t.y }}" y2="{{ t.y }}"/><text x="{{ ch.L - 8 }}" y="{{ t.y + 4 }}" text-anchor="end">{{ t.label }}</text>{% endfor %}</g>
+      <path class="area" d="{{ ch.area }}" fill="url(#rl-area-{{ c.key }})"/>
+      <line class="start" x1="{{ ch.L }}" x2="{{ ch.R }}" y1="{{ ch.start_y }}" y2="{{ ch.start_y }}"/>
+      <path class="line" d="{{ ch.path }}"/>
+      <line class="cross" y1="{{ ch.T }}" y2="{{ ch.B }}" x1="0" x2="0"/>
+      <circle class="dot" cx="{{ ch.last.x }}" cy="{{ ch.last.y }}" r="4.5"/>
+      <circle class="hov" cx="0" cy="0" r="5"/>
+      <text x="{{ ch.L }}" y="{{ ch.h - 6 }}">{{ ch.first_t[:5] }}</text>
+      <text x="{{ ch.R }}" y="{{ ch.h - 6 }}" text-anchor="end">{{ ch.last_t[:5] }}</text>
+      <rect class="hit" x="{{ ch.L }}" y="{{ ch.T }}" width="{{ ch.R - ch.L }}" height="{{ ch.B - ch.T }}"/>
+    </svg>
+  </div>
+  </div>
+  {% endif %}
   <div class="rl-when">{% if c.state == 'done' %}Решение было <b>{{ dm(c.decide) }}</b>{% else %}Решение <b>{{ dm(c.decide) }}</b>{% if c.days_left > 0 %} · через {{ c.days_left }} дн.{% elif c.days_left == 0 %} · сегодня{% else %} · прошло{% endif %}{% endif %}</div>
 </article>
 {% endmacro %}
@@ -208,6 +231,43 @@
   // открывается на Симуляции, после запуска настоящего счёта — на Live (is_live); #sim / #dry / #live — нужная вкладка
   var want = location.hash ? 'tab-' + location.hash.slice(1) : null;
   if (want && document.getElementById(want)) show(want);
+})();
+</script>
+<script>
+/* 04.11 (Alex, как на образце): наведение на кривую счёта — ближайшая точка по горизонтали: пунктир, кружок на линии,
+   рядом время и сумма. Слушаем на document — переживает живое обновление страницы (morph). */
+(function () {
+  function near(svg, e) {
+    var vb = svg.viewBox.baseVal, r = svg.getBoundingClientRect(), x = (e.clientX - r.left) * vb.width / r.width;
+    var xs = JSON.parse(svg.dataset.pts), i = 0;
+    for (var k = 1; k < xs.length; k++) if (Math.abs(xs[k] - x) < Math.abs(xs[i] - x)) i = k;
+    return i;
+  }
+  function hideAll() {
+    document.querySelectorAll('.rl-curve').forEach(function (c) { c.classList.remove('on'); });
+  }
+  document.addEventListener('pointermove', function (e) {
+    var svg = e.target.closest && e.target.closest('.rl-curve svg.viz');
+    if (!svg) { hideAll(); return; }
+    var card = svg.closest('.rl-curve'), i = near(svg, e);
+    var xs = JSON.parse(svg.dataset.pts), ys = JSON.parse(svg.dataset.ys), vs = JSON.parse(svg.dataset.vs), ts = JSON.parse(svg.dataset.ts);
+    var cross = svg.querySelector('.cross'), hov = svg.querySelector('.hov');
+    cross.setAttribute('x1', xs[i]); cross.setAttribute('x2', xs[i]);
+    hov.setAttribute('cx', xs[i]); hov.setAttribute('cy', ys[i]);
+    var tip = card.querySelector('.viz-tip');
+    if (!tip) { tip = document.createElement('div'); tip.className = 'viz-tip'; card.appendChild(tip); }
+    tip.textContent = '';
+    var t = document.createElement('span'); t.textContent = ts[i]; tip.appendChild(t);
+    var b = document.createElement('b'); b.textContent = '$' + vs[i].toFixed(2); tip.appendChild(b);
+    card.classList.add('on');
+    var vb = svg.viewBox.baseVal, r = svg.getBoundingClientRect(), c = card.getBoundingClientRect();
+    var px = r.left - c.left + xs[i] * r.width / vb.width, py = r.top - c.top + ys[i] * r.height / vb.height;
+    var left = px + 14;
+    if (left + tip.offsetWidth > c.width) left = px - 14 - tip.offsetWidth;
+    tip.style.left = Math.max(0, left) + 'px';
+    tip.style.top = Math.max(0, py - tip.offsetHeight - 6) + 'px';
+  });
+  document.addEventListener('pointerleave', hideAll);
 })();
 </script>
 {% endblock %}

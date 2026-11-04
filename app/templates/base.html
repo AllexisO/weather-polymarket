@@ -356,6 +356,10 @@
       {{ navlink('/notes', 'Заметки', 'notes', path == '/notes', nc.notes if nc.notes else none, 'warn' if nc.notes else '') }}
       {{ navlink('/audit', 'Проверка', 'target', path == '/audit', ('ok' if nc.audit == 0 else nc.audit) if nc.audit is not none else none, 'good' if nc.audit == 0 else ('bad' if nc.audit else '')) }}
      </div>
+     {# 04.11 (Alex): «Как работает» — в самом низу меню #}
+     <div class="side-block">
+      {{ navlink('/how', 'Как работает', 'book', path.startswith('/how')) }}
+     </div>
     </nav>
     <div class="side-spacer"></div>
     <div class="side-foot">

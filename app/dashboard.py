@@ -616,7 +616,7 @@ def smooth_path(pts):
     return " ".join(out)
 
 
-def balance_chart(rows, start=100.0, w=500, h=330):
+def balance_chart(rows, start=100.0, w=500, h=330, smooth=True):
     """Баланс по моментам, когда он менялся (2026-09-27, просьба Alex): точка — каждый
     расчёт ставок (settled_at, с точностью до минуты), ступенька — баланс между
     расчётами не меняется. rows: (settled_at, итог, город, won/lost/void).
@@ -649,7 +649,8 @@ def balance_chart(rows, start=100.0, w=500, h=330):
     Y = lambda v: T + ph * (1 - (v - y0) / (y1 - y0))
     for i, p in enumerate(pts):
         p["x"], p["y"] = round(X(i), 1), round(Y(p["v"]), 1)
-    path = smooth_path([(p["x"], p["y"]) for p in pts])
+    # smooth=False (04.11, кривая банка на /real): ломаная — сотни точек, сглаживать нечего
+    path = smooth_path([(p["x"], p["y"]) for p in pts]) if smooth else "M" + " L".join(f"{p['x']},{p['y']}" for p in pts)
     area = path + f" L{pts[-1]['x']},{T + ph} L{pts[0]['x']},{T + ph} Z"
     ticks = []
     t = y0
@@ -657,7 +658,8 @@ def balance_chart(rows, start=100.0, w=500, h=330):
         ticks.append({"y": round(Y(t), 1), "label": f"${t:,.0f}" if step >= 1 else f"${t:.1f}"})
         t += step
     return {"w": w, "h": h, "L": L, "R": w - R, "T": T, "B": T + ph, "path": path, "area": area, "points": pts,
-            "ticks": ticks, "start_y": round(Y(start), 1), "last": pts[-1], "first_t": pts[1]["t"], "last_t": pts[-1]["t"]}
+            "ticks": ticks, "start_y": round(Y(start), 1), "last": pts[-1], "first_t": pts[1]["t"], "last_t": pts[-1]["t"],
+            "peak": max(pts, key=lambda p: p["v"]), "low": min(pts, key=lambda p: p["v"])}
 
 
 def money_str(v):
@@ -3892,6 +3894,29 @@ def system_page(request: Request):
     return TEMPLATES.TemplateResponse("system.html", {"request": request, "words": STATE_WORD, **d})
 
 
+# 04.11 (Alex): раздел «Как работает» — карточка на каждую логику проекта, по клику страница с описанием и диаграммами.
+# Новая логика — строка сюда и шаблон how_<key>.html.
+HOW_PAGES = [
+    {"key": "wallet-live", "title": "Путь кошелька до Live", "icon": "wallet", "tone": "violet", "updated": "04.11.2026",
+     "desc": "Как идея становится кошельком и что она проходит до настоящих денег: 4 шага, пороги, кто решает, "
+             "один счёт $100 с частью у каждого кошелька.",
+     "tags": ["Кошельки", "Симуляция", "Вхолостую", "Live"]},
+]
+
+
+@app.get("/how", response_class=HTMLResponse)
+def how_index(request: Request):
+    return TEMPLATES.TemplateResponse("how.html", {"request": request, "pages": HOW_PAGES})
+
+
+@app.get("/how/{key}", response_class=HTMLResponse)
+def how_page(request: Request, key: str):
+    p = next((x for x in HOW_PAGES if x["key"] == key), None)
+    if p is None:
+        raise HTTPException(404, "Нет такой страницы")
+    return TEMPLATES.TemplateResponse(f"how_{key.replace('-', '_')}.html", {"request": request, "p": p})
+
+
 @app.get("/system/flows", response_class=HTMLResponse)
 def flows_page(request: Request):
     conn = db()
@@ -4046,7 +4071,8 @@ def _real_paper(conn, wallet, since, until=None):
             "pnl": pnl, "roi": 100 * pnl / cost if cost else None, "open": sum(r["status"] == "open" for r in rs), "luck": luck(pnl, sd),
             # 02.11 (блок «Сколько заработали» на /real): поставлено в закрытых, проиграли, сколько стоит в открытых
             "staked": cost, "lost": sum(r["status"] == "lost" for r in st),
-            "open_cost": sum(r["stake"] + _fee(r) for r in rs if r["status"] == "open")}
+            "open_cost": sum(r["stake"] + _fee(r) for r in rs if r["status"] == "open"),
+            "events": [(r["settled_at"], _pnl(r), r["city"], r["status"]) for r in st]}
 
 
 def _llm_accuracy(conn, wallet, since, until):
@@ -4183,6 +4209,7 @@ def _real_pool(conn, wallets, since, until, bank=100.0, frac=None, refill=False)
     return {"n": len(st), "pnl": pnl, "roi": 100 * pnl / cost if cost else None, "cash": cash, "low": low, "skip": skip,
             "staked": cost, "won": sum(r["status"] == "won" for r in st), "lost": sum(r["status"] == "lost" for r in st),
             "days": [days[k] for k in sorted(days)], "luck_p": _luck_p(st),
+            "events": [(r["settled_at"], _pnl(r), r["city"], r["status"]) for r in st],
             "open": len(op), "open_cost": sum(r["stake"] + r["fee"] for r in op), "rebuy": rebuy, "nofill": nofill,
             "max_stake": max((r["stake"] + r["fee"] for r in took), default=0.0),
             "refill_n": sum(r["status"] in ("won", "lost", "void") for r in refills), "refill_open": sum(r["status"] not in ("won", "lost", "void") for r in refills),
@@ -4225,6 +4252,7 @@ def real_page_data(conn):
                          "facts": [(money_str(p["refill_pnl"]) if p["refill_n"] else "—", "из них докупки", tn(p["refill_pnl"])),
                                    (money_str(base["pnl"]) if base["n"] else "—", "первый банк за те же дни", tn(base["pnl"])),
                                    (f"${p['cash']:.2f}", "свободно", "")]}
+            c["curve"] = balance_chart(p["events"], 100.0, w=560, h=220, smooth=False)
         elif c["key"] in ("pool", "pool2", "pool_mix"):
             p = _real_pool(conn, c["wallets"], c["since"], c["until"], frac=c.get("frac"))
             tn = lambda v: "pos" if v > 0.005 else ("neg" if v < -0.005 else "")
@@ -4258,6 +4286,8 @@ def real_page_data(conn):
                     facts.append((c["rows"][-1]["value"], "заявки вхолостую", c["rows"][-1]["tone"]))
             c["card"] = {"pnl": p["pnl"] if p["n"] else None, "note": f"закрытые ставки с {c['since'][8:10]}.{c['since'][5:7]}",
                          "goal": (p["n"], c["need_n"], "закрытых ставок"), "facts": facts}
+            # 04.11 (Alex): кривая счёта после каждого расчёта ставок, линия — стартовые $100 (у главного — справа, у остальных — под фактами)
+            c["curve"] = balance_chart(p["events"], 100.0, w=560, h=270 if c.get("featured") else 220, smooth=False)
             ok_n, ok_roi = p["n"] >= c["need_n"], p["roi"] is not None and p["roi"] >= c["need_roi"]
             # 02.11 (заметка #155, Alex «давай», до итога 21.11): ещё и шанс получить такой итог удачей ≤ need_luck %
             ok_luck = not c.get("need_luck") or (p["luck_p"] is not None and p["luck_p"] <= c["need_luck"])
@@ -4303,6 +4333,8 @@ def real_page_data(conn):
                            "who": best["label"] if len(rows) > 1 else "кошелёк на бумаге"}
             c["progress"] = min(100, round(100 * best["n"] / c["need_n"]))
             c["best"] = best["label"]
+            # 04.11 (Alex): кривая — $100 + итог закрытых ставок (лучшего кошелька, если их несколько) с начала порога
+            c["curve"] = balance_chart(best["events"], 100.0, w=560, h=220, smooth=False)
             roi = f"{best['roi']:+.1f}%".replace("-", "−") if best["roi"] is not None else "—"
             c["card"] = {"pnl": best["pnl"] if best["n"] else None,
                          "note": ((f"{roi} · закрытых ставок: {best['n']}" if len(rows) == 1 else f"лучший: {best['label']}, {roi}")

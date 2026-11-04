@@ -1,0 +1,96 @@
+{#
+  04.11 (Alex): общий стиль /how и всех /how/<key> — палитра сайта; с образца Alex взято устройство страницы (номера разделов,
+  схемы, таблица с иконками, дерево, нумерованный список, галочки).
+#}
+<style>
+  /* 04.11 (Alex «отталкивайся от нашего дизайна»): тёмная палитра сайта (DESIGN_SYSTEM.md, как .bk); с образца взяты только
+     устройство страницы — номера разделов, схемы, таблица с иконками, дерево, нумерованный список, галочки.
+     Цвета по смыслу: лавандовый — путь на бумаге, янтарный — внимание/проверка, салатовый — деньги/прошёл, персиковый — стоп. */
+  .hw { --h-bg: #1C1C1E; --h-text: #F4F4F5; --h-muted: #A1A1AA; --h-faint: #71717A; --h-line: #2E2E31; --h-soft: #262628;
+        --h-acc: #FFD58A; --h-acc-bg: rgba(255, 213, 138, .14); --h-acc-line: rgba(255, 213, 138, .35);
+        --pink: #A1A1AA; --pink-bg: #262628; --pink-line: #3A3A3E;
+        --blue: #D3DDFB; --blue-bg: rgba(211, 221, 251, .12); --blue-line: rgba(211, 221, 251, .30);
+        --green: #A3E39A; --green-bg: rgba(163, 227, 154, .13); --green-line: rgba(163, 227, 154, .32);
+        --yellow: #FFD58A; --yellow-bg: rgba(255, 213, 138, .14); --yellow-line: rgba(255, 213, 138, .35);
+        --violet: #FFE3AE; --violet-bg: rgba(255, 227, 174, .12); --violet-line: rgba(255, 227, 174, .30);
+        --red: #F4A77F; --red-bg: rgba(244, 167, 127, .13); --red-line: rgba(244, 167, 127, .32);
+        color: var(--h-text); font-family: "Onest", -apple-system, "Segoe UI", Roboto, sans-serif; font-size: 14px; line-height: 1.55;
+        max-width: 1180px; }
+  .hw a { color: inherit; }
+  .hw .crumb { font-size: 12px; color: var(--h-muted); display: flex; align-items: center; gap: 6px; margin-bottom: 18px; }
+  .hw .crumb a { text-decoration: none; } .hw .crumb a:hover { color: var(--h-text); }
+  .hw .crumb .sep { color: var(--h-faint); }
+  .hw .file { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .hw .file .fi { width: 22px; height: 22px; color: var(--h-acc); }
+  .hw .file .fi svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linejoin: round; }
+  .hw .file .fn { font-weight: 500; font-size: 14px; }
+  .hw .pill { margin-left: auto; font-size: 11.5px; color: var(--h-acc); background: var(--h-acc-bg); border: 1px solid var(--h-acc-line);
+              border-radius: 999px; padding: 3px 12px; }
+  .hw h1 { font-size: 30px; line-height: 1.15; font-weight: 700; letter-spacing: -.01em; margin: 14px 0 6px; }
+  .hw .lead { color: var(--h-muted); font-size: 14px; margin: 0 0 26px; max-width: 760px; }
+
+  .hw .hs { margin-top: 28px; }
+  .hw .hs-h { display: flex; align-items: baseline; gap: 12px; }
+  .hw .hs-h .no { color: var(--h-acc); font-size: 15px; font-weight: 500; font-variant-numeric: tabular-nums; }
+  .hw .hs-h b { font-size: 15px; font-weight: 600; }
+  .hw .hs-sub { color: var(--h-muted); font-size: 11.5px; margin: 2px 0 10px; }
+  .hw .card { border: 1px solid var(--h-line); border-radius: 16px; padding: 16px 18px; background: var(--h-bg); }
+  .hw .two { display: grid; grid-template-columns: 1fr 1fr; gap: 26px; }
+  .hw .two .hs { margin-top: 28px; }
+
+  /* плашка иконки */
+  .hw .ic { width: 30px; height: 30px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; flex: none; }
+  .hw .ic svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  .hw .ic.sm { width: 22px; height: 22px; border-radius: 6px; } .hw .ic.sm svg { width: 13px; height: 13px; }
+  .hw .t-pink { color: var(--pink); background: var(--pink-bg); } .hw .t-blue { color: var(--blue); background: var(--blue-bg); }
+  .hw .t-green { color: var(--green); background: var(--green-bg); } .hw .t-yellow { color: var(--yellow); background: var(--yellow-bg); }
+  .hw .t-violet { color: var(--violet); background: var(--violet-bg); } .hw .t-red { color: var(--red); background: var(--red-bg); }
+  .hw .ic.solid { color: #0A0A0B; } .hw .ic.solid.t-blue { background: var(--blue); } .hw .ic.solid.t-violet { background: var(--violet); }
+  .hw .ic.solid.t-green { background: var(--green); } .hw .ic.solid.t-pink { background: var(--pink); }
+
+  /* таблица «иконка — название — значение» */
+  .hw .kv { width: 100%; border-collapse: collapse; }
+  .hw .kv td { padding: 9px 4px; border-bottom: 1px solid var(--h-soft); vertical-align: top; font-size: 12.5px; }
+  .hw .kv tr:last-child td { border-bottom: 0; }
+  .hw .kv td.k { white-space: nowrap; font-weight: 600; width: 1%; padding-right: 18px; }
+  .hw .kv td.k span { display: inline-flex; align-items: center; gap: 9px; }
+  .hw .kv td.v { color: var(--h-muted); }
+
+  /* блок-дерево как код */
+  .hw .tree { position: relative; background: var(--h-soft); border-radius: 10px; padding: 12px 14px; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 12px; line-height: 1.85;
+              white-space: pre; overflow-x: auto; color: var(--h-text); }
+  .hw .tree .c { color: var(--h-faint); }
+  .hw .copy { position: absolute; top: 24px; right: 26px; border: 0; background: transparent; color: var(--h-faint); cursor: pointer; padding: 2px; }
+  .hw .copy:hover { color: var(--h-text); } .hw .copy svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.8; }
+
+  /* нумерованный список */
+  .hw .steps { list-style: none; margin: 0; padding: 0; }
+  .hw .steps li { display: flex; gap: 12px; align-items: flex-start; padding: 7px 0; font-size: 12.5px; }
+  .hw .steps .n { width: 20px; height: 20px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+                  font-size: 11px; font-weight: 600; flex: none; border: 1px solid; }
+  .hw .steps li:nth-child(6n+1) .n { color: var(--violet); background: var(--violet-bg); border-color: var(--violet-line); }
+  .hw .steps li:nth-child(6n+2) .n { color: var(--pink); background: var(--pink-bg); border-color: var(--pink-line); }
+  .hw .steps li:nth-child(6n+3) .n { color: var(--blue); background: var(--blue-bg); border-color: var(--blue-line); }
+  .hw .steps li:nth-child(6n+4) .n { color: var(--green); background: var(--green-bg); border-color: var(--green-line); }
+  .hw .steps li:nth-child(6n+5) .n { color: var(--yellow); background: var(--yellow-bg); border-color: var(--yellow-line); }
+  .hw .steps li:nth-child(6n+6) .n { color: var(--red); background: var(--red-bg); border-color: var(--red-line); }
+  .hw .steps b { font-weight: 600; } .hw .steps .m { color: var(--h-muted); }
+
+  /* список с галочками */
+  .hw .checks { list-style: none; margin: 0; padding: 0; }
+  .hw .checks li { display: flex; gap: 10px; align-items: flex-start; padding: 6px 0; font-size: 12.5px; }
+  .hw .checks li::before { content: ""; width: 16px; height: 16px; border-radius: 50%; flex: none; margin-top: 1px;
+    background: var(--green) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4.5 8.3l2.2 2.2 4.8-4.9' fill='none' stroke='%230A0A0B' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 16px no-repeat; }
+  .hw .checks li.stop::before { background-color: var(--red);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M5.5 5.5l5 5M10.5 5.5l-5 5' fill='none' stroke='%230A0A0B' stroke-width='1.8' stroke-linecap='round'/%3E%3C/svg%3E"); }
+  .hw .checks .m { color: var(--h-muted); }
+
+  .hw .note { font-size: 11.5px; color: var(--h-muted); margin-top: 10px; }
+
+  @media (max-width: 900px) {
+    .hw h1 { font-size: 25px; }
+    .hw .two { grid-template-columns: 1fr; gap: 0; }
+    .hw .pill { margin-left: 0; }
+    .hw .kv td.k { white-space: normal; width: 34%; }
+  }
+</style>

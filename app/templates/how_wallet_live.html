@@ -1,0 +1,232 @@
+{% extends "base.html" %}
+{% block title %}Путь кошелька до Live — weather-lab{% endblock %}
+{% block content %}
+{#
+  04.11 (Alex): «Как работает» → путь кошелька от идеи до настоящих денег. Текст — правило из CLAUDE.md «Путь кошелька до Live»
+  (договорились 04.11); поменялось правило — поправить и здесь. Части счёта — по ставкам банка 24.10-04.11 (пример, не решение).
+#}
+{% import "_how_icons.html" as hi %}
+{% include "_how_style.html" %}
+<style>
+  /* схема пути: 5 шагов в ряд, дуги «прошёл» сверху и «не прошёл» снизу, справа — ветка в части счёта */
+  .hw .flow { display: grid; grid-template-columns: minmax(0,1fr) 30px minmax(0,1fr) 30px minmax(0,1fr) 30px minmax(0,1fr) 30px minmax(0,1fr) 44px minmax(0,1.1fr);
+              grid-template-rows: 46px auto 46px; align-items: center; padding: 6px 0; }
+  .hw .nd { grid-row: 2; display: flex; gap: 9px; align-items: flex-start; border: 1px solid; border-radius: 9px; padding: 11px 10px; min-height: 84px; }
+  .hw .nd b { display: block; font-size: 12.5px; font-weight: 600; margin-top: 1px; }
+  .hw .nd span.s { display: block; font-size: 11px; color: var(--h-muted); line-height: 1.4; }
+  .hw .nd.pink { background: var(--pink-bg); border-color: var(--pink-line); } .hw .nd.blue { background: var(--blue-bg); border-color: var(--blue-line); }
+  .hw .nd.green { background: var(--green-bg); border-color: var(--green-line); } .hw .nd.yellow { background: var(--yellow-bg); border-color: var(--yellow-line); }
+  .hw .nd.violet { background: var(--violet-bg); border-color: var(--violet-line); }
+  .hw .nd .ic { background: rgba(10, 10, 11, .35); }
+  .hw .ar { grid-row: 2; display: flex; justify-content: center; color: var(--h-muted); }
+  .hw .ar svg { width: 24px; height: 12px; }
+  .hw .arc { position: relative; align-self: stretch; display: flex; flex-direction: column; font-size: 10.5px; color: var(--h-muted); text-align: center; }
+  .hw .arc.top { grid-row: 1; grid-column: 3 / 10; justify-content: flex-end; padding: 0 9%; }
+  .hw .arc.top i { display: block; height: 16px; border: 1.3px dashed var(--h-muted); border-bottom: 0; border-radius: 14px 14px 0 0; margin-top: 3px; position: relative; }
+  .hw .arc.top i::after { content: ""; position: absolute; right: -4.5px; bottom: -2px; border: 4.5px solid transparent; border-top: 6px solid var(--h-muted); border-bottom: 0; }
+  .hw .arc.bot { grid-row: 3; grid-column: 3 / 8; justify-content: flex-start; padding: 0 9%; }
+  .hw .arc.bot i { display: block; height: 16px; border: 1.3px dashed var(--h-muted); border-top: 0; border-radius: 0 0 14px 14px; margin-bottom: 3px; position: relative; }
+  .hw .arc.bot i::after { content: ""; position: absolute; left: -4.5px; top: -2px; border: 4.5px solid transparent; border-bottom: 6px solid var(--h-muted); border-top: 0; }
+  .hw .br { grid-column: 10; grid-row: 1 / 4; align-self: stretch; }
+  .hw .br svg { width: 100%; height: 100%; display: block; }
+  .hw .stk { grid-column: 11; grid-row: 1 / 4; display: grid; grid-template-rows: repeat(4, 1fr); gap: 6px; align-self: stretch; }
+  .hw .stk div { position: relative; display: flex; gap: 8px; align-items: center; border: 1px solid var(--h-line); border-radius: 10px; padding: 6px 8px; background: var(--h-soft); }
+  .hw .stk div::before { content: ""; position: absolute; left: -6px; top: 50%; margin-top: -4px; border: 4px solid transparent; border-left: 6px solid var(--h-muted); border-right: 0; }
+  .hw .stk b { display: block; font-size: 11.5px; font-weight: 600; } .hw .stk span.s { display: block; font-size: 10.5px; color: var(--h-muted); }
+  .hw .legend { display: flex; flex-wrap: wrap; gap: 6px 22px; font-size: 11.5px; color: var(--h-muted); margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--h-soft); }
+  .hw .legend i { display: inline-block; width: 22px; border-top: 1.3px dashed var(--h-muted); vertical-align: middle; margin-right: 6px; }
+
+  /* сроки: полосы по неделям */
+  .hw .gantt { display: grid; grid-template-columns: 150px 1fr; row-gap: 9px; align-items: center; font-size: 12px; }
+  .hw .gantt .lb { font-weight: 600; } .hw .gantt .lb span { display: block; font-weight: 400; color: var(--h-muted); font-size: 11px; }
+  .hw .gantt .tr { position: relative; height: 26px; background: repeating-linear-gradient(90deg, var(--h-soft) 0 calc(100% / 9 - 1px), var(--h-line) calc(100% / 9 - 1px) calc(100% / 9)); border-radius: 6px; }
+  .hw .gantt .bar { position: absolute; top: 3px; bottom: 3px; border-radius: 5px; font-size: 10.5px; font-weight: 600; color: #0A0A0B; display: flex; align-items: center; padding: 0 8px; white-space: nowrap; overflow: hidden; }
+  .hw .gantt .bar.ext { background: repeating-linear-gradient(135deg, var(--blue-line) 0 6px, var(--blue-bg) 6px 12px) !important; color: var(--blue); font-weight: 500; }
+  .hw .gantt .ax { grid-column: 2; display: grid; grid-template-columns: repeat(9, 1fr); font-size: 10.5px; color: var(--h-faint); }
+  .hw .gantt .ax span { border-left: 1px solid var(--h-line); padding-left: 4px; }
+
+  /* часть из прибыли: две полосы до/после */
+  .hw .split { display: grid; grid-template-columns: 110px 1fr 70px; gap: 10px 12px; align-items: center; font-size: 12px; }
+  .hw .split .lb { font-weight: 600; } .hw .split .tot { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .hw .sbar { display: flex; height: 34px; border-radius: 7px; overflow: hidden; gap: 2px; }
+  .hw .sbar span { display: flex; flex-direction: column; justify-content: center; padding: 0 8px; font-size: 10.5px; line-height: 1.25; white-space: nowrap; overflow: hidden; }
+  .hw .sbar span b { font-weight: 600; font-size: 11px; }
+  .hw .sbar .s1 { background: var(--blue-bg); color: var(--blue); } .hw .sbar .s2 { background: var(--green-bg); color: var(--green); }
+  .hw .sbar .s3 { background: var(--yellow-bg); color: var(--yellow); } .hw .sbar .s4 { background: var(--h-text); color: #0A0A0B; }
+
+  @media (max-width: 1000px) {
+    .hw .flow { display: flex; flex-direction: column; align-items: stretch; gap: 0; }
+    .hw .arc, .hw .br { display: none; }
+    .hw .ar { padding: 4px 0; } .hw .ar svg { transform: rotate(90deg); }
+    .hw .nd { min-height: 0; }
+    .hw .stk { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: none; margin-top: 12px; }
+    .hw .stk div::before { display: none; }
+    .hw .gantt { grid-template-columns: 1fr; row-gap: 4px; } .hw .gantt .ax { grid-column: 1; }
+    .hw .gantt .lb { margin-top: 6px; }
+    .hw .split { grid-template-columns: 1fr auto; } .hw .split .sbar { grid-column: 1 / -1; grid-row: auto; }
+    .hw .sbar span { padding: 0 4px; font-size: 9.5px; }
+  }
+</style>
+{% set arrow %}<svg viewBox="0 0 24 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1 6h21M17 1.5L22 6l-5 4.5"/></svg>{% endset %}
+<div class="hw">
+  <div class="crumb"><a href="/how">Как работает</a><span class="sep">›</span><span>Путь кошелька до Live</span></div>
+  <div class="file"><span class="fi">{{ hi.i('layers') }}</span><span class="fn">Путь кошелька до Live</span>
+    <span class="pill">Одна идея — один кошелёк. На деньги — только прошедшие все шаги.</span></div>
+  <h1>Путь кошелька до Live</h1>
+  <p class="lead">Как идея становится кошельком и что она проходит до настоящих денег: четыре шага, у каждого свой порог,
+    записанный заранее. Пропускать шаги нельзя. На настоящем счёте один бюджет $100, и у каждого кошелька в нём своя часть —
+    кошельки не мешают друг другу.</p>
+
+  <section class="hs">
+    <div class="hs-h"><span class="no">01</span><b>Обзор пути</b></div>
+    <div class="hs-sub">Пять остановок от идеи до настоящих денег и куда кошелёк попадает на счёте.</div>
+    <div class="card">
+      <div class="flow">
+        <div class="arc top">прошёл порог шага → следующий шаг<i></i></div>
+        <div class="nd pink" style="grid-column:1"><span class="ic t-pink">{{ hi.i('bulb') }}</span><div><b>Идея</b><span class="s">шаг 0 · до первой ставки</span><span class="s">правила маркета, прогон на истории с 01.06.2025</span></div></div>
+        <div class="ar" style="grid-column:2">{{ arrow }}</div>
+        <div class="nd blue" style="grid-column:3"><span class="ic t-blue">{{ hi.i('wallet') }}</span><div><b>Кошельки</b><span class="s">шаг 1 · /paper</span><span class="s">бумага $100, 2-4 недели</span></div></div>
+        <div class="ar" style="grid-column:4">{{ arrow }}</div>
+        <div class="nd blue" style="grid-column:5"><span class="ic t-blue">{{ hi.i('flask') }}</span><div><b>Симуляция</b><span class="s">шаг 2 · /real</span><span class="s">своя часть счёта, + 14 дней</span></div></div>
+        <div class="ar" style="grid-column:6">{{ arrow }}</div>
+        <div class="nd yellow" style="grid-column:7"><span class="ic t-yellow">{{ hi.i('dry') }}</span><div><b>Вхолостую</b><span class="s">шаг 3 · настоящие заявки</span><span class="s">не отправляются, 14 дней</span></div></div>
+        <div class="ar" style="grid-column:8">{{ arrow }}</div>
+        <div class="nd green" style="grid-column:9"><span class="ic t-green">{{ hi.i('rocket') }}</span><div><b>Live</b><span class="s">шаг 4 · счёт $100</span><span class="s">только по прямому решению</span></div></div>
+        <div class="br"><svg viewBox="0 0 44 100" preserveAspectRatio="none" fill="none" stroke="#A1A1AA" stroke-width="1.3" vector-effect="non-scaling-stroke">
+          <path vector-effect="non-scaling-stroke" d="M0 50H20M20 12.5V87.5M20 12.5H43M20 37.5H43M20 62.5H43M20 87.5H43"/></svg></div>
+        <div class="stk">
+          <div><span class="ic sm solid t-blue">{{ hi.i('coin') }}</span><span><b>fav</b><span class="s">своя часть ~$20</span></span></div>
+          <div><span class="ic sm solid t-green">{{ hi.i('coin') }}</span><span><b>ml4e_cal</b><span class="s">своя часть ~$30</span></span></div>
+          <div><span class="ic sm solid t-violet">{{ hi.i('coin') }}</span><span><b>ml5_cal</b><span class="s">своя часть ~$35</span></span></div>
+          <div><span class="ic sm solid t-pink">{{ hi.i('plus') }}</span><span><b>новый кошелёк</b><span class="s">часть — из прибыли</span></span></div>
+        </div>
+        <div class="arc bot"><i></i>не прошёл → выключаем или оставляем в Кошельках</div>
+      </div>
+      <div class="legend">
+        <span><i></i>прошёл порог → следующий шаг; кто подтверждает — в разделе 02</span>
+        <span><i></i>не прошёл на любом шаге → назад, на деньги не идёт</span>
+        <span>мало ставок к дате → срок продлеваем, порог не снижаем</span>
+        <span>справа — пример частей счёта (раздел 03)</span>
+      </div>
+    </div>
+  </section>
+
+  <div class="two">
+    <section class="hs">
+      <div class="hs-h"><span class="no">02</span><b>Шаги и пороги</b></div>
+      <div class="hs-sub">Что нужно, чтобы перейти дальше. Порог пишется числом до первой ставки.</div>
+      <div class="card">
+        <table class="kv">
+          <tr><td class="k"><span><span class="ic sm t-pink">{{ hi.i('bulb') }}</span>0 · До ставки</span></td>
+            <td class="v">Карточка: от какого кошелька, что одно меняем, зачем. Правила маркета и прогон на всей истории против настоящих итогов Polymarket — с 01.06.2025, где есть данные кошелька (у нового источника с короткой историей — не меньше 7 дней); ни одного расхождения. Порог шага 1 — заметкой.</td></tr>
+          <tr><td class="k"><span><span class="ic sm t-blue">{{ hi.i('wallet') }}</span>1 · Кошельки</span></td>
+            <td class="v">≥ N закрытых ставок (сколько успеет за 2-4 недели, не меньше 40), ≥ 14 дней, доходность ≥ +5% с комиссией, шанс удачи ≤ 5%. Вариант другого кошелька — больше «родителя» в $ на тех же днях.</td></tr>
+          <tr><td class="k"><span><span class="ic sm t-blue">{{ hi.i('flask') }}</span>2 · Симуляция</span></td>
+            <td class="v">Прогон ставок шага 1 повторяет ≥ 95% настоящих ставок, затем 14 дней вперёд. В плюсе на своей части, ниже бумаги не больше 3 п.п., ни разу не упёрся в свою часть и пределы.</td></tr>
+          <tr><td class="k"><span><span class="ic sm t-yellow">{{ hi.i('dry') }}</span>3 · Вхолостую</span></td>
+            <td class="v">14 дней, 0 расхождений: цена и размер заявки совпадают со стаканом в эту секунду, учёт сходится, при остановке биржи не ставим.</td></tr>
+          <tr><td class="k"><span><span class="ic sm t-green">{{ hi.i('rocket') }}</span>4 · Live</span></td>
+            <td class="v">Счёт $100, рядом бумажный двойник, сверка каждый день.</td></tr>
+          <tr><td class="k"><span><span class="ic sm t-red">{{ hi.i('user') }}</span>Кто решает</span></td>
+            <td class="v">0 → 1 — после «давай». 1 → 2 и 2 → 3 — Claude считает в дату порога, пишет итог числами, владелец подтверждает. 3 → 4 — только прямое решение владельца.</td></tr>
+        </table>
+      </div>
+    </section>
+
+    <section class="hs">
+      <div class="hs-h"><span class="no">03</span><b>Счёт $100 и части</b></div>
+      <div class="hs-sub">На бирже счёт один, а учёт — как будто у каждого кошелька свой.</div>
+      <div class="card" style="position:relative">
+        <button type="button" class="copy" id="copy-tree" title="Скопировать">{{ hi.i('copy') }}</button>
+<div class="tree" id="tree">Счёт Polymarket              $100
+├── fav               ~$20   <span class="c"># в ставках до $16 + просадка $3</span>
+├── ml4e_cal          ~$30   <span class="c"># $14 + $15</span>
+├── ml5_cal           ~$35   <span class="c"># $13 + $21</span>
+├── не распределено    $15   <span class="c"># решим при запуске Live</span>
+└── ml5, ml_day       ждут   <span class="c"># нужно ~$50 и ~$45 — из прибыли</span></div>
+        <div class="note"><b>Часть = максимум денег в ставках одновременно + худшая просадка</b> (сколько терял подряд от лучшего момента),
+          вверх до $5 — это меньше нельзя; прошли не все кошельки — каждому можно дать больше, решаем при запуске Live. Кошелёк ставит только из своей части, выигрыш и проигрыш остаются в ней. На старте — только те, чьи части
+          помещаются в $100. Пример — по ставкам 24.10-04.11; кого подключать, решается после шага 3.</div>
+      </div>
+    </section>
+  </div>
+
+  <div class="two">
+    <section class="hs">
+      <div class="hs-h"><span class="no">04</span><b>Как проходит одна ставка</b></div>
+      <div class="hs-sub">Шаги 2, 3 и 4 — одинаково; разница только в том, уходит ли заявка на биржу.</div>
+      <div class="card">
+        <ol class="steps">
+          <li><span class="n">1</span><span><b>Кошелёк решил</b> <span class="m">— город, вариант, цена из стакана в эту секунду.</span></span></li>
+          <li><span class="n">2</span><span><b>Хватает ли его части?</b> <span class="m">Нет — ставка пропущена и считается «пропущено»; у других кошельков не берём.</span></span></li>
+          <li><span class="n">3</span><span><b>Тот же вариант у другого кошелька?</b> <span class="m">Одна общая заявка, доли делятся по средней цене; разница с покупкой «в одиночку» видна отдельно.</span></span></li>
+          <li><span class="n">4</span><span><b>Пределы счёта</b> <span class="m">— ставка ≤ $5, новых за сутки ≤ $100, биржа стоит > 15 мин — не ставим.</span></span></li>
+          <li><span class="n">5</span><span><b>Заявка</b> <span class="m">— Вхолостую подписана, но не отправлена; в Live — отправлена.</span></span></li>
+          <li><span class="n">6</span><span><b>Маркет закрыт и погашен</b> <span class="m">— деньги возвращаются в часть этого кошелька.</span></span></li>
+        </ol>
+      </div>
+    </section>
+
+    <section class="hs">
+      <div class="hs-h"><span class="no">05</span><b>Когда останавливаемся</b></div>
+      <div class="hs-sub">Что проверяем всё время и что останавливает ставки.</div>
+      <div class="card">
+        <ul class="checks">
+          <li class="stop"><span>Убыток счёта за сутки ≥ $40 <span class="m">— пауза</span></span></li>
+          <li class="stop"><span>Счёт меньше $60 <span class="m">— остановка</span></span></li>
+          <li class="stop"><span>Live отстал от бумажного двойника больше чем на $10 <span class="m">— стоп и ищем причину</span></span></li>
+          <li><span>Часть кошелька кончилась <span class="m">— не ставит только он, остальные как обычно</span></span></li>
+          <li><span>Слишком хороший результат на любом шаге <span class="m">— сначала ищем ошибку, потом «прошёл»</span></span></li>
+          <li><span>Перед «прошёл» на шаге 1 <span class="m">— проверка данных и логики решений (deep_check)</span></span></li>
+        </ul>
+      </div>
+    </section>
+  </div>
+
+  <section class="hs">
+    <div class="hs-h"><span class="no">06</span><b>Сроки</b></div>
+    <div class="hs-sub">Сколько недель от первой ставки до Live, если шаг 1 закончился за 2 недели. Длился 4 — всё сдвигается на 2 недели.</div>
+    <div class="card">
+      <div class="gantt">
+        <div class="lb">Шаг 1 · Кошельки<span>2 недели, до 4 если мало ставок</span></div>
+        <div class="tr"><span class="bar" style="left:0;width:22.2%;background:var(--blue)">≥ 14 дней</span><span class="bar ext" style="left:22.2%;width:22.2%">продление</span></div>
+        <div class="lb">Шаг 2 · Симуляция<span>прогон сразу + 14 дней</span></div>
+        <div class="tr"><span class="bar" style="left:22.2%;width:22.2%;background:var(--blue)">14 дней вперёд</span></div>
+        <div class="lb">Шаг 3 · Вхолостую<span>14 дней</span></div>
+        <div class="tr"><span class="bar" style="left:44.4%;width:22.2%;background:var(--yellow)">14 дней</span></div>
+        <div class="lb">Шаг 4 · Live<span>не раньше 6-й недели</span></div>
+        <div class="tr"><span class="bar" style="left:66.7%;width:33.3%;background:linear-gradient(90deg,var(--green),rgba(163,227,154,.35))">настоящие $100 →</span></div>
+        <div class="ax">{% for w in range(9) %}<span>{{ w }} нед</span>{% endfor %}</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="hs">
+    <div class="hs-h"><span class="no">07</span><b>Новый кошелёк — часть из прибыли</b></div>
+    <div class="hs-sub">Пример: счёт вырос, новый кошелёк прошёл шаг 3 и ему нужно $20. Нераспределённое не показано.</div>
+    <div class="card">
+      <div class="split">
+        <div class="lb">До</div>
+        <div class="sbar"><span class="s1" style="flex:30"><b>fav $30</b>нужно $20</span><span class="s2" style="flex:40"><b>ml4e_cal $40</b>нужно $30</span><span class="s3" style="flex:45"><b>ml5_cal $45</b>нужно $35</span></div>
+        <div class="tot">$115</div>
+        <div class="lb">После</div>
+        <div class="sbar"><span class="s1" style="flex:23.33"><b>fav $23.33</b></span><span class="s2" style="flex:33.33"><b>ml4e_cal $33.33</b></span><span class="s3" style="flex:38.33"><b>ml5_cal $38.33</b></span><span class="s4" style="flex:20"><b>новый $20</b></span></div>
+        <div class="tot">$115</div>
+      </div>
+      <ol class="steps" style="margin-top:14px">
+        <li><span class="n">1</span><span><b>Считаем лишнее</b> <span class="m">— у каждого сверх его нужной части: fav $10, ml4e_cal $10, ml5_cal $10.</span></span></li>
+        <li><span class="n">2</span><span><b>Берём поровну</b> <span class="m">— по $6.67 у каждого, вместе $20 новому кошельку.</span></span></li>
+        <li><span class="n">3</span><span><b>Ниже нужной части не опускаем</b> <span class="m">— лишнего не хватает на $20, новый кошелёк ждёт, пока прибыли станет больше.</span></span></li>
+      </ol>
+    </div>
+  </section>
+</div>
+<script>
+(function () {
+  var b = document.getElementById('copy-tree');
+  b.addEventListener('click', function () {
+    try { navigator.clipboard.writeText(document.getElementById('tree').innerText); b.title = 'Скопировано'; } catch (e) {}
+  });
+})();
+</script>
+{% endblock %}

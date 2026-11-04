@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Как работает — weather-lab{% endblock %}
+{% block content %}
+{#
+  04.11 (Alex): «Как работает» — карточка на каждую логику проекта (HOW_PAGES в dashboard.py), по клику — страница с описанием
+  и диаграммами. Вид — тёмная палитра сайта, с образца Alex — устройство страницы (_how_style.html).
+#}
+{% import "_how_icons.html" as hi %}
+{% include "_how_style.html" %}
+<style>
+  .hw .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+  .hw a.hc { display: flex; flex-direction: column; gap: 10px; text-decoration: none; border: 1px solid var(--h-line); border-radius: 16px;
+             padding: 18px; background: var(--h-bg); transition: border-color .15s, box-shadow .15s, transform .15s; }
+  .hw a.hc:hover { border-color: var(--h-acc-line); box-shadow: 0 6px 20px rgba(0, 0, 0, .35); transform: translateY(-1px); }
+  .hw .hc h3 { margin: 4px 0 0; font-size: 16px; font-weight: 600; }
+  .hw .hc p { margin: 0; color: var(--h-muted); font-size: 13px; }
+  .hw .tags { display: flex; flex-wrap: wrap; gap: 6px; }
+  .hw .tags span { font-size: 11px; color: var(--h-muted); background: var(--h-soft); border: 1px solid var(--h-line); border-radius: 6px; padding: 1px 8px; }
+  .hw .hc .ft { margin-top: auto; padding-top: 10px; border-top: 1px solid var(--h-soft); display: flex; justify-content: space-between;
+                font-size: 11.5px; color: var(--h-faint); }
+  .hw .hc .ft b { color: var(--h-acc); font-weight: 500; }
+</style>
+<div class="hw">
+  <div class="file"><span class="fi">{{ hi.i('layers') }}</span><span class="fn">Как работает</span>
+    <span class="pill">Каждая логика — простыми словами и схемой.</span></div>
+  <h1>Как работает</h1>
+  <p class="lead">Описание того, как устроены части проекта: что за чем идёт, какие пороги и кто что решает. Нажми на карточку —
+    откроется страница с подробностями и диаграммами.</p>
+  <div class="grid">
+    {% for p in pages %}
+    <a class="hc" href="/how/{{ p.key }}">
+      <span class="ic t-{{ p.tone }}">{{ hi.i(p.icon) }}</span>
+      <h3>{{ p.title }}</h3>
+      <p>{{ p.desc }}</p>
+      <div class="tags">{% for t in p.tags %}<span>{{ t }}</span>{% endfor %}</div>
+      <div class="ft"><span>обновлено {{ p.updated }}</span><b>открыть →</b></div>
+    </a>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}
