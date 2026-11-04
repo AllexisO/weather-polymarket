@@ -389,6 +389,10 @@ def ensure_schema(conn):
         for col, typ in (("limit_price", "REAL"), ("want_shares", "REAL"), ("queue_ahead", "REAL"),
                          ("condition_id", "TEXT"), ("token_id", "TEXT"), ("placed_at", "TEXT")):
             conn.execute(f"ALTER TABLE paper_trades ADD COLUMN {col} {typ}")
+    if "price_max" not in cols:
+        # 04.11 (полная проверка, Alex «максимально похоже на live»): самая дорогая цена, по которой купили (покупка по нескольким
+        # ценам стакана) — потолок настоящей заявки «Вхолостую» / Live; по средней цене FAK купила бы меньше бумаги
+        conn.execute("ALTER TABLE paper_trades ADD COLUMN price_max REAL")
     if "side" not in cols:
         # 2026-09-26: сторона ставки — 'yes' (по умолчанию) или 'no' (кошельки NO_WALLETS)
         conn.execute("ALTER TABLE paper_trades ADD COLUMN side TEXT DEFAULT 'yes'")
@@ -766,15 +770,15 @@ def place(conn, now, only=None):
                         """
                         INSERT OR IGNORE INTO paper_trades
                         (wallet, city, local_date, snapshot_ts, unit, bucket_lo, bucket_hi, model_p, market_p, price, stake,
-                         status, reason, shares, fee, book_json, side, placed_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         status, reason, shares, fee, book_json, side, placed_at, price_max)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (wallet, city, d["local_date"], d["ts"], b["unit"], b["bucket_lo"], b["bucket_hi"],
                          b[field], b["market_p"], ex["avg"], ex["cost"] if filled else 0.0,
                          "open" if filled else "nofill", reason, ex["shares"] if filled else 0.0,
                          ex["fee"] if filled else 0.0, ex["book"], "no" if no_side else "yes",
                          # 2026-09-27: время покупки — для ленты ставок (/bets)
-                         datetime.now(timezone.utc).isoformat()),
+                         datetime.now(timezone.utc).isoformat(), ex.get("worst") if filled else None),
                     )
                     conn.commit()
                     # 03.11: стакан всех вариантов города при первой за день попытке кошелька (decision_books.py)

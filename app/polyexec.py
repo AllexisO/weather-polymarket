@@ -74,7 +74,8 @@ def simulate_buy(market, token, budget, max_price):
     before = _asks(token)
     time.sleep(LATENCY_S)
     asks = _asks(token)
-    out = {"shares": 0.0, "cost": 0.0, "fee": 0.0, "avg": None,
+    # worst — самая дорогая цена, по которой купили (04.11: потолок настоящей заявки FAK — по ней, а не по средней)
+    out = {"shares": 0.0, "cost": 0.0, "fee": 0.0, "avg": None, "worst": None,
            "min_ask": asks[0][0] if asks else None,
            "book": json.dumps({"before": before[:5], "after": asks[:5]}), "reason": None}
     # Минимальная заявка — min_size долей: если на бюджет выходит меньше
@@ -94,6 +95,7 @@ def simulate_buy(market, token, budget, max_price):
         out["shares"] += take
         out["cost"] += take * price
         out["fee"] += fee_for(take, price, rate, exponent)
+        out["worst"] = price
         left -= take * per_share
     if out["shares"] > 0:
         out["avg"] = out["cost"] / out["shares"]
@@ -104,7 +106,7 @@ def simulate_buy(market, token, budget, max_price):
     elif out["shares"] < min_size:
         out["reason"] = (f"по выгодной цене продавали только {out['shares']:.1f} долей, "
                          f"а минимальная заявка на Polymarket — {min_size:.0f}")
-        out.update(shares=0.0, cost=0.0, fee=0.0, avg=None)
+        out.update(shares=0.0, cost=0.0, fee=0.0, avg=None, worst=None)
     return out
 
 

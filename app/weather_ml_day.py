@@ -363,13 +363,14 @@ def bet(conn, city, day, now, mk, blend, wallet=WALLET, day_max_c=None, hour=Non
         filled = False
     lt = now.astimezone(ZoneInfo(OBS_CITIES[city]["tz"]))
     conn.execute("""INSERT OR IGNORE INTO paper_trades (wallet, city, local_date, snapshot_ts, unit, bucket_lo, bucket_hi,
-        model_p, market_p, price, stake, status, reason, shares, fee, book_json, condition_id, token_id, placed_at, side)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        model_p, market_p, price, stake, status, reason, shares, fee, book_json, condition_id, token_id, placed_at, side, price_max)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                  (wallet, city, day, now.isoformat(), OBS_CITIES[city]["unit"], b["lo"], b["hi"], q, price,
                   f["avg"] if filled else None, f["cost"] if filled else 0.0, "open" if filled else "nofill",
                   f"смесь {q * 100:.0f}% против цены {price * 100:.0f}¢ ({side}), {lt:%H:%M} местного"
                   + ("" if filled else f"; не исполнилось: {f['reason']}"),
-                  f["shares"], f["fee"], f["book"], b["m"].get("conditionId"), tok, now.isoformat(), side))
+                  f["shares"], f["fee"], f["book"], b["m"].get("conditionId"), tok, now.isoformat(), side,
+                  f.get("worst") if filled else None))   # 04.11: потолок настоящей заявки (weather_real_dry.build)
     conn.commit()
     decision_books.record(conn, wallet, city, day, b["lo"], side)   # 03.11: стакан всех вариантов города
     return (f"купили {side} {b['label']} {f['shares']:.1f} долей по {f['avg'] * 100:.1f}¢ (смесь {q * 100:.0f}%)" if filled
@@ -382,6 +383,8 @@ def run(dry=False):
     conn = sqlite3.connect(DB_PATH, timeout=60)
     conn.row_factory = sqlite3.Row   # ml.row_for → weather_multimodel.fit читает поля по имени (как в weather_ml_fast)
     conn.execute(PREDS_SQL)
+    from weather_paper import ensure_schema
+    ensure_schema(conn)   # 04.11: колонка price_max — до первой записи
     conn.commit()
     if not all((ML_DIR / f"day_s{s}" / "features.json").exists() for s in SEEDS):
         print("дневная модель ещё не обучена — запуск с --train")

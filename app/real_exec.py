@@ -116,7 +116,8 @@ def submit(c, src, r):
             from py_clob_client.client import ClobClient
             _client = ClobClient(rd.CLOB, key=Account.create().key.hex(), chain_id=137)   # пустой ключ — только подпись
         try:
-            out = rd.build(_client, {**dict(r), "side": r["side"] or "yes"})
+            # 04.11: потолок — самая дорогая цена бумажной покупки, и стакан сейчас должен дать столько же долей (check_fill)
+            out = rd.build(_client, {**dict(r), "side": r["side"] or "yes"}, check_fill=True)
         except Exception as e:
             out["problem"] = f"{type(e).__name__}: {e}"[:200]
     now = _now()

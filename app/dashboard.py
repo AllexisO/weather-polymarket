@@ -3461,7 +3461,8 @@ def _cron_human(sched):
     return ", ".join(f"{int(x):02d}:{int(mi):02d}" for x in h.split(",")) + days
 
 
-def _log_tail(log, n=200):
+def _job_log_tail(log, n=200):
+    # 04.11 (полная проверка): было вторым _log_tail и подменяло первый — у «Событий» хвост лога приходил кортежем
     if not log:
         return None, None
     p = LOGS / log
@@ -3510,7 +3511,7 @@ def jobs_list(conn):
         j["kind"] = "job"
         by_key[j["key"]] = j
     for key, label, script, sched, max_age, log in SERVICE_SCRIPTS:
-        _t, mt = _log_tail(log, 1)
+        _t, mt = _job_log_tail(log, 1)
         j = {"key": key, "label": label, "script": script, "sched": sched, "kind": "service", "ok_ago": _ago(mt, now) if mt else None,
              "ok_when": _when(mt, now.astimezone(VIEWER_TZ)) if mt else None, "runs": None, "fails": None, "err": None,
              "cron": [_cron_human(s) for s, f, _a, _l in cron if f == script]}
@@ -3764,7 +3765,7 @@ def job_detail(conn, key):
     alias = [f for f, k in CRON_ALIAS.items() if k == key]
     if alias:   # показать настоящие строки крона обёртки
         out["cron_raw"] = [f"{s}  {f} {a}".strip() for s, f, a, _l in _cron_lines() if f in alias]
-    tail, mt = _log_tail(log, 250)
+    tail, mt = _job_log_tail(log, 250)
     out["tail"], out["log_when"] = tail, (_when(mt, vt) if mt else None)
     if j["kind"] == "job" and table_exists(conn, "job_log"):
         cols = [r[1] for r in conn.execute("PRAGMA table_info(job_log)")]
@@ -3954,7 +3955,7 @@ def job_log_tail(key: str):
     log = next((x[5] for x in list(JOBS) + list(SERVICE_SCRIPTS) if x[0] == key), None)
     if log is None:
         raise HTTPException(404, "нет такого скрипта")
-    tail, mt = _log_tail(log, 250)
+    tail, mt = _job_log_tail(log, 250)
     return {"tail": tail, "when": _when(mt, datetime.now(VIEWER_TZ)) + mt.astimezone(VIEWER_TZ).strftime(":%S") if mt else None}
 
 

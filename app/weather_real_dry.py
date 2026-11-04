@@ -48,8 +48,11 @@ def find_token(city, local_date, lo, hi, side):
     return None, None
 
 
-def build(client, r):
-    """→ dict для real_dry. problem — первая причина, по которой настоящая заявка не ушла бы."""
+def build(client, r, check_fill=False):
+    """→ dict для real_dry. problem — первая причина, по которой настоящая заявка не ушла бы.
+    04.11 (Alex «максимально похоже на live»): потолок цены — самая дорогая цена бумажной покупки (price_max), не средняя: бумага
+    покупает по нескольким ценам стакана, и FAK с потолком по средней купила бы меньше. check_fill (real_exec — заявка в момент
+    решения): по стакану СЕЙЧАС FAK с этим потолком и суммой должна купить столько же долей, сколько бумага; меньше 99% — problem."""
     side = r["side"] or "yes"
     out = {"token_id": None, "tick": None, "neg_risk": None, "min_size": None, "limit_price": None, "amount": None,
            "maker_amount": None, "taker_amount": None, "best_ask_now": None, "problem": None}
@@ -69,8 +72,9 @@ def build(client, r):
     out.update(tick=float(tick), neg_risk=int(bool(nr)), min_size=float(book.min_order_size or 0))
     asks = sorted(float(a.price) for a in (book.asks or []))
     out["best_ask_now"] = asks[0] if asks else None
-    # потолок цены — цена бумажной покупки, вверх до шага (настоящая заявка FAK купит не дороже)
-    lim = float((Decimal(str(r["price"])) / Decimal(tick)).to_integral_value(ROUND_UP) * Decimal(tick))
+    # потолок цены — самая дорогая цена бумажной покупки (у старых ставок её нет — средняя), вверх до шага
+    top = r.get("price_max") or r["price"]
+    lim = float((Decimal(str(round(top, 6))) / Decimal(tick)).to_integral_value(ROUND_UP) * Decimal(tick))
     amount = round(r["stake"], 2)
     out.update(limit_price=lim, amount=amount)
     if not float(tick) <= lim <= 1 - float(tick):
@@ -79,6 +83,17 @@ def build(client, r):
     if r["shares"] < out["min_size"]:
         out["problem"] = f"долей {r['shares']:.2f} меньше минимума стакана {out['min_size']:g}"
         return out
+    if check_fill:
+        left, got = amount, 0.0
+        for p, s in sorted((float(a.price), float(a.size)) for a in (book.asks or [])):
+            if p > lim + 1e-9 or left <= 1e-9:
+                break
+            take = min(s, left / p)
+            got, left = got + take, left - take * p
+        out["fill_shares"] = got
+        if got < 0.99 * r["shares"]:
+            out["problem"] = f"по стакану сейчас купила бы {got:.2f} из {r['shares']:.2f} долей (не дороже {lim:g})"
+            return out
     o = client.create_market_order(MarketOrderArgs(token_id=tok, amount=amount, side=BUY, price=lim, order_type=OrderType.FAK),
                                    PartialCreateOrderOptions(tick_size=tick, neg_risk=nr))
     d = o.dict()
