@@ -1336,20 +1336,32 @@ def llm_page_data(conn, key, city, day):
     for k in (k for k in LLM_BET_WALLETS if k not in RETIRED):
         rows = conn.execute("SELECT * FROM paper_trades WHERE wallet = ? AND status != 'skip'", (k,)).fetchall() if table_exists(conn, "paper_trades") else []
         c = _wallet_card(WALLET_INFO[k][1], [r for r in rows if r["status"] != "nofill"], nofill=0, skipped=0)
-        sp = conn.execute("SELECT COUNT(*), COALESCE(SUM(cost), 0), COALESCE(SUM(CASE WHEN ts_utc >= ? THEN cost END), 0) FROM llm_hour_preds WHERE wallet = ?",
-                          (month, k)).fetchone() if have else (0, 0.0, 0.0)
-        c.update(key=k, model=LLM_MODEL_NAME[k], calls=sp[0], spent=sp[1], spent_month=sp[2], limit=LLM_LIMIT[k],
+        sp = conn.execute("""SELECT COUNT(*), COALESCE(SUM(cost), 0), COALESCE(SUM(CASE WHEN ts_utc >= ? THEN cost END), 0),
+                                    COUNT(CASE WHEN ts_utc >= ? THEN 1 END) FROM llm_hour_preds WHERE wallet = ?""",
+                          (month, month, k)).fetchone() if have else (0, 0.0, 0.0, 0)
+        c.update(key=k, model=LLM_MODEL_NAME[k], calls=sp[0], spent=sp[1], spent_month=sp[2], calls_month=sp[3], limit=LLM_LIMIT[k],
                  free=c["balance"] - c["in_play"], per_call=sp[1] / sp[0] if sp[0] else None)
-        # 06.10: итог до и после обучения v2 — по времени ставки
-        for part, sel in (("before", lambda r: (r["placed_at"] or "") < LLM_V2_FROM), ("after", lambda r: (r["placed_at"] or "") >= LLM_V2_FROM)):
-            st = [r for r in rows if r["status"] in ("won", "lost", "void") and sel(r)]
-            pnl, cost = sum(_pnl(r) for r in st), sum(r["stake"] + _fee(r) for r in st)
-            c[part] = {"n": len(st), "won": sum(r["status"] == "won" for r in st), "pnl": pnl, "roi": 100 * pnl / cost if cost else None,
-                       "open": sum(1 for r in rows if r["status"] == "open" and sel(r))}
         spend_all += sp[1]
         spend_month += sp[2]
         cards.append(c)
-    out = {"v2_from": LLM_V2_FROM, "cards": cards, "spend": {"all": spend_all, "month": spend_month, "limit_month": sum(v for k, v in LLM_LIMIT.items() if k not in RETIRED), "key_limit": LLM_KEY_LIMIT},
+    # 04.11 (Alex): блок «Потрачено на LLM» на всю ширину под заголовком — месяц и прогноз до конца месяца, остаток ключа
+    # OpenRouter, по платным кошелькам; кошельки через Antigravity — подпиской, без оплаты за запрос
+    import calendar
+    from services_info import SUBSCRIPTIONS
+    today = datetime.now(timezone.utc)
+    n_days = calendar.monthrange(today.year, today.month)[1]
+    limit_month = sum(v for k, v in LLM_LIMIT.items() if k not in RETIRED)
+    per_day = spend_month / today.day
+    paid = [c for c in cards if c["limit"] > 0]
+    mixes = ("llm_mix", "llm_mix5", "llm_cal", "llm_agy_cal")   # шансы из чужого ответа (+ рынок / LightGBM / v5) — своих писем нет
+    agy = [c for c in cards if c["limit"] == 0 and c["calls"] and c["key"] not in mixes]
+    spend = {"all": spend_all, "month": spend_month, "limit_month": limit_month, "key_limit": LLM_KEY_LIMIT,
+             "key_left": LLM_KEY_LIMIT - spend_all, "per_day": per_day, "forecast": per_day * n_days,
+             "month_name": ("январе", "феврале", "марте", "апреле", "мае", "июне", "июле", "августе", "сентябре", "октябре", "ноябре", "декабре")[today.month - 1],
+             "paid": paid, "agy_n": len(agy), "agy_calls": sum(c["calls_month"] for c in agy), "agy_ends": next((f"{x['ends'][8:10]}.{x['ends'][5:7]}.{x['ends'][:4]}" for x in SUBSCRIPTIONS
+                                                                                                if x["name"].startswith("Antigravity") and x.get("ends")), None),
+             "mix": [c["key"] for c in cards if c["key"] in mixes]}
+    out = {"v2_from": LLM_V2_FROM, "cards": cards, "spend": spend,
            "key": key, "city": city, "cities": [(c, CITY_RU.get(c, c), _llm_clock(c)) for c in LLM_CITIES], "model": LLM_MODEL_NAME[key]}
     if not have:
         return out

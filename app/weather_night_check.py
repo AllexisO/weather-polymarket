@@ -121,8 +121,11 @@ def check_cron(c, now):
     ps = DATA / "night" / "docker_ps.txt"
     if ps.exists():
         rows = [l.split("|") for l in ps.read_text().splitlines() if l.count("|") >= 3]
-        stuck = [r[0] for r in rows if "collector" in r[0] and r[1] == "running"
-                 and any(u in r[2] for u in ("hour", "day"))]
+        # 04.11: скрипты, которые по крону живут час (запуск в :55 / :59, конец в :55:10 / :00:05 следующего часа), в 07:00 и 13:00
+        # бывают «About an hour» — это не зависание (ложная тревога 04.11: crypto_speed_rec с 11:59 до 13:00:05); им — только «N hours» / дни
+        long_lived = ("weather_book_rec.py", "weather_fast_dry.py", "crypto_speed_rec.py")
+        stuck = [r[0] + (f" ({r[4].strip(chr(34)).split()[-1]})" if len(r) > 4 else "") for r in rows if "collector" in r[0] and r[1] == "running"
+                 and (any(u in r[2] for u in ("hours", "day")) or ("hour" in r[2] and not (len(r) > 4 and any(x in r[4] for x in long_lived))))]
         add("Крон", not stuck, "Нет зависших запусков", ", ".join(stuck) or "зависших нет",
             "остановить: sudo docker stop <имя> (сторож базы делает это сам, если база занята)" if stuck else "")
         for name in ("weather-lab-copier", "weather-lab-dashboard"):

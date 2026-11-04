@@ -63,6 +63,30 @@
   .tabs a.on { border-color: var(--bk-accent); color: var(--bk-text); box-shadow: inset 0 0 0 1px var(--bk-accent); }
   .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)); gap: 14px; }
   .big { font-size: 28px; font-weight: 600; display: block; margin: 4px 0; }
+  /* 04.11 (Alex): карточка LLM — «Заработано» отдельным блоком, «закрыто / угадано» всегда внизу карточки */
+  a.pane.lc { display: flex; flex-direction: column; }
+  .split { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; overflow-wrap: normal; }
+  .split > div { display: flex; flex-direction: column; gap: 1px; }
+  .split span { font-size: 12.5px; color: var(--bk-muted); } .split b { font-size: 16px; font-weight: 600; }
+  .earn { display: flex; flex-direction: column; gap: 2px; margin-top: 14px; padding: 12px 14px; background: var(--bk-raise); border-radius: 12px; overflow-wrap: normal; }
+  .earn span { font-size: 12.5px; color: var(--bk-muted); }
+  .earn b { font-size: 22px; font-weight: 600; line-height: 1.2; white-space: nowrap; }
+  .earn em { font-style: normal; font-size: 12.5px; color: var(--bk-muted); }
+  .lfoot { margin-top: auto; padding-top: 14px; font-size: 13px; color: var(--bk-muted); overflow-wrap: normal; }
+  .lfoot b { color: var(--bk-text); font-weight: 600; }
+  /* 04.11: блок «Потрачено на LLM» на всю ширину */
+  .spend { display: grid; grid-template-columns: 1.25fr 1fr 1.25fr; background: var(--bk-card); border: 1px solid var(--bk-line); border-radius: 18px; overflow: hidden; }
+  .spend > div { padding: 18px 22px; min-width: 0; }
+  .spend > div + div { border-left: 1px solid var(--bk-line); }
+  .sp-k { font-size: 12.5px; font-weight: 600; color: var(--bk-muted); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 6px; }
+  .sp-big { font-size: 32px; font-weight: 700; letter-spacing: -.02em; line-height: 1.1; }
+  .sp-mid { font-size: 24px; font-weight: 600; line-height: 1.15; }
+  .sp-big small, .sp-mid small { font-size: 14px; font-weight: 500; color: var(--bk-muted); letter-spacing: 0; }
+  .sp-s { font-size: 13px; color: var(--bk-muted); margin-top: 6px; } .sp-s b { color: var(--bk-text); font-weight: 600; }
+  .sp-row { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; font-size: 14px; margin-top: 8px; }
+  .sp-row i { font-style: normal; font-size: 12.5px; color: var(--bk-faint); margin-left: 4px; }
+  .sp-row + .sp-s { margin-top: 1px; }
+  @media (max-width: 860px) { .spend { grid-template-columns: 1fr; } .spend > div + div { border-left: 0; border-top: 1px solid var(--bk-line); } }
   .bar { height: 6px; background: var(--bk-raise); border-radius: 3px; overflow: hidden; margin-top: 8px; }
   .bar i { display: block; height: 100%; background: var(--bk-accent); }
   pre.letter { white-space: pre-wrap; word-break: break-word; background: var(--bk-raise); border-radius: 12px; padding: 14px 16px; font-size: 13px;
@@ -78,10 +102,6 @@
   .steps div { background: var(--bk-raise); border-radius: 12px; padding: 12px 14px; font-size: 14px; }
   .steps b { display: block; margin-bottom: 4px; }
   .when { font-size: 12px; color: var(--bk-faint); margin-top: 2px; white-space: nowrap; }
-  /* 06.10: итог до и после обучения v2 на карточке LLM */
-  .v2s { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
-  .v2s > div { background: var(--bk-raise); border-radius: 10px; padding: 8px 10px; display: flex; flex-direction: column; gap: 2px; }
-  .v2s span { font-size: 12px; color: var(--bk-muted); } .v2s b { font-size: 16px; font-weight: 600; } .v2s i { font-style: normal; font-size: 12px; color: var(--bk-faint); }
 </style>
 <div class="bk">
   <div class="top">
@@ -91,34 +111,59 @@
       Учатся на своих ошибках: в каждом запросе видят свои прошлые прогнозы рядом с настоящей температурой. Решение — 18.10.</p>
     <p><b>Обучение v2 с {{ v2_from[8:10] }}.{{ v2_from[5:7] }} {{ v2_from[11:16] }} UTC:</b> в письме ещё прогноз LightGBM, её систематические ошибки по всей истории,
       итоги её ставок в долларах и как часто сбываются её шансы; перед ставкой код поправляет шансы по этой проверке
-      (DeepSeek на «80%» угадывал 36%). На карточках — итог до и после.</p>
+      (DeepSeek на «80%» угадывал 36%).</p>
   </div>
+
+
+  {# 04.11 (Alex): «Потрачено на LLM» — сразу под заголовком, на всю ширину: месяц и прогноз, остаток ключа OpenRouter,
+     платные кошельки, кошельки через Antigravity (подписка) — данные spend в llm_page_data() #}
+  {% set sp = spend %}
+  <section class="sec spend">
+    <div class="sp-main">
+      <div class="sp-k">Потрачено в {{ sp.month_name }}</div>
+      <div class="sp-big num">${{ '%.2f' | format(sp.month) }} <small>из ${{ '%.2f' | format(sp.limit_month) }}</small></div>
+      <div class="bar"><i style="width: {{ [100, 100 * sp.month / sp.limit_month] | min if sp.limit_month else 0 }}%;"></i></div>
+      <div class="sp-s">~${{ '%.2f' | format(sp.per_day) }} в день → к концу месяца
+        <b class="{{ 'neg' if sp.forecast > sp.limit_month else '' }}">~${{ '%.2f' | format(sp.forecast) }}</b>{% if sp.forecast > sp.limit_month %} — упрётся в лимит, лишние часы пропустит{% endif %}</div>
+    </div>
+    <div class="sp-cell">
+      <div class="sp-k">Ключ OpenRouter</div>
+      <div class="sp-mid num">${{ '%.2f' | format(sp.key_left) }} <small>осталось</small></div>
+      <div class="bar"><i style="width: {{ [100, 100 * sp.all / sp.key_limit] | min }}%;"></i></div>
+      <div class="sp-s">потрачено ${{ '%.2f' | format(sp.all) }} из ${{ '%.2f' | format(sp.key_limit) }} внесённых</div>
+    </div>
+    <div class="sp-cell">
+      <div class="sp-k">По кошелькам в этом месяце</div>
+      {% for c in sp.paid %}
+      <div class="sp-row"><span>{{ c.model }} <i>{{ c.key }}</i></span><b class="num">${{ '%.2f' | format(c.spent_month) }}</b></div>
+      <div class="sp-s">{{ c.calls_month }} запросов{% if c.calls_month %} · ~${{ '%.3f' | format(c.spent_month / c.calls_month) }} за запрос{% endif %} · лимит ${{ '%.2f' | format(c.limit) }}</div>
+      {% endfor %}
+      {% if sp.agy_n %}
+      <div class="sp-row"><span>Antigravity <i>{{ sp.agy_n }} кошельков</i></span><b class="num pos">$0</b></div>
+      <div class="sp-s">{{ sp.agy_calls }} запросов · подписка{% if sp.agy_ends %} до {{ sp.agy_ends }}{% endif %}</div>
+      {% endif %}
+      {% if sp.mix %}<div class="sp-s" style="margin-top:6px">Смеси ({{ sp.mix | join(', ') }}) своих запросов не делают.</div>{% endif %}
+    </div>
+  </section>
 
   <!-- деньги и расход -->
   <section class="sec">
     <div class="grid2">
       {% for c in cards %}
-      <a class="pane" href="/llm?w={{ 'llm_gem' if c.key in ('llm_mix', 'llm_cal') else c.key }}&city={{ city }}" style="text-decoration: none; color: inherit;{% if c.key == key %} box-shadow: inset 0 0 0 1px var(--bk-accent);{% endif %}">
+      <a class="pane lc" href="/llm?w={{ 'llm_gem' if c.key in ('llm_mix', 'llm_cal') else c.key }}&city={{ city }}" style="text-decoration: none; color: inherit;{% if c.key == key %} box-shadow: inset 0 0 0 1px var(--bk-accent);{% endif %}">
         <h3 style="margin: 0;">{{ c.model }} <span class="muted" style="font-size: 13px; font-weight: 400;">{{ c.key }}</span></h3>
-        <span class="big num">${{ '%.2f' | format(c.free) }}</span>
-        <div class="muted" style="font-size: 13.5px;">свободно из $100 · в игре ${{ '%.2f' | format(c.in_play) }} ({{ c.open }} ставок)</div>
+        {# 04.11 (Alex): сколько сейчас из стартовых $100 (доступно + на ставках по цене покупки), отдельно — доступно и на ставках #}
+        <span class="big num">${{ '%.2f' | format(c.free + c.in_play) }}</span>
+        <div class="muted" style="font-size: 13px;">сейчас из стартовых $100</div>
+        <div class="split"><div><span>Доступно</span><b class="num">${{ '%.2f' | format(c.free) }}</b></div>
+          <div><span>На ставках{% if c.open %} ({{ c.open }}){% endif %}</span><b class="num">${{ '%.2f' | format(c.in_play) }}</b></div></div>
         {% if c.key == 'llm_mix' %}<div class="muted" style="font-size: 13px; margin-top: 4px;">поровну шансы Gemini и LightGBM v3, с 06.10; своих запросов нет — $0</div>{% endif %}
         {% if c.key == 'llm_cal' %}<div class="muted" style="font-size: 13px; margin-top: 4px;">Gemini 35% + рынок 65%, перевес от 10 п.п., с 08.10; своих запросов нет — $0</div>{% endif %}
-        <div style="margin-top: 8px; font-size: 14px;">Закрыто ставок: <b>{{ c.n }}</b>{% if c.n %}, угадано {{ c.won }} · итог <b class="{{ tone(c.pnl) }}">{{ money(c.pnl) }}</b>{% if c.roi is not none %} ({{ '%+.0f' | format(c.roi) }}%){% endif %}{% endif %}</div>
-        {% if c.after %}<div class="v2s">{% for part, name in [('before', 'до обучения v2'), ('after', 'после')] %}{% set x = c[part] %}
-          <div><span>{{ name }}</span><b class="num {{ tone(x.pnl) if x.n }}">{{ money(x.pnl) if x.n else '—' }}</b>
-            <i>{% if x.n %}{{ x.n }} ставок, угадано {{ x.won }}{% if x.roi is not none %} · {{ '%+.0f' | format(x.roi) }}%{% endif %}{% else %}пока нет закрытых{% endif %}{% if x.open %} · ждут {{ x.open }}{% endif %}</i></div>{% endfor %}</div>{% endif %}
+        {# 04.11 (Alex): «сколько заработано» — итог закрытых ставок с комиссией, отдельной строкой на каждой карточке #}
+        <div class="earn"><span>Заработано</span><b class="num {{ tone(c.pnl) if c.n }}">{{ money(c.pnl) if c.n else '$0.00' }}</b></div>
+        <div class="lfoot">{% if c.n %}Закрыто ставок <b>{{ c.n }}</b> · угадано <b>{{ c.won }}</b>{% else %}Закрытых ставок пока нет{% endif %}</div>
       </a>
       {% endfor %}
-      <div class="pane">
-        <h3 style="margin: 0;">Потрачено на LLM</h3>
-        <span class="big num">${{ '%.2f' | format(spend.month) }}</span>
-        <div class="muted" style="font-size: 13.5px;">в этом месяце из ${{ '%.2f' | format(spend.limit_month) }} (лимит в коде)</div>
-        <div class="bar"><i style="width: {{ [100, 100 * spend.month / spend.limit_month] | min }}%;"></i></div>
-        <div style="margin-top: 10px; font-size: 13.5px;">
-          {% for c in cards if c.key not in ('llm_mix', 'llm_cal') %}{{ c.model }}: ${{ '%.2f' | format(c.spent_month) }} из ${{ '%.2f' | format(c.limit) }} · {{ c.calls }} запросов{% if c.per_call %}, ~${{ '%.4f' | format(c.per_call) }} за запрос{% endif %}<br>{% endfor %}
-          <span class="muted">Всего за всё время ${{ '%.2f' | format(spend.all) }} из ${{ '%.0f' | format(spend.key_limit) }} на ключе OpenRouter.</span></div>
-      </div>
     </div>
   </section>
 

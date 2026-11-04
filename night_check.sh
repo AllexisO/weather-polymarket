@@ -6,6 +6,6 @@ LAB=/mnt/applications/docker/stacks/weather-lab
 cd "$LAB" || exit 1
 mkdir -p data/night
 crontab -l > data/night/crontab.txt 2>/dev/null
-sudo docker ps -a --filter "name=weather-lab" --format '{{.Names}}|{{.State}}|{{.RunningFor}}|{{.Status}}' > data/night/docker_ps.txt 2>/dev/null
+sudo docker ps -a --no-trunc --filter "name=weather-lab" --format '{{.Names}}|{{.State}}|{{.RunningFor}}|{{.Status}}|{{.Command}}' > data/night/docker_ps.txt 2>/dev/null
 # режим: morning (07:00) / midday (13:00) / evening (23:30, по умолчанию)
 exec sudo docker compose run --rm -e JOB_TIMEOUT=900 collector weather_night_check.py "${1:-evening}"
