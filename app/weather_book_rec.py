@@ -14,6 +14,10 @@ POST /books CLOB пачками по 50; на каждый вариант — д
 Где: data/booklog/books_ГГГГ-ММ.sqlite3 (месяц по UTC; в начале каждого файла — полный стакан всех вариантов, файл читается сам
 по себе). Не рабочая база (иначе гигабайты в ней и «database is locked» у крона) и не ночная копия (решение Alex 03.11: диск
 копий personal_data с ошибками записи; потом — новый диск). Оценка 03.11: ~600 МБ в день, ~18 ГБ в месяц до сжатия ZFS.
+ЧАСТО В МИНУТЫ РЕШЕНИЙ (05.11, Alex «да»: прогон правил по стаканам replay_books.py повторял настоящие покупки только в 12 из 15 —
+в 08:00 по местному цены меняются за секунды, минутной записи мало): между минутами — раз в HOT_S секунд стаканы вариантов тех
+городов, где сейчас окно решения (HOT_WINDOWS по местному: утренние кошельки и «Вхолостую» 07:59-08:09, ml_day в 10/12/14 ч :04-:09).
+Пишутся в ту же books (ts — секунда, только изменившиеся), проход — строка в hot_rounds.
 Крон: каждый час в :55, живёт до :55:10 следующего часа; следующий запуск ждёт, пока предыдущий допишет минуту :55
 (блокирующая блокировка до 3 мин) — разрыва на стыке часов нет.
 Запуск: docker compose run --rm -e JOB_TIMEOUT=3900 collector weather_book_rec.py
@@ -42,6 +46,8 @@ BATCH = 50
 REFRESH_S = 600
 GONE_AFTER = 3   # стакана нет 3 минуты подряд — маркет закрылся (день в городе кончился), убираем до обновления списка
 END_MIN, END_SEC = 55, 10
+HOT_S = 5
+HOT_WINDOWS = ((7, 59, 60), (8, 0, 10), (10, 4, 10), (12, 4, 10), (14, 4, 10))   # (час, с минуты, до минуты) по местному
 
 
 def schema(db):
@@ -53,6 +59,7 @@ def schema(db):
         PRIMARY KEY (token, ts)) WITHOUT ROWID;
     CREATE TABLE IF NOT EXISTS rounds (ts INTEGER PRIMARY KEY, n_tokens INTEGER, n_got INTEGER, n_changed INTEGER, secs REAL);
     CREATE TABLE IF NOT EXISTS missing (ts INTEGER, token INTEGER, PRIMARY KEY (ts, token)) WITHOUT ROWID;
+    CREATE TABLE IF NOT EXISTS hot_rounds (ts INTEGER PRIMARY KEY, n_tokens INTEGER, n_got INTEGER, n_changed INTEGER, cities TEXT);
     """)
 
 
@@ -122,6 +129,45 @@ def token_idx(db, cache, tok, meta):
     return cache[tok]
 
 
+def hot_tokens(mk, now):
+    """Варианты городов, где сейчас окно решения (по местному времени города, только сегодняшний день маркета)."""
+    from zoneinfo import ZoneInfo
+    hot = {}
+    for tok, (_cid, city, d, _lo, _hi) in mk.items():
+        lt = now.astimezone(ZoneInfo(CITIES[city]["tz"]))
+        if lt.date().isoformat() == d and any(lt.hour == h and a <= lt.minute < b for h, a, b in HOT_WINDOWS):
+            hot.setdefault(city, []).append(tok)
+    return hot
+
+
+def hot_round(db, idx, last, mk, hot):
+    """Один частый проход по «горячим» вариантам: пишем только изменившиеся стаканы, ts — секунда."""
+    toks = sorted(t for ts_ in hot.values() for t in ts_)
+    ts = int(time.time())
+    got = fetch(toks)
+    rows = []
+    for tok in toks:
+        b = got.get(tok)
+        if b is None:
+            continue
+        a, bd = levels(b.get("asks"), False), levels(b.get("bids"), True)
+        if last.get(tok) == (a, bd):
+            continue
+        last[tok] = (a, bd)
+        bm = b.get("timestamp")
+        rows.append((token_idx(db, idx, tok, mk[tok]), ts, int(bm) if bm else None, a, bd))
+    try:
+        db.executemany("INSERT OR IGNORE INTO books VALUES (?, ?, ?, ?, ?)", rows)
+        db.execute("INSERT OR REPLACE INTO hot_rounds VALUES (?, ?, ?, ?, ?)", (ts, len(toks), len(got), len(rows), ",".join(sorted(hot))))
+        db.commit()
+    except sqlite3.OperationalError as e:
+        db.rollback()
+        for tok in toks:
+            last.pop(tok, None)
+        print(f"частая запись {ts} не записана — {e}", flush=True)
+    return len(rows)
+
+
 def lock():
     """Ждём, пока предыдущий запуск допишет свою последнюю минуту (до 3 мин); дольше — значит завис, выходим."""
     fh = open("/data/db/.lock_book_rec", "w")
@@ -149,12 +195,20 @@ def run():
     idx, last = {}, {}
     mk, t_mk, gone = {}, 0.0, {}
     alive = {}
-    stats = {"rounds": 0, "rows": 0, "missing": 0}
+    stats = {"rounds": 0, "rows": 0, "missing": 0, "hot": 0, "hot_rows": 0}
     print(f"{JOB}: запись до {end:%H:%M:%S} UTC → {BOOK_DIR}/books_{month}.sqlite3", flush=True)
     while True:
         nxt = (time.time() // 60 + 1) * 60
         if nxt > end.timestamp():
             break
+        # до следующей минуты — частые проходы по городам в окне решения (не ближе HOT_S к началу минуты)
+        while nxt - time.time() > HOT_S:
+            t_h = time.time()
+            hot = hot_tokens(mk, datetime.now(timezone.utc)) if mk else {}
+            if hot:
+                stats["hot_rows"] += hot_round(db, idx, last, mk, hot)
+                stats["hot"] += 1
+            time.sleep(max(0.0, min(HOT_S - (time.time() - t_h), nxt - time.time() - HOT_S)))
         time.sleep(max(0.0, nxt - time.time()))
         t0 = time.time()
         ts = int(nxt)
@@ -211,7 +265,8 @@ def run():
     db.close()
     alive["t"] = 0
     mark_alive(JOB, alive)
-    print(f"{JOB}: минут {stats['rounds']}, строк {stats['rows']}, не получено {stats['missing']}", flush=True)
+    print(f"{JOB}: минут {stats['rounds']}, строк {stats['rows']}, не получено {stats['missing']}; частых проходов {stats['hot']}, "
+          f"строк {stats['hot_rows']}", flush=True)
     fh.close()
 
 

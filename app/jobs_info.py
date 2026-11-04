@@ -45,7 +45,7 @@ JOBS = [
     # 02.11: запись для проверки скорости на часовых BTC (без ставок, отдельная база data/research/crypto/live.sqlite3), 3 дня — разбор заметкой
     ("crypto_speed_rec", "Запись скорости BTC — поток Binance и стакан Polymarket с мс (часовые «вверх/вниз», без ставок)", "crypto_speed_rec.py", "каждый час в :59, живёт час", 75, "crypto_speed_rec.log"),
     # 03.11: стаканы всех погодных вариантов каждую минуту (без ставок, отдельные файлы data/booklog/books_ГГГГ-ММ.sqlite3)
-    ("weather_book_rec", "Стаканы всех вариантов 47 городов каждую минуту — 30 уровней, только изменившиеся (без ставок, data/booklog)", "weather_book_rec.py", "каждый час с :55, живёт час", 25, "weather_book_rec.log"),
+    ("weather_book_rec", "Стаканы всех вариантов 47 городов каждую минуту, в минуты решений — раз в 5 с; 30 уровней, только изменившиеся (без ставок, data/booklog)", "weather_book_rec.py", "каждый час с :55, живёт час", 25, "weather_book_rec.log"),
     # weather_obs_wethr — выключен 31.10 (заметка #59): подписка wethr.net отменена 15.10 (порог PRD §9 п.8 не прошёл), ключ до 01.11
     ("weather_obs_atis", "Живые замеры — ATIS (кошелёк obs_atis, atis.info, 11 городов США; до проверки — вхолостую)", "weather_obs_atis.py", "каждый час в :48, 15 мин", 75, "weather_obs_atis.log"),
     # weather_mm_ml, weather_mm_ws — выключены 27.10 (решение Alex): бот-мейкер целиком на «Не прошли»; weather_mm_settle снят 30.10 (заметка #122):
