@@ -94,7 +94,10 @@ def try_copy(conn, w, t, now, source="опрос"):
         print(f"{city} {d}: ошибка стакана — {e}", flush=True)
         return None
     filled = ex["cost"] >= MIN_FILL
-    from weather_paper import fmt_bucket
+    from weather_paper import cash, fmt_bucket
+    # 05.11 (полная проверка; так в weather_paper с 21.10): минимум 5 долей делает покупку дороже $2 — сверяем с остатком
+    if filled and ex["cost"] + ex["fee"] > cash(conn, WALLET) + 1e-9:
+        ex["reason"], filled = f"покупка стоит ${ex['cost'] + ex['fee']:.2f}, а в кошельке ${cash(conn, WALLET):.2f}", False
     what = ("на " if side == "yes" else "против ") + fmt_bucket(bucket[0], bucket[1], CITIES[city]["unit"])
     lag = time.time() - int(t["timestamp"])
     reason = (f"повтор за {w[:10]}…: купил {what} по {their * 100:.0f}¢ "

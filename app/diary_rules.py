@@ -15,13 +15,11 @@
 Книга — diary.md (R1. IF … THEN +x [helped h, misled m]); все версии — history/.
 """
 import json
-import math
 import os
 import re
 import statistics
 import time
 from datetime import date, datetime, timedelta, timezone
-from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import sys

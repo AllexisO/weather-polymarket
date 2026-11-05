@@ -20,7 +20,6 @@
 Таблица real_ledger — в data/db/fast_dry.sqlite3 (рядом с холостыми ставками). Рабочая база — только чтение.
 """
 
-import os
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path

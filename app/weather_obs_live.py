@@ -536,6 +536,9 @@ def _buy_no(conn, wallet, city, cfg, today, m, rng, bid, obs_max, obs_time, now,
         print(f"{wallet}: {city} ошибка стакана — {e}", file=sys.stderr)
         return True
     filled = ex["cost"] >= MIN_FILL
+    # 05.11 (полная проверка; так в weather_paper с 21.10): минимум 5 долей делает покупку дороже $2 — сверяем с остатком
+    if filled and ex["cost"] + ex["fee"] > cash(conn, wallet) + 1e-9:
+        ex["reason"], filled = f"покупка стоит ${ex['cost'] + ex['fee']:.2f} (минимум 5 долей), а в кошельке ${cash(conn, wallet):.2f}", False
     reason = None if filled else (
         nofill_text.format(bid=f"{bid*100:.0f}") + (ex["reason"] or f"можно было купить меньше чем на ${MIN_FILL:.0f}"))
     conn.execute(

@@ -165,7 +165,6 @@ def iowa_obs(cfg, d1, d2):
 def build(city, month):
     run, city = city, city_of(city)
     cfg = OBS_CITIES[city]
-    tz = ZoneInfo(cfg["tz"])
     days = list(month_days(month))
     obs = iowa_obs(cfg, days[0] - timedelta(days=2), days[-1] + timedelta(days=2))
     conn = db()

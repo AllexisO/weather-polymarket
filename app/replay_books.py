@@ -23,7 +23,6 @@ import os
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
 import weather_paper as wp
 from weather_cities import OBS_CITIES

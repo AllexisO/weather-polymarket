@@ -383,6 +383,10 @@ def buy_dead(conn, city, cfg, day, mx, prev, t_obs, markets, src, wallet=WALLET,
             print(f"{wallet}: денег нет")
             break
         filled = r["cost"] >= MIN_FILL
+        # 05.11 (полная проверка; так в weather_paper с 21.10): минимум 5 долей делает покупку дороже $2 — сверяем с остатком
+        if filled and r["cost"] + r["fee"] > cash(conn, wallet) + 1e-9:
+            r = {**r, "reason": f"покупка стоит ${r['cost'] + r['fee']:.2f} (минимум 5 долей), а в кошельке ${cash(conn, wallet):.2f}"}
+            filled = False
         if not filled and watch is not None and books is not None:   # 03.10: не купили сразу — следим WATCH_SEC
             watch[(wallet, city, day.isoformat(), rng[0])] = {"cfg": cfg, "day": day, "mx": mx, "t_obs": t_obs, "rng": rng, "m": m,
                                                              "tok": json.loads(m["clobTokenIds"])[1], "src": src,
@@ -429,7 +433,7 @@ def check_watch(conn, books, watch, wallet=WALLET):
             continue
         time.sleep(ORDER_LAT)
         r = fill_from_asks(w["m"], books.get(w["tok"]) or [], STAKE, cap)
-        if r["cost"] < MIN_FILL or cash(conn, wallet) < STAKE:
+        if r["cost"] < MIN_FILL or r["cost"] + r["fee"] > cash(conn, wallet) + 1e-9:   # 05.11: минимум 5 долей дороже $2
             continue
         watch.pop(key)
         now = datetime.now(timezone.utc)

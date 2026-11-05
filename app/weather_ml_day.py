@@ -264,7 +264,6 @@ def morning_row(conn, city, d, tz, metars):
     """Утренняя строка признаков — как weather_ml_live.bucket_probs (прогнозы за сутки, замеры к 07:50, вчерашний максимум),
     плюс рынок в 08:00 из первого быстрого снимка дня (snapshots_fast)."""
     from weather_ml_live import _metar_obs
-    from weather_obs_live import routine_only
     cfg = OBS_CITIES[city]
     unit = cfg["unit"]
     prev = (datetime.fromisoformat(d) - timedelta(days=1)).date().isoformat()
@@ -360,6 +359,11 @@ def bet(conn, city, day, now, mk, blend, wallet=WALLET, day_max_c=None, hour=Non
         f.update(shares=0.0, cost=0.0, fee=0.0, avg=None,
                  reason=f"в живом стакане вариант стоит {f['avg'] * 100:.1f}¢ — вне полосы кошелька "
                         f"{FAV_BAND[0] * 100:.0f}-{FAV_BAND[1] * 100:.0f}¢ (цены устарели)")
+        filled = False
+    # 05.11 (полная проверка; так в weather_paper с 21.10): минимум 5 долей делает покупку дороже $2 — сверяем с остатком настоящую цену
+    if filled and f["cost"] + f["fee"] > cash(conn, wallet) + 1e-9:
+        f.update(shares=0.0, cost=0.0, fee=0.0, avg=None,
+                 reason=f"покупка стоит ${f['cost'] + f['fee']:.2f} (минимум 5 долей), а в кошельке ${cash(conn, wallet):.2f}")
         filled = False
     lt = now.astimezone(ZoneInfo(OBS_CITIES[city]["tz"]))
     conn.execute("""INSERT OR IGNORE INTO paper_trades (wallet, city, local_date, snapshot_ts, unit, bucket_lo, bucket_hi,

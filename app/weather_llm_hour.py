@@ -1004,6 +1004,9 @@ def bet(conn, wallet, city, day, now, mk, probs, edge=EDGE):
     decision_books.record(conn, wallet, city, day.isoformat(), b["lo"], side)   # 03.11: стакан всех вариантов города
     if f["shares"] <= 0:
         return f"не купили {side} {b['label']}: {f['reason']}"
+    # 05.11 (полная проверка; так в weather_paper с 21.10): минимум 5 долей делает покупку дороже $2 — сверяем с остатком настоящую цену
+    if f["cost"] + f["fee"] > cash(conn, wallet) + 1e-9:
+        return f"не купили {side} {b['label']}: покупка стоит ${f['cost'] + f['fee']:.2f} (минимум 5 долей), а в кошельке ${cash(conn, wallet):.2f}"
     if not MIN_PRICE <= f["avg"] <= MAX_PRICE:   # 10.10: Gamma дала устаревшие 28¢, в стакане было 1.9¢ — правило 10-90¢ по настоящей цене
         return f"не купили {side} {b['label']}: настоящая цена {f['avg'] * 100:.1f}¢ вне 10-90¢ (цена Gamma {price * 100:.0f}¢ устарела)"
     conn.execute("""INSERT OR IGNORE INTO paper_trades (wallet, city, local_date, snapshot_ts, unit, bucket_lo, bucket_hi,

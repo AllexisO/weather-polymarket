@@ -3461,7 +3461,7 @@ def _cron_human(sched):
     days = "" if dow == "*" else " (" + ", ".join({"1": "пн", "2": "вт", "3": "ср", "4": "чт", "5": "пт", "6": "сб", "0": "вс", "7": "вс"}.get(d, d)
                                                    for d in dow.split(",")) + ")"
     if h == "*":
-        return f"каждый час в " + ", ".join(f":{int(x):02d}" for x in mi.split(",")) + days
+        return "каждый час в " + ", ".join(f":{int(x):02d}" for x in mi.split(",")) + days
     if h.startswith("*/"):
         return f"каждые {h[2:]} ч в :{int(mi):02d}" + days
     if "-" in h:

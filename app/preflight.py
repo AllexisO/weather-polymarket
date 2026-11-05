@@ -119,16 +119,23 @@ def run_checks():
         wp.trading_stopped = lambda: False
         import contextlib
         import io
+        # 05.11 (полная проверка): ошибки по городу ловит item_guard внутри place — печать уходила в redirect_stdout, и проверка писала
+        # «без ошибок» (04.11 21:50 — 390 пропусков в job_log при «✓»). Теперь пропуски этого прогона — провал проверки с текстом.
+        import jobmark
+        n0 = len(jobmark.ITEM_ERRORS)
         try:
             with contextlib.redirect_stdout(io.StringIO()):
                 wp.place(mem, "preflight")
         finally:
             wp.buy_yes, wp.find_market, wp.trading_stopped = orig
+        errs = jobmark.ITEM_ERRORS[n0:]
+        del jobmark.ITEM_ERRORS[n0:]   # свои пропуски не идут в job_log как пропуски запуска — они уже провал проверки
         decided = {r[0]: r[1] for r in mem.execute(
             "SELECT wallet, COUNT(*) FROM paper_trades WHERE local_date >= ? GROUP BY wallet", (last,))}
         silent = [w for w in wallets if w not in decided]
-        res.append((sum(decided.values()) > 0, "прогон всех кошельков без ошибок (в памяти, без покупок)",
-                    f"день {last}: решений {sum(decided.values())}; без решений: {', '.join(silent) or 'нет'}"))
+        res.append((sum(decided.values()) > 0 and not errs, "прогон всех кошельков без ошибок (в памяти, без покупок)",
+                    f"день {last}: решений {sum(decided.values())}; без решений: {', '.join(silent) or 'нет'}"
+                    + (f"; ОШИБОК {len(errs)}: " + " | ".join(errs[:3])[:400] if errs else "")))
     except Exception as e:
         res.append((False, "прогон всех кошельков без ошибок (в памяти, без покупок)",
                     f"{type(e).__name__}: {e} | {traceback.format_exc().strip().splitlines()[-3].strip()}"))
