@@ -379,23 +379,27 @@ def _models_failed():
             for k, v in FAILED_MODELS.items() if k in MODEL_INFO]
 
 
+# 05.11: база бота data/db/mm.sqlite3 и страницы /mm удалены (чистка) — итоги карточек сохранены здесь (по закрытым маркетам на 05.11)
+MM_FAILED = (   # ключ, название, маркетов, потрачено $, итог $, когда выключен
+    ("mm100", "Счёт $100 — строго как вживую", 1511, 880.89, -89.11, "Выключен 27.10"),
+    ("mm100f", "Сосредоточенный $100", 519, 2798.50, -48.50, "Выключен 23.10"),
+    ("mm_ws_zone", "Тот же бот в идеальном мире", 6705, 100917.84, 2299.81, "Выключен 27.10"),
+    ("mm_ws_zs", "Живой поток: дешёвая сторона, строго", 6164, 92425.03, 2264.41, "Выключен 27.10"),
+    ("mm_ws_z30", "Живой поток: только дешевле 30¢", 6545, 31803.34, 509.67, "Выключен 27.10"),
+    ("mm_ws_sel", "Живой поток: выгодные зоны", 6135, 124941.08, 360.91, "Выключен 27.10"),
+    ("mm_ws_ml", "Живой поток + модель", 2929, 136743.35, 1917.16, "Выключен 27.10"),
+    ("mm_ws_all", "Живой поток: все заявки", 6979, 1112083.44, 9821.16, "Выключен 27.10"),
+    ("mm_all", "Все заявки бота", 1322, 152207.01, -782.46, "Выключен 02.10"),
+    ("mm_sel", "Только выгодные зоны", 1322, 18136.91, 318.27, "Выключен 02.10"),
+    ("mm_pol", "Политика и прочее", 21, 6094.60, -75.00, "Выключен 02.10"),
+    ("mm_own", "Свой выбор маркетов", 66, 12307.05, 38.03, "Выключен 02.10"),
+)
+
+
 def _mm_failed():
     """Карточки бота-мейкера для «Не прошли»: итог по закрытым маркетам и почему выключен."""
-    if not MM_DB.exists():
-        return []
-    conn = sqlite3.connect(f"file:{MM_DB}?mode=ro", uri=True, timeout=10)
-    conn.row_factory = sqlite3.Row
-    try:
-        out = []
-        for w in MM_WALLETS:
-            c = _mm_card(conn, w)
-            c["name"] = c["name"].split(" — закрыт")[0]
-            c["why"] = MM_FAILED_WHY.get(w, _MM_IDEAL)
-            c["off"] = "Выключен 02.10" if w in MM_OFF else ("Выключен 23.10" if w == "mm100f" else "Выключен 27.10")
-            out.append(c)
-        return out
-    finally:
-        conn.close()
+    return [{"key": k, "name": n, "m": m, "spent": sp, "pnl": pnl, "roi": 100 * pnl / sp if sp else None, "off": off,
+             "why": MM_FAILED_WHY.get(k, _MM_IDEAL)} for k, n, m, sp, pnl, off in MM_FAILED]
 
 
 # 27.10 (Alex: «в Модели должна быть сама модель — вся её история»): выключенные модели; карточка на /failed ведёт на её
@@ -2364,235 +2368,6 @@ def model_page(request: Request, key: str):
     alerts = active_alerts(conn)
     conn.close()
     return TEMPLATES.TemplateResponse("models.html", {"request": request, "models": None, "m": m, "others": others, "alerts": alerts})
-
-
-# ---- /mm: виртуальный бот-мейкер по схеме Poligarch (2026-09-30, решение Alex) — weather_mm_paper.py / weather_mm_settle.py ----
-MM_DB = DB_PATH.parent / "mm.sqlite3"
-# 02.10 (решение Alex): сверху — по чему решаем (mm100) и тот же бот «в идеальном мире»; остальные — исследование
-MM_WALLETS = {
-    'mm100': ('Счёт $100 — строго как вживую', 'Банк ровно $100, заявки по 5 долей только на дешёвую сторону и только пока хватает свободных денег (заявка замораживает деньги, как на Polymarket). Исполнение — только гарантированное, отменённая заявка ещё 1 с может быть «подобрана», без возврата комиссии. С 02.10'),
-    'mm100f': ('Сосредоточенный $100 — закрыт 23.10', 'Закрыт 23.10 (решение Alex): за 08-21.10 +$0.56 и −$26.44, итог −$25.88 — порог не прошёл, новых заявок нет. Был: как «Счёт $100», но только в 5 городах с самой большой торговлей за прошлые 7 дней и без пары не больше 5 долей одной стороны — чтобы складывались пары. С 07.10, порог на 08-21.10 (страница «Реальные деньги»)'),
-    'mm_ws_zone': ('Тот же бот в идеальном мире', 'Правила как у «Счёт $100», но без ограничения денег и с допущением «наша заявка всегда первая в очереди» — верхняя граница, вживую столько не будет. Разница со «Счёт $100» показывает, сколько прибыли держится на этом допущении'),
-    'mm_ws_zs': ('Живой поток: дешёвая сторона, строго', 'Как «только дешёвая сторона», но исполнение засчитывается, только если оно гарантировано вживую: заявка стояла ≥ 1 с и сделка прошла хуже нашей цены (весь наш уровень съеден). Нижняя оценка — с 02.10'),
-    'mm_ws_z30': ('Живой поток: только дешевле 30¢', 'Покупает только сторону дешевле 30¢: лучшая граница на первой половине истории (+17.9%), на проверке +18.4%, в худшем случае очереди +10.8%'),
-    'mm_ws_sel': ('Живой поток: выгодные зоны', 'Живой поток, только в выгодных зонах цены и времени'),
-    'mm_ws_ml': ('Живой поток + модель', 'Заявки как «все заявки», но исполнение берётся, только если модель (LightGBM на живых исполнениях, переобучение каждую ночь) ждёт по нему заработок; «да» на вариант, уже убитый сводкой, — никогда. Проверка вслепую: 09-12.10 +0.80¢ на долю против +0.20¢, 06-08.10 +2.31¢ против +0.22¢. С 15.10, решение 30.10'),
-    'mm_ws_all': ('Живой поток: все заявки', 'Те же заявки, но переставляются сразу при каждом изменении стакана (задержка ~0.03 с), исполнение — по живой сделке в ту же секунду'),
-    'mm_all': ('Все заявки бота', 'Заявки на «да» и «нет» по всем погодным вариантам, кроме пауз (сводки METAR, вечер дня маркета)'),
-    'mm_sel': ('Только выгодные зоны', 'Те же заявки, но только в зонах цены и времени, где стоять с заявкой было выгодно в обоих периодах истории'),
-    'mm_pol': ('Политика и прочее', 'Те же заявки на не погодных маркетах, где Poligarch торговал за 7 дней; открытые маркеты — по текущей цене, пересчёт каждый день'),
-    'mm_own': ('Свой выбор маркетов', 'Те же заявки на 40 не погодных маркетах, выбранных самим ботом: Polymarket платит за заявки, торговля за сутки от $5 000, до итога больше недели. Без Poligarch'),
-}
-MM_MAIN = ("mm100", "mm_ws_zone")
-MM_OFF = {"mm_all", "mm_sel", "mm_pol", "mm_own"}   # 02.10: остановлены (старый бот с опросом, не погода)
-MM_DECIDE = "2026-10-14"
-# 01.10 (Alex: «при клике видеть все заявки», «когда получили обновление»): откуда брать заявки и исполнения каждого бота.
-# Бот на живом потоке заявки держит в памяти (переставляет за доли секунды) — сохраняются только исполнения.
-MM_QUOTES = {"mm_all": "city NOT IN ('pol', 'own')", "mm_sel": "city NOT IN ('pol', 'own') AND (sel_yes = 1 OR sel_no = 1)",
-             "mm_pol": "city = 'pol'", "mm_own": "city = 'own'"}
-MM_PAGE = 200
-
-
-def _mm_dt(v):
-    """Время из unix-секунд или ISO-строки → «01.10 15:25» в часовом поясе сайта."""
-    if v is None:
-        return None
-    try:
-        d = datetime.fromtimestamp(float(v), VIEWER_TZ) if isinstance(v, (int, float)) else datetime.fromisoformat(v).astimezone(VIEWER_TZ)
-    except (ValueError, OSError):
-        return None
-    return d.strftime("%d.%m %H:%M")
-
-
-def _mm_fills_table(w):
-    return "mm_ws_fills" if w.startswith("mm_ws_") else "mm_fills"
-
-
-def _mm_updates(conn, w):
-    """Когда бот последний раз что-то получил: заявка (бот на опросе), исполнение, пересчёт итога."""
-    out = []
-    if w in MM_QUOTES and table_exists(conn, "mm_quotes"):
-        v = conn.execute(f"SELECT MAX(ts_to) FROM mm_quotes WHERE {MM_QUOTES[w]}").fetchone()[0]
-        out.append(("последняя заявка", _mm_dt(v) or "—"))
-    ft = _mm_fills_table(w)
-    if table_exists(conn, ft):
-        v = conn.execute(f"SELECT MAX(ts) FROM {ft} WHERE wallet = ?", (w,)).fetchone()[0]
-        out.append(("последнее исполнение", _mm_dt(v) or ("считается при расчёте итога" if w in ("mm_all", "mm_sel") else "—")))
-    if table_exists(conn, "mm_results"):
-        v = conn.execute("SELECT MAX(settled_at) FROM mm_results WHERE wallet = ?", (w,)).fetchone()[0]
-        out.append(("итог пересчитан", _mm_dt(v) or "ещё не было"))
-    return out
-
-
-def _mm_card(conn, w):
-    name, desc = MM_WALLETS[w]
-    c = {"key": w, "name": name, "desc": desc, "n": 0}
-    if table_exists(conn, "mm_results"):
-        r = conn.execute("""SELECT COUNT(*) AS m, SUM(n_fills > 0) AS mf, SUM(n_fills) AS n, SUM(sh_yes + sh_no) AS sh, SUM(spent) AS spent,
-                            SUM(merged) AS merged, SUM(merge_pnl) AS mp, SUM(inv_pnl) AS ip, SUM(rebate) AS rb, SUM(pnl) AS pnl
-                            FROM mm_results WHERE wallet = ?""", (w,)).fetchone()
-        c.update({k: (r[k] or 0) for k in r.keys()})
-        c["roi"] = 100 * c["pnl"] / c["spent"] if c["spent"] else None
-        c["cps"] = 100 * c["pnl"] / c["sh"] if c["sh"] else None
-    c["upd"] = _mm_updates(conn, w)
-    return c
-
-
-def _mm_titles():
-    """Вопросы не погодных маркетов (кэш списков бота) — чтобы на странице было понятно, что за маркет."""
-    out = {}
-    for f in ("mm_pol_markets.json", "mm_own_markets.json"):
-        try:
-            for m in json.loads((DB_PATH.parent / f).read_text()):
-                out[m["cid"]] = m.get("q")
-        except (OSError, ValueError, KeyError, TypeError):
-            pass
-    return out
-
-
-def _mm_zone_rows(conn, wallet, expr, order=None):
-    rows = conn.execute(f"""SELECT {expr} AS k, COUNT(*) AS n, SUM(size) AS sh, SUM(price * size) AS spent, SUM(pnl_final) AS pnl
-                            FROM mm_fills WHERE wallet = ? GROUP BY k""", (wallet,)).fetchall()
-    out = [{"k": r["k"], "n": r["n"], "sh": r["sh"] or 0, "spent": r["spent"] or 0, "pnl": r["pnl"] or 0,
-            "c": 100 * (r["pnl"] or 0) / r["sh"] if r["sh"] else 0} for r in rows]
-    # 02.10: корзина цены 0 (дешевле 10¢) превращалась в "" и не сравнивалась с числами — страница падала
-    return sorted(out, key=order or (lambda x: (x["k"] is None, x["k"] if x["k"] is not None else "")))
-
-
-@app.get("/mm", response_class=HTMLResponse)
-def mm_page(request: Request):
-    ctx = {"request": request, "wallets": [], "live": None, "decide": MM_DECIDE, "chart": None, "recent": [], "zones": [], "prices": [], "cities": []}
-    if MM_DB.exists():
-        conn = sqlite3.connect(f"file:{MM_DB}?mode=ro", uri=True, timeout=10)
-        conn.row_factory = sqlite3.Row
-        try:
-            now = int(time.time())
-            q = conn.execute("""SELECT COUNT(*) AS n, SUM(yes_bid IS NOT NULL) + SUM(no_bid IS NOT NULL) AS sides, SUM(sel_yes) + SUM(sel_no) AS sel,
-                                MAX(ts_to) AS last, COUNT(DISTINCT city) AS cities FROM mm_quotes WHERE ts_to >= ?""", (now - 90,)).fetchone()
-            first = conn.execute("SELECT MIN(ts_from), MAX(ts_to), COUNT(DISTINCT condition_id) FROM mm_quotes").fetchone()
-            st100 = conn.execute("SELECT ts, cash, reserved, quotes FROM mm100_state ORDER BY ts DESC LIMIT 1").fetchone() \
-                if table_exists(conn, "mm100_state") else None
-            ctx["live100"] = {"on": bool(st100 and now - st100["ts"] < 300), "quotes": st100["quotes"] if st100 else 0,
-                              "reserved": st100["reserved"] if st100 else 0.0, "last": _mm_dt(st100["ts"]) if st100 else None}
-            ctx["live"] = {"n": q["n"] or 0, "sides": q["sides"] or 0, "sel": q["sel"] or 0, "cities": q["cities"] or 0,
-                           "since": datetime.fromtimestamp(first[0], VIEWER_TZ).strftime("%d.%m %H:%M") if first[0] else None,
-                           "last": datetime.fromtimestamp(first[1], VIEWER_TZ).strftime("%d.%m %H:%M") if first[1] else None,
-                           "markets": first[2] or 0, "on": bool(q["last"])}
-            has_res = table_exists(conn, "mm_results")
-            series, days_all = [], set()
-            for w in MM_WALLETS:
-                c = _mm_card(conn, w)
-                if w == "mm100" and table_exists(conn, "mm100_state"):   # 02.10: счёт как в банке
-                    st = conn.execute("SELECT ts, cash, reserved, quotes FROM mm100_state ORDER BY ts DESC LIMIT 1").fetchone()
-                    if st:
-                        settled = conn.execute("SELECT COALESCE(SUM(pnl), 0) FROM mm_results WHERE wallet = 'mm100'").fetchone()[0] if has_res else 0.0
-                        acct = 100.0 + settled
-                        c["bank"] = {"acct": acct, "free": st["cash"] - st["reserved"], "orders": st["reserved"], "quotes": st["quotes"],
-                                     "pos": max(0.0, acct - st["cash"]), "when": _mm_dt(st["ts"])}
-                if has_res:
-                    by = dict(conn.execute("SELECT local_date, SUM(pnl) FROM mm_results WHERE wallet = ? GROUP BY local_date", (w,)).fetchall())
-                    if w not in ("mm_pol", "mm_own"):  # у не погоды «день» — дата окончания маркета, на график по дням не кладём
-                        days_all |= set(by)
-                    c["by_day"] = by
-                c["main"] = w in MM_MAIN
-                c["off"] = w in MM_OFF
-                ctx["wallets"].append(c)
-            days = sorted(days_all)
-            if len(days) >= 2:
-                for c, cls in zip(ctx["wallets"], ("s-model", "s-real")):
-                    acc, vals = 0.0, []
-                    for d in days:
-                        acc += c.get("by_day", {}).get(d, 0.0)
-                        vals.append(acc)
-                    series.append({"name": c["name"], "cls": cls, "values": vals})
-                ctx["chart"] = line_chart([f"{d[8:10]}.{d[5:7]}" for d in days], series, lambda v: f"{'−' if v < 0 else '+'}${abs(v):.0f}", w=760, h=280)
-            if has_res and table_exists(conn, "mm_fills"):
-                order_z = ["накануне", "0-6", "6-9", "9-12", "12-15", "15-18", "18-24"]
-                ctx["zones"] = _mm_zone_rows(conn, "mm_all", "zone", lambda x: order_z.index(x["k"]) if x["k"] in order_z else 99)
-                ctx["prices"] = _mm_zone_rows(conn, "mm_all", "CAST(MIN(price * 10, 9) AS INTEGER)")
-                cs = _mm_zone_rows(conn, "mm_all", "city", lambda x: -x["pnl"])
-                for x in cs:
-                    x["ru"] = CITY_RU.get(x["k"], x["k"])
-                ctx["cities"] = cs
-                ctx["recent"] = [dict(r) | {"city_ru": CITY_RU.get(r["city"], r["city"])} for r in conn.execute(
-                    """SELECT * FROM mm_results WHERE wallet = 'mm100' AND n_fills > 0 ORDER BY local_date DESC, pnl DESC LIMIT 40""")]
-                for r in ctx["recent"]:
-                    from weather_cities import OBS_CITIES
-                    r["what"] = paper_bucket(r["bucket_lo"], r["bucket_hi"], OBS_CITIES.get(r["city"], {}).get("unit", "celsius"))
-        except sqlite3.Error as e:
-            ctx["error"] = str(e)
-        finally:
-            conn.close()
-    return TEMPLATES.TemplateResponse("mm.html", ctx)
-
-
-@app.get("/mm/{key}", response_class=HTMLResponse)
-def mm_wallet_page(request: Request, key: str, tab: str = "markets", p: int = 1):
-    """Страница одного бота: все маркеты с итогом, все исполнения, все заявки (где они хранятся) — по 200 на страницу."""
-    if key not in MM_WALLETS:
-        raise HTTPException(status_code=404, detail="нет такого бота")
-    from weather_cities import OBS_CITIES
-    ctx = {"request": request, "w": None, "tab": tab, "p": max(p, 1), "rows": [], "pages": 1, "total": 0,
-           "has_quotes": key in MM_QUOTES, "decide": MM_DECIDE}
-    if not MM_DB.exists():
-        return TEMPLATES.TemplateResponse("mm_wallet.html", ctx)
-    conn = sqlite3.connect(f"file:{MM_DB}?mode=ro", uri=True, timeout=10)
-    conn.row_factory = sqlite3.Row
-    titles = _mm_titles()
-
-    def what(city, lo, hi, cid):
-        if city in ("pol", "own"):
-            return titles.get(cid) or (cid[:10] + "…")
-        return paper_bucket(lo, hi, OBS_CITIES.get(city, {}).get("unit", "celsius"))
-
-    try:
-        ctx["w"] = _mm_card(conn, key)
-        off = (ctx["p"] - 1) * MM_PAGE
-        if tab == "fills":
-            ft = _mm_fills_table(key)
-            if table_exists(conn, ft):
-                ctx["total"] = conn.execute(f"SELECT COUNT(*) FROM {ft} WHERE wallet = ?", (key,)).fetchone()[0]
-                rows = conn.execute(f"SELECT * FROM {ft} WHERE wallet = ? ORDER BY ts DESC LIMIT ? OFFSET ?", (key, MM_PAGE, off)).fetchall()
-                cache = {}
-                for r in rows:
-                    d = dict(r)
-                    if "bucket_lo" not in d:   # mm_fills: варианта нет в строке — берём из заявок
-                        if d["condition_id"] not in cache:
-                            q = conn.execute("SELECT bucket_lo, bucket_hi FROM mm_quotes WHERE condition_id = ? LIMIT 1", (d["condition_id"],)).fetchone()
-                            cache[d["condition_id"]] = (q[0], q[1]) if q else (None, None)
-                        d["bucket_lo"], d["bucket_hi"] = cache[d["condition_id"]]
-                    d["when"] = _mm_dt(d["ts"])
-                    d["city_ru"] = {"pol": "политика и прочее", "own": "свой выбор"}.get(d["city"], CITY_RU.get(d["city"], d["city"]))
-                    d["what"] = what(d["city"], d["bucket_lo"], d["bucket_hi"], d["condition_id"])
-                    ctx["rows"].append(d)
-        elif tab == "quotes" and key in MM_QUOTES and table_exists(conn, "mm_quotes"):
-            ctx["total"] = conn.execute(f"SELECT COUNT(*) FROM mm_quotes WHERE {MM_QUOTES[key]}").fetchone()[0]
-            for r in conn.execute(f"SELECT * FROM mm_quotes WHERE {MM_QUOTES[key]} ORDER BY ts_from DESC LIMIT ? OFFSET ?", (MM_PAGE, off)):
-                d = dict(r)
-                d["from"], d["to"] = _mm_dt(d["ts_from"]), _mm_dt(d["ts_to"])
-                d["city_ru"] = {"pol": "политика и прочее", "own": "свой выбор"}.get(d["city"], CITY_RU.get(d["city"], d["city"]))
-                d["what"] = what(d["city"], d["bucket_lo"], d["bucket_hi"], d["condition_id"])
-                if key == "mm_sel":
-                    d["yes_bid"] = d["yes_bid"] if d["sel_yes"] else None
-                    d["no_bid"] = d["no_bid"] if d["sel_no"] else None
-                ctx["rows"].append(d)
-        else:
-            ctx["tab"] = "markets"
-            if table_exists(conn, "mm_results"):
-                ctx["total"] = conn.execute("SELECT COUNT(*) FROM mm_results WHERE wallet = ?", (key,)).fetchone()[0]
-                for r in conn.execute("SELECT * FROM mm_results WHERE wallet = ? ORDER BY local_date DESC, settled_at DESC LIMIT ? OFFSET ?",
-                                      (key, MM_PAGE, off)):
-                    d = dict(r)
-                    d["city_ru"] = {"pol": "политика и прочее", "own": "свой выбор"}.get(d["city"], CITY_RU.get(d["city"], d["city"]))
-                    d["what"] = what(d["city"], d["bucket_lo"], d["bucket_hi"], d["condition_id"])
-                    d["settled"] = _mm_dt(d["settled_at"])
-                    ctx["rows"].append(d)
-        ctx["pages"] = max(1, -(-ctx["total"] // MM_PAGE))
-    except sqlite3.Error as e:
-        ctx["error"] = str(e)
-    finally:
-        conn.close()
-    return TEMPLATES.TemplateResponse("mm_wallet.html", ctx)
 
 
 # ---- /bets: все ставки всех кошельков — открытые и закрытые отдельно (2026-09-27, просьба Alex) ----

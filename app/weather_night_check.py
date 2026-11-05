@@ -123,7 +123,7 @@ def check_cron(c, now):
         rows = [l.split("|") for l in ps.read_text().splitlines() if l.count("|") >= 3]
         # 04.11: скрипты, которые по крону живут час (запуск в :55 / :59, конец в :55:10 / :00:05 следующего часа), в 07:00 и 13:00
         # бывают «About an hour» — это не зависание (ложная тревога 04.11: crypto_speed_rec с 11:59 до 13:00:05); им — только «N hours» / дни
-        long_lived = ("weather_book_rec.py", "weather_fast_dry.py", "crypto_speed_rec.py")
+        long_lived = ("weather_book_rec.py", "weather_fast_dry.py")
         stuck = [r[0] + (f" ({r[4].strip(chr(34)).split()[-1]})" if len(r) > 4 else "") for r in rows if "collector" in r[0] and r[1] == "running"
                  and (any(u in r[2] for u in ("hours", "day")) or ("hour" in r[2] and not (len(r) > 4 and any(x in r[4] for x in long_lived))))]
         add("Крон", not stuck, "Нет зависших запусков", ", ".join(stuck) or "зависших нет",
@@ -337,68 +337,6 @@ def _ro(path):
     return sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=30) if Path(path).exists() else None
 
 
-BOTS_OFF = True   # 27.10 (решение Alex): бот-мейкер выключен целиком — его проверки не нужны
-
-
-def check_bots(c, now):
-    """2026-09-30 (просьба Alex: «проверка, которая работает каждый день»): то, что проверялось руками 30.09 — боты-мейкеры
-    работают, заявки не двоятся и не пересекаются, расчёт не отстаёт, списки не погодных маркетов свежие."""
-    if BOTS_OFF:
-        return
-    mm = _ro(DB_PATH.parent / "mm.sqlite3")
-    if mm is None:
-        add("Боты-мейкеры", "warn", "База ботов не найдена", "data/db/mm.sqlite3")
-        return
-    t = int(now.timestamp())
-    POLL_OFF = True   # 02.10 (решение Alex): старый бот с опросом раз в 30 с и не погода отключены — их проверки не нужны
-    if mm.execute("SELECT 1 FROM sqlite_master WHERE name = 'mm_ws_stats'").fetchone():
-        r = mm.execute("SELECT hour, events, trades, fills, reconnects FROM mm_ws_stats ORDER BY hour DESC LIMIT 1").fetchone()
-        fresh = r and r[0] >= (now - timedelta(hours=2)).strftime("%Y-%m-%d %H")
-        add("Боты-мейкеры", True if fresh and r[1] > 0 else False, "Бот на живом потоке получает события",
-            f"последний час {r[0]}: событий {r[1]}, сделок {r[2]}, исполнений {r[3]}, переподключений {r[4]}" if r else "статистики нет",
-            "" if fresh and r[1] > 0 else "посмотреть data/logs/weather_mm_ws.log и крон (каждый час)")
-        if r and r[4] > 5:
-            add("Боты-мейкеры", "warn", "Живой поток часто обрывается", f"переподключений за час: {r[4]}", "посмотреть data/logs/weather_mm_ws.log")
-    if not POLL_OFF:
-        # 01.10: через оконную функцию (раньше — самосоединение, держало базу бота и в 23:30 уронило его запись)
-        dup = mm.execute("""SELECT COUNT(*) FROM (SELECT ts_from, LAG(ts_to) OVER (PARTITION BY condition_id, city ORDER BY ts_from, id) AS prev_to
-                            FROM mm_quotes WHERE ts_from >= ?) WHERE prev_to > ts_from""", (t - 86400,)).fetchone()[0]
-        add("Боты-мейкеры", True if dup == 0 else False, "Заявки не двоятся", f"наложений за сутки: {dup}",
-            "" if dup == 0 else "две копии бота работали одновременно — проверить замок (jobmark.single_instance) и ручные запуски")
-        badq = mm.execute("""SELECT COUNT(*) FROM mm_quotes WHERE ts_from >= ? AND (yes_bid + no_bid >= 1.0 OR yes_bid < 0.02 OR yes_bid > 0.98
-                             OR no_bid < 0.02 OR no_bid > 0.98 OR ts_to < ts_from)""", (t - 86400,)).fetchone()[0]
-        add("Боты-мейкеры", True if badq == 0 else False, "Заявки в пределах правил", f"нарушений за сутки: {badq}",
-            "" if badq == 0 else "заявки «да»+«нет» ≥ $1 или цена вне 2-98¢ — ошибка в weather_mm_paper.quote")
-    # расчёт не отстаёт: закрытые маркеты с собранными сделками, по которым итога бота нет
-    done = {r[0] for r in mm.execute("SELECT DISTINCT condition_id FROM mm_results WHERE wallet = 'mm_all'")}
-    loaded = {(r[0], r[1]) for r in c.execute("SELECT city, local_date FROM poly_trades_days")}
-    final = {r[0]: (r[1], r[2]) for r in c.execute("SELECT condition_id, city, local_date FROM poly_market_final")}
-    lag = [cid for (cid,) in mm.execute("SELECT DISTINCT condition_id FROM mm_quotes WHERE city NOT IN ('pol', 'own')")
-           if cid in final and final[cid] in loaded and cid not in done]
-    add("Боты-мейкеры", True if not lag else "warn", "Расчёт бота не отстаёт", f"закрытых маркетов без итога: {len(lag)}",
-        "" if not lag else "запустить weather_mm_settle.py и посмотреть его лог")
-    if mm.execute("SELECT 1 FROM sqlite_master WHERE name = 'mm_ws_fills'").fetchone():
-        win = {(r[0], r[1]) for r in c.execute("SELECT city, local_date FROM weather_poly_outcomes WHERE resolved_at < ?",
-                                               ((now - timedelta(hours=3)).isoformat(),))}
-        wsdone = {r[0] for r in mm.execute("SELECT DISTINCT condition_id FROM mm_results WHERE wallet LIKE 'mm_ws_%'")}
-        wslag = [r[0] for r in mm.execute("SELECT DISTINCT condition_id, city, local_date FROM mm_ws_fills") if (r[1], r[2]) in win and r[0] not in wsdone]
-        add("Боты-мейкеры", True if not wslag else "warn", "Расчёт живого бота не отстаёт", f"маркетов с итогом, но без расчёта: {len(wslag)}",
-            "" if not wslag else "запустить weather_mm_settle.py")
-    mm.close()
-    if POLL_OFF:
-        return
-    for name, label in (("mm_pol_markets.json", "Список маркетов Poligarch"), ("mm_own_markets.json", "Свой выбор маркетов")):
-        p = DB_PATH.parent / name
-        try:
-            age_h = (time.time() - p.stat().st_mtime) / 3600
-            k = len(json.loads(p.read_text()))
-        except (OSError, ValueError):
-            age_h, k = None, 0
-        ok = age_h is not None and age_h < 26 and k > 0
-        add("Боты-мейкеры", True if ok else "warn", f"{label} свежий", f"маркетов {k}, обновлён {age_h:.0f} ч назад" if age_h is not None else "файла нет",
-            "" if ok else "список обновляется ботом раз в сутки — посмотреть data/logs/weather_mm_paper.log")
-
-
 def check_stuck_bets(c, now):
     """Открытые ставки, у которых итог маркета уже известен больше 3 часов, — расчёт застрял."""
     n = c.execute("""SELECT COUNT(*) FROM paper_trades t JOIN weather_poly_outcomes o ON o.city = t.city AND o.local_date = t.local_date
@@ -575,7 +513,7 @@ def main():
     extra = {"morning": [(check_night_done, (c, now))], "midday": [(check_decisions, (c, now))],
              "evening": [(check_deep, (now,))]}.get(mode, [])
     for fn, args in extra + [(check_cron, (c, now)), (check_db, (c,)), (check_models, (c, now)), (check_misc, (c, now)),
-                             (check_bots, (c, now)), (check_stuck_bets, (c, now)), (check_logic, (c, now)), (check_inputs, (c, now)), (check_fastobs, (now,)), (check_backup, (now,))]:
+                             (check_stuck_bets, (c, now)), (check_logic, (c, now)), (check_inputs, (c, now)), (check_fastobs, (now,)), (check_backup, (now,))]:
         with item_guard(fn.__name__):
             fn(*args)
     c.close()

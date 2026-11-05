@@ -871,16 +871,16 @@
   </section>
   {% endif %}
   {% if mm_failed %}
-  {# 27.10 (решение Alex): бот-мейкер выключен целиком — карточки ведут на его страницы /mm/<кошелёк> #}
+  {# 27.10: бот-мейкер выключен целиком; 05.11 его база и страницы /mm удалены — карточки без ссылки #}
   <section class="grp-box{{ ' first' if not groups else '' }}" aria-labelledby="grp-mm">
   <div class="grp"><h2 id="grp-mm">Бот-мейкер</h2></div>
   <div class="wal-grid">
     {% for c in mm_failed %}
-    <a class="wal off" href="/mm/{{ c.key }}">
+    <div class="wal off">
       <div class="wal-top"><span class="wal-id"><span class="wal-name">{{ c.name }}</span><span class="off-h">{{ c.off }}</span><code class="wal-code">{{ c.key }}</code></span><span class="wal-pnl num {{ 'pos' if c.pnl > 0.005 else ('neg' if c.pnl < -0.005 else '') }}">{{ money(c.pnl) }}</span></div>
       <p class="wal-meta">{% if c.spent %}потрачено <b>${{ '{:,.0f}'.format(c.spent).replace(',', ' ') }}</b> · маркетов <b>{{ c.m }}</b>{% if c.roi is not none %} · <b class="{{ 'pos' if c.roi > 0 else 'neg' }}">{{ '%+.1f' | format(c.roi) }}%</b>{% endif %}{% else %}закрытых маркетов нет{% endif %}</p>
       <p class="wal-meta">{{ c.why }}</p>
-    </a>
+    </div>
     {% endfor %}
   </div>
   </section>

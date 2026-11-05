@@ -223,7 +223,7 @@ def row_for(conn, city, ci, cfg, d, fc, fv, known, actual, afd=None, extra=None)
 
 
 def build(conn):
-    # 03.10 (замер на копии базы, data/research/bench/cache_result.txt): кэш SQLite 512 МБ вместо 2 МБ — история цен 48
+    # 03.10 (замер на копии базы; папка замера data/research/bench удалена 05.11): кэш SQLite 512 МБ вместо 2 МБ — история цен 48
     # городов читается на ~30% быстрее (60 → 42-45 с); память берётся по мере надобности и освобождается с подключением
     conn.execute("PRAGMA cache_size = -524288")
     rows = []

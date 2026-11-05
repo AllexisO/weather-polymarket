@@ -45,8 +45,6 @@ JOBS = [
     ("weather_ml_day_train", "Дневная модель — обучение и экзамен", "weather_ml_day.py --train", "05:45", 26 * 60, "weather_ml_day_train.log"),
     ("weather_llm_hour", "LLM-прогноз каждый час (llm_gem через OpenRouter и смеси llm_mix, llm_cal; llm_agy, llm_agy_nomem, llm_agy_p и двойник llm_gem_agy через agy, смеси llm_agy_cal и llm_mix5; llm_ds и llm_agy_bet выключены 01.11)", "weather_llm_hour.py", "каждый час в :56 (первый час дня — в :05)", 75, "weather_llm_hour.log"),
     ("weather_llm_skill", "Скилл agy с Python — кошелёк llm_skill (08:10 местного, 5 городов США)", "weather_llm_skill.py", "каждый час в :10", 75, "weather_llm_skill.log"),
-    # 02.11: запись для проверки скорости на часовых BTC (без ставок, отдельная база data/research/crypto/live.sqlite3), 3 дня — разбор заметкой
-    ("crypto_speed_rec", "Запись скорости BTC — поток Binance и стакан Polymarket с мс (часовые «вверх/вниз», без ставок)", "crypto_speed_rec.py", "каждый час в :59, живёт час", 75, "crypto_speed_rec.log"),
     # 03.11: стаканы всех погодных вариантов каждую минуту (без ставок, отдельные файлы data/booklog/books_ГГГГ-ММ.sqlite3)
     ("weather_book_rec", "Стаканы всех вариантов 47 городов каждую минуту, в минуты решений — раз в 5 с; 30 уровней, только изменившиеся (без ставок, data/booklog)", "weather_book_rec.py", "каждый час с :55, живёт час", 25, "weather_book_rec.log"),
     # weather_obs_wethr — выключен 31.10 (заметка #59): подписка wethr.net отменена 15.10 (порог PRD §9 п.8 не прошёл), ключ до 01.11
@@ -71,7 +69,7 @@ GROUPS = [
                                         "weather_ml_data", "weather_ens", "weather_pws_live", "weather_trades_history",
                                         "weather_price_history", "weather_sharp_rank"]),
     ("Модели: обучение и оценка", ["weather_ml_train", "weather_ml_day_train", "weather_ml_skill"]),
-    ("Запись без ставок (для проверок)", ["weather_book_rec", "weather_fresh_live", "crypto_speed_rec"]),
+    ("Запись без ставок (для проверок)", ["weather_book_rec", "weather_fresh_live"]),
     ("Проверки и служебные", ["weather_alerts", "weather_audit", "weather_night_check", "weather_logic_check", "weather_research",
                               "db_watchdog", "backup_db", "agy_runner"]),
 ]
@@ -120,7 +118,7 @@ FLOW_SOURCES = {
     "gamma": "Polymarket · маркеты", "clob": "Polymarket · стаканы", "data": "Polymarket · сделки",
     "ws": "Polymarket · поток сделок", "om": "Open-Meteo", "iem": "Iowa Mesonet (METAR)",
     "awc": "aviationweather / NOAA", "fast": "JMA · DWD · FMI · KNMI · HKO", "cwop": "CWOP (народные станции)",
-    "atis": "ATIS", "openrouter": "OpenRouter (LLM)", "agy": "Antigravity (Gemini)", "binance": "Binance", "db": "рабочая база",
+    "atis": "ATIS", "openrouter": "OpenRouter (LLM)", "agy": "Antigravity (Gemini)", "db": "рабочая база",
 }
 FLOW_FILES = {   # «файл:имя» -> (подпись, путь от /data)
     "файл:fast_dry": ("fast_dry.sqlite3", "db/fast_dry.sqlite3"),
@@ -128,7 +126,6 @@ FLOW_FILES = {   # «файл:имя» -> (подпись, путь от /data)
     "файл:booklog": ("booklog (месяц)", "booklog"),
     "файл:pws": ("pws.sqlite3", "db/pws.sqlite3"),
     "файл:research": ("research.sqlite3", "research/research.sqlite3"),
-    "файл:crypto": ("crypto/live.sqlite3", "research/crypto/live.sqlite3"),
     "файл:backup": ("копии на personal_data", None),
     "файл:agy": ("data/agy (письма)", "agy"),
     "файл:ml": ("data/ml (модели)", "ml"),
@@ -165,7 +162,6 @@ FLOWS = {   # key -> (источники, куда пишет)
     "weather_ml_day_train": (["db"], ["ml_day_exam", "файл:ml"]),
     "weather_ml_skill": (["db"], ["ml_skill"]),
     "weather_book_rec": (["gamma", "clob"], ["файл:booklog"]),
-    "crypto_speed_rec": (["binance", "gamma", "clob"], ["файл:crypto"]),
     "weather_alerts": (["db"], ["alerts"]),
     "weather_audit": (["db"], ["audit_log"]),
     "weather_night_check": (["db"], ["night_check"]),

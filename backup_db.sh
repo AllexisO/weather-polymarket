@@ -36,10 +36,9 @@ for f in data/db/*.sqlite3 data/books/*.sqlite3; do
   printf '%s\t%s\t%s\t%s\n' "$n" "$src_b" "$(stat -c %s "$tmp.zst" 2>/dev/null || echo 0)" "$qc" >> "$OUT/.files.tsv"
 done
 cp data/db/*.json "$OUT/" 2>/dev/null
-# 11.10: скрипты и итоги исследований (не в GitHub); без копии базы для исследований и тестовой duckdb;
-# 02.11: без записи скорости BTC crypto/live.sqlite3 (пишется круглые сутки, ~1.5 ГБ в день; копия один раз после 05.11, заметка #156)
-if tar -C data -cf - --exclude='research/research.sqlite3*' --exclude='research/bench/c.duckdb' --exclude='research/crypto/live.sqlite3*' research | zstd -q -T0 -10 -o "$OUT/research.tar.zst" -f; then
-  printf '%s\t%s\t%s\t%s\n' "research.tar" "$(du -sb --exclude='research.sqlite3*' --exclude='c.duckdb' --exclude='live.sqlite3*' data/research | cut -f1)" "$(stat -c %s "$OUT/research.tar.zst")" "ok" >> "$OUT/.files.tsv"
+# 11.10: скрипты и итоги исследований (не в GitHub); без копии базы для исследований;
+if tar -C data -cf - --exclude='research/research.sqlite3*' research | zstd -q -T0 -10 -o "$OUT/research.tar.zst" -f; then
+  printf '%s\t%s\t%s\t%s\n' "research.tar" "$(du -sb --exclude='research.sqlite3*' data/research | cut -f1)" "$(stat -c %s "$OUT/research.tar.zst")" "ok" >> "$OUT/.files.tsv"
 else status=fail; msg+="research: архив не создан; "; fi
 # 28.10 (полная проверка, Alex «добавь»): обученные модели data/ml (~83 МБ). Утренние модели переобучаются из базы каждую ночь,
 # а П1 (кошельки ml5_p1*) — нет: её модели p1*_s*.txt обучены один раз (weather_p1.py --train на файлах из research)

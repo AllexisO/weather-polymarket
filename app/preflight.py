@@ -176,14 +176,6 @@ def run_checks():
         import weather_ml_day as md
         t("ml_day_fav: полоса «да»", md.FAV_BAND, (0.50, 0.95))
         t("ml_day_nohigh: часы и полоса цены «да»", (md.NOHIGH_HOURS, md.NOHIGH_BAND), ((12, 14), (0.05, 0.25)))
-        import weather_mm_ml as mml   # 15.10: mm_ws_ml не покупает «да» на вариант, уже убитый сводкой, даже при прогнозе > 0
-        from datetime import datetime as _dt, timezone as _tz
-        ts15 = _dt(2026, 10, 15, 14, 0, tzinfo=_tz.utc).timestamp()   # 15:00 по Лондону, день маркета
-        dead = mml.features("yes", 0.05, ts15, "london", "2026-10-15", 17.5, 18.5, 10, 22)
-        alive = mml.features("yes", 0.40, ts15, "london", "2026-10-15", 21.5, 22.5, 10, 22)
-        t("mm_ws_ml: «да» на убитый сводкой вариант", mml.take(dead, 0.12), False)
-        t("mm_ws_ml: «да» на живой вариант при прогнозе > 0", mml.take(alive, 0.12), True)
-        t("mm_ws_ml: прогноз ≤ 0 — не брать", mml.take(alive, -0.01), False)
     except Exception as e:
         tests.append(f"{type(e).__name__}: {e}")
     res.append((not tests, "правила на известных примерах (округление, источники замеров, варианты)",

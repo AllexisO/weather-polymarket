@@ -241,7 +241,7 @@ $100 на кошелёк (`ml`, `mm_mk`, `mm` — $300, `copy` — $1000, `ml3` 
 | `llm_*` | LLM каждый час и agy (§10) |
 | `obs`, `obs_fast`, `obs_speci`, `obs_wethr`, `obs_fmi` | по замерам станций (§10) |
 | `obs_atis` | `weather_obs_atis.py` (крон :48, 15 мин): ATIS 11 аэропортов США (atis.info), правило `buy_dead`; 25.10-01.11 вхолостую, с 01.11 ставки (`OBS_ATIS_DRY=0` в кроне) |
-| `mm_ws_*`, `mm100`, `mm100f` | бот-мейкер (§10, страница /mm) |
+| `mm_ws_*`, `mm100`, `mm100f` | бот-мейкер (§10; удалён 05.11, итоги — карточки /failed) |
 | выключены 14-15.10 (`RETIRED`) | main, main_mk, emos, emos_mk, mm, mm_mk, ml, ml_shift, ens, obs_rt |
 
 С 03.10 «да» дешевле 10¢ кошельки моделей не покупают (`YES_MIN`; с 19.10 проверка и по цене покупки).
@@ -259,8 +259,7 @@ $100 на кошелёк (`ml`, `mm_mk`, `mm` — $300, `copy` — $1000, `ml3` 
 | `db_watchdog.sh` | крон */2 | база занята >6 мин → останавливает зависшие скрипты, при необходимости перезапускает copier/dashboard, пишет `data/ALERT_DB_LOCKED` |
 | `preflight.py` / `./check.sh` | каждые 30 мин / после изменений | сборка скриптов, колонки, прогон всех кошельков в памяти, страницы; правила на известных примерах; тесты данных `data_tests.py` (расчёт ставок по итогу, шансы моделей/LLM в сумме 1, сводки = архив IEM, быстрые замеры не «убивают» победителя, итоги = финальные цены) |
 | `weather_alerts.py` | крон */30 | сбои крона, упавшие проверки, потеря >$50/сутки |
-| `crypto_speed_rec` | `crypto_speed_rec.py` (крон :59, живёт час; 02-05.11) | исследование, без ставок: поток aggTrade Binance BTCUSDT и стакан Polymarket часового BTC «вверх/вниз» (book / price_change / last_trade_price) с временем получения в мс, раз в 10 с задержка до бирж → отдельная база `data/research/crypto/live.sqlite3`; порог — в описании скрипта |
-| `backup_db.sh` | 03:10 (с 02.10, решение Alex) | все базы data/db, с 11.10 и стаканы `data/books` + архив `research.tar.zst` (скрипты и итоги исследований, без research.sqlite3 и с 02.11 без записи скорости BTC `crypto/live.sqlite3`) → `/mnt/personal_data/Backups/Projects/Weather Polymarket/ГГГГ-ММ-ДД/` (HDD): VACUUM INTO (без блокировки записи), quick_check, zstd (7.2 ГБ → ~1 ГБ, ~2 мин); 7 дней + воскресенья 4 недели; итог — `data/backup_status.json`, проверяет night_check; с 11.10 `backup_report.py` (Python сервера) пишет `data/backup_history.jsonl` (каждый запуск, по каждой базе размер до/после сжатия и quick_check) и `data/backup_inventory.json` (папки копий, диск, что не входит) — страница `/backup` |
+| `backup_db.sh` | 03:10 (с 02.10, решение Alex) | все базы data/db, с 11.10 и стаканы `data/books` + архив `research.tar.zst` (скрипты и итоги исследований, без research.sqlite3) → `/mnt/personal_data/Backups/Projects/Weather Polymarket/ГГГГ-ММ-ДД/` (HDD): VACUUM INTO (без блокировки записи), quick_check, zstd (7.2 ГБ → ~1 ГБ, ~2 мин); 7 дней + воскресенья 4 недели; итог — `data/backup_status.json`, проверяет night_check; с 11.10 `backup_report.py` (Python сервера) пишет `data/backup_history.jsonl` (каждый запуск, по каждой базе размер до/после сжатия и quick_check) и `data/backup_inventory.json` (папки копий, диск, что не входит) — страница `/backup` |
 
 Исследования — только на копии `data/research/research.sqlite3`, иначе крон ловит «database is locked».
 
@@ -374,13 +373,7 @@ Gemini напрямую в Google при `GEMINI_DIRECT`, отказ → OpenRou
     (`skill_status.live_traces`). Другая версия скилла на тех же письмах — `BT_SKILL_DIR`.
 - Ответы — `agy_skill_bt_<набор><движок><BT_TAG>.jsonl`. Сравнение кругов — `agy_skill_pair.py`, моделей — `model_compare.py`.
 
-**Бот-мейкер** (**выключен целиком 27.10**, решение Alex: со $100 не прошёл, остальное — «идеальный мир»; крон mm_ws и mm_ml снят, mm_settle снят 30.10 — всё рассчитано, карточки — /failed, проверки в night_check — BOTS_OFF) — `weather_mm_ws.py` (крон каждый час, 57 мин): живой канал стаканов, заявка переставляется при каждом изменении,
-исполнения — `mm_ws_fills` (`data/db/mm.sqlite3`); расчёт — `weather_mm_settle.py` (`settle_ws`; с 30.10 не в кроне). Кошельки:
-`mm_ws_all` / `mm_ws_sel` / `mm_ws_zone` / `mm_ws_z30` / строгий `mm_ws_zs`; `mm100` (банк $100, `bank100()`, `mm100_state`), `mm100f`
-(`focus_cities()`, FOCUS_N=5, FOCUS_CAP=5; **закрыт 23.10** — порог не прошёл, новых заявок нет); `mm_ws_ml` — только исполнения, где модель `weather_mm_ml.py` (обучение 03:40,
-`data/ml/mm_ws_ml/`) ждёт плюс. Тот же бот пишет свои стаканы раз в 60 с → `data/books/books.sqlite3` `book_snaps` (формат Falcon).
-Расписание сводок — `mm_metar_minutes.json`. Старый опросный бот `weather_mm_paper.py` и не погода остановлены 02.10 (`POLL_OFF`).
-Страница `/mm`, `/mm/<код>`. Долгие скрипты берут замок `jobmark.single_instance`, «жив» — `jobmark.mark_alive`.
+**Бот-мейкер** — выключен целиком 27.10 (со $100 не прошёл, остальное — «идеальный мир»); **05.11 удалён**: база `data/db/mm.sqlite3`, страницы `/mm`, скрипты `weather_mm_ws/ml/settle`, `weather_study_mm_*`, проверки в night_check и logic_check. Итоги 12 кошельков — постоянные карточки на /failed (`dashboard.MM_FAILED`). Остались: его стаканы до 27.10 `data/books/books.sqlite3` `book_snaps` (формат Falcon, единственная запись стаканов за октябрь) и `weather_mm_paper.py` — только ради расписания сводок `mm_metar_minutes.json` (его читают obs_live, obs_atis, fastobs, station_obs, logic_check, data_tests). Долгие скрипты берут замок `jobmark.single_instance`, «жив» — `jobmark.mark_alive`.
 
 **Сбор без ставок:**
 - CWOP — `weather_pws_live.py` (11:00-19:00) → `data/db/pws.sqlite3` `cwop_obs`.

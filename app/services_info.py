@@ -69,7 +69,7 @@ SERVICES = [
     ("Исследования и разовые проверки", [
         {"name": "Falcon (polymarketanalytics.com)", "site": "https://api.polymarketanalytics.com/dashboard", "what": "история стаканов Polymarket — проверка бота-мейкера; данные скачаны в data/research/falcon",
          "apis": ["narrative.agent.heisenberg.so …/retrieve/parameterized (agent 572)"], "mode": "research", "key": "PMA_TOKEN",
-         "price": "$10 за 20 тыс. кредитов — см. подписки", "scripts": "weather_falcon_fetch, weather_study_falcon"},
+         "price": "$10 за 20 тыс. кредитов — см. подписки", "scripts": "weather_falcon_fetch"},
         {"name": "Kalshi", "site": "https://kalshi.com", "what": "те же погодные маркеты на другой бирже — сравнение цен",
          "apis": ["api.elections.kalshi.com/trade-api/v2"], "mode": "research", "key": None, "price": "бесплатно",
          "scripts": "weather_kalshi_hist, weather_study_kalshi"},

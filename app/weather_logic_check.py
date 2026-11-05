@@ -38,7 +38,6 @@ from weather_cities import OBS_CITIES, STATION_FROM
 
 DB_PATH = Path(os.environ.get("POLY_LAB_DB", "/data/db/polymarket_lab.sqlite3"))
 FAST_DB = DB_PATH.parent / "fastobs.sqlite3"
-MM_DB = DB_PATH.parent / "mm.sqlite3"
 DAYS = 14
 # последнее исправление правил замеров (аудит 11.10: целые °C, Гонконг) — проигрыши до него уже разобраны; исправил снова — сдвинь
 # 15.10: obs_fmi выключен, FMI в obs_fast только пишем, DWD запас 0.3 — проигрыши obs_fmi Хельсинки и obs_rt Лакхнау 13.10 разобраны
@@ -165,42 +164,6 @@ def check_station(c, since, out):
         short(f"{k}: {len(v)} раз ({v[-1]})" for k, v in sorted(many.items(), key=lambda x: -len(x[1])))
         if many else f"расхождений по 2+ раза нет (единичных: {sum(len(v) for v in bad.values())})",
         "модели учатся на факте станции — если итог считается по другой станции/правилу, город учится не тому" if many else "")
-
-
-def check_maker(c):
-    if not MM_DB.exists():
-        return
-    m = sqlite3.connect(f"file:{MM_DB}?mode=ro", uri=True, timeout=30)
-    from weather_mm_settle import L_MAX, REBATE
-    win = {(r[0], r[1]): r[2] for r in c.execute("SELECT city, local_date, win_lo FROM weather_poly_outcomes")}
-    res = {(w, cid): p for w, cid, p in m.execute("SELECT wallet, condition_id, pnl FROM mm_results WHERE wallet LIKE 'mm_ws%' OR wallet LIKE 'mm100%'")}
-    fills, meta = defaultdict(list), {}
-    for w, cid, city, ld, lo, side, pr, k in m.execute("""SELECT wallet, condition_id, city, local_date, bucket_lo, side, price, size
-                                                           FROM mm_ws_fills ORDER BY ts, rowid"""):
-        fills[(w, cid)].append((side, pr, k))
-        meta[(w, cid)] = (city, ld, lo)
-    m.close()
-    diff, n = [], 0
-    for key, fs in fills.items():
-        city, ld, lo = meta[key]
-        if key not in res or (city, ld) not in win or lo is None:
-            continue
-        fin = 1.0 if abs(win[(city, ld)] - lo) < 1e-6 else 0.0
-        oy = on = pnl = 0.0
-        for side, pr, k in fs:
-            k = max(0.0, min(k, L_MAX - (oy - on) if side == "yes" else L_MAX - (on - oy)))
-            if k <= 1e-9:
-                continue
-            oy, on = (oy + k, on) if side == "yes" else (oy, on + k)
-            mm = min(oy, on)
-            oy, on = oy - mm, on - mm
-            pnl += k * ((fin if side == "yes" else 1 - fin) - pr) + (0 if key[0] in ("mm100", "mm100f") else REBATE * pr * (1 - pr) * k)
-        n += 1
-        if abs(pnl - res[key]) > 0.01:
-            diff.append(f"{key[0]} {city} {ld}: пересчёт {pnl:+.2f}, записано {res[key]:+.2f}")
-    add("Логика", True if not diff else False, "Итог бота-мейкера сходится с независимым пересчётом",
-        f"маркетов {n}" + (f", расхождений {len(diff)}: " + short(diff) if diff else ", расхождений нет"),
-        "" if not diff else "weather_mm_settle считает итог не так, как исполнения — решение по мейкеру по неверным цифрам")
 
 
 def check_trades(c, since):
@@ -334,7 +297,7 @@ def main():
     c = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=60)
     out = outcomes(c, since)
     for fn, args in ((check_obs_losses, (c, since)), (check_sources, (c, since, out)), (check_station, (c, since, out)),
-                     (check_maker, (c,)), (check_trades, (c, since)), (check_llm, (c, since)), (check_pending, (c,)), (check_real_dry, (c, since))):
+                     (check_trades, (c, since)), (check_llm, (c, since)), (check_pending, (c,)), (check_real_dry, (c, since))):
         with item_guard(fn.__name__):
             fn(*args)
     c.close()
