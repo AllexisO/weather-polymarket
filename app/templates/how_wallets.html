@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Кошельки — как работают — weather-lab{% endblock %}
+{% block content %}
+{#
+  05.11 (Alex): «Как работает» → «Кошельки» — каждый кошелёк, который сейчас ставит (запись за 3 дня или только что запущен),
+  по группам; по клику — схема решения, параметры, счёт, проверки (how_wallet.html). Данные — dashboard.how_wallets_index.
+#}
+{% import "_how_icons.html" as hi %}
+{% include "_how_style.html" %}
+<style>
+  .hw .wg { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 12px; }
+  .hw a.wt { display: flex; flex-direction: column; gap: 8px; text-decoration: none; border: 1px solid var(--h-line); border-radius: 14px;
+             padding: 14px 15px; background: var(--h-bg); transition: border-color .15s, transform .15s; min-width: 0; }
+  .hw a.wt:hover { border-color: var(--h-acc-line); transform: translateY(-1px); }
+  .hw .wt .top { display: flex; align-items: center; gap: 10px; }
+  .hw .wt .bd { font-size: 11px; font-weight: 700; color: #0A0A0B; background: var(--h-acc); border-radius: 6px; padding: 2px 7px; white-space: nowrap; }
+  .hw .wt .nm { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; color: var(--h-muted); }
+  .hw .wt .st { margin-left: auto; font-size: 10.5px; border-radius: 999px; padding: 1px 9px; border: 1px solid var(--blue-line); color: var(--blue); background: var(--blue-bg); white-space: nowrap; }
+  .hw .wt .st.s2 { border-color: var(--green-line); color: var(--green); background: var(--green-bg); }
+  .hw .wt h3 { margin: 0; font-size: 14px; font-weight: 600; line-height: 1.3; }
+  .hw .wt p { margin: 0; color: var(--h-muted); font-size: 12px; line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  .hw .wt .nums { display: flex; align-items: flex-end; gap: 14px; margin-top: auto; padding-top: 8px; border-top: 1px solid var(--h-soft); }
+  .hw .wt .nums div b { display: block; font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .hw .wt .nums div span { font-size: 10.5px; color: var(--h-faint); }
+  .hw .wt .nums svg { margin-left: auto; width: 96px; height: 30px; flex: none; }
+  .hw .wt .nums svg path.l { fill: none; stroke-width: 1.5; } .hw .wt .nums svg line { stroke: var(--h-line); stroke-dasharray: 2 3; }
+  .hw .wt .dec { font-size: 11px; color: var(--h-faint); }
+  .hw .wt .dec b { color: var(--h-acc); font-weight: 500; }
+  .hw .up { color: var(--green); } .hw .dn { color: var(--red); }
+  .hw .gh { display: flex; align-items: baseline; gap: 10px; margin: 26px 0 10px; }
+  .hw .gh b { font-size: 15px; font-weight: 600; } .hw .gh span { color: var(--h-faint); font-size: 12px; }
+</style>
+<div class="hw">
+  <div class="crumb"><a href="/how">Как работает</a><span class="sep">›</span><span>Кошельки</span></div>
+  <div class="file"><span class="fi">{{ hi.i('coin') }}</span><span class="fn">Кошельки</span>
+    <span class="pill">Сейчас ставят: {{ total }}</span></div>
+  <h1>Кошельки</h1>
+  <p class="lead">Каждый кошелёк, который сейчас работает. Все на бумаге: $100 (у некоторых больше), ставка $2. Нажми на кошелёк —
+    откроется схема его решения от данных до итога, все параметры, кривая счёта, итог по неделям, почему он пропускает дни
+    и когда по нему решение.</p>
+  {% for g, ws in groups %}
+  <div class="gh"><b>{{ g }}</b><span>{{ ws | length }}</span></div>
+  <div class="wg">
+    {% for c in ws %}
+    <a class="wt" href="/how/wallets/{{ c.key }}">
+      <div class="top"><span class="bd">{{ c.badge }}</span><span class="nm">{{ c.key }}</span>
+        <span class="st{% if c.step == 2 %} s2{% endif %}">{% if c.step == 2 %}шаг 2 · в банке{% else %}шаг 1 · Кошельки{% endif %}</span></div>
+      <h3>{{ c.title }}</h3>
+      <p>{{ c.desc }}</p>
+      <div class="nums">
+        <div><b>{{ c.n }}</b><span>закрыто</span></div>
+        <div><b class="{{ 'up' if c.pnl >= 0 else 'dn' }}">{{ ('%+.2f$' | format(c.pnl)) | replace('-', '−') if c.n else '—' }}</b><span>итог</span></div>
+        <div><b class="{{ 'up' if (c.roi or 0) >= 0 else 'dn' }}">{{ ('%+.1f%%' | format(c.roi)) | replace('-', '−') if c.roi is not none else '—' }}</b><span>доходность</span></div>
+        {% if c.spark %}<svg viewBox="0 0 {{ c.spark.w }} {{ c.spark.h }}" aria-hidden="true"><line x1="0" x2="{{ c.spark.w }}" y1="{{ c.spark.base }}" y2="{{ c.spark.base }}"/>
+          <path class="l" d="{{ c.spark.path }}" stroke="{{ '#A3E39A' if c.spark.up else '#F4A77F' }}"/></svg>{% endif %}
+      </div>
+      <div class="dec">{% if c.next %}решение <b>{{ c.next.due[8:10] }}.{{ c.next.due[5:7] }}</b> · {{ c.next.title }}{% else %}даты решения в заметках нет{% endif %}</div>
+    </a>
+    {% endfor %}
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}

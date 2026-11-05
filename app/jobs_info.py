@@ -38,6 +38,9 @@ JOBS = [
     ("weather_alerts", "Проверки и тревоги", "weather_alerts.py", "каждые 30 мин", 70, "weather_alerts.log"),
     ("weather_logic_check", "Проверка логики — правила против итогов Polymarket (пн и чт)", "weather_logic_check.py", "пн и чт 09:00", 6000, "weather_logic_check.log"),
     ("weather_fastobs", "Быстрые замеры (Synoptic, JMA, DWD, FMI) + кошелёк obs_fast", "weather_fastobs.py", "каждую минуту", 5, "weather_fastobs.log"),
+    ("weather_fav_eve", "Фавориты накануне — решение в 20:00 местного на завтра (кошелёк fav_eve)", "weather_fav_eve.py", "каждые 5 мин", 15, "weather_fav_eve.log"),
+    ("weather_fav_eve22", "Фавориты накануне, 22:00 — где fav_eve в 20:00 не купил (кошелёк fav_eve22)", "weather_fav_eve22.py", "каждые 5 мин", 15, "weather_fav_eve22.log"),
+    ("weather_fav_eve4e", "Фавориты накануне на v4e — решение в 20:00 местного на завтра (кошелёк fav_eve4e)", "weather_fav_eve4e.py", "каждые 5 мин", 15, "weather_fav_eve4e.log"),
     ("weather_ml_day", "Дневная модель — решения в 10/12/14 местного (кошелёк ml_day)", "weather_ml_day.py", "каждый час в :06", 75, "weather_ml_day.log"),
     ("weather_ml_day_train", "Дневная модель — обучение и экзамен", "weather_ml_day.py --train", "05:45", 26 * 60, "weather_ml_day_train.log"),
     ("weather_llm_hour", "LLM-прогноз каждый час (llm_gem через OpenRouter и смеси llm_mix, llm_cal; llm_agy, llm_agy_nomem, llm_agy_p и двойник llm_gem_agy через agy, смеси llm_agy_cal и llm_mix5; llm_ds и llm_agy_bet выключены 01.11)", "weather_llm_hour.py", "каждый час в :56 (первый час дня — в :05)", 75, "weather_llm_hour.log"),
@@ -62,7 +65,7 @@ KEY_BY_SCRIPT = {script: key for key, _l, script, _s, _a, _log in JOBS}
 # здесь или в JOBS — на странице в группе «Нет в списке» (сверка с data/night/crontab.txt).
 GROUPS = [
     ("Ставки и кошельки", ["weather_paper", "weather_ml_fast", "weather_fast_dry", "weather_real_dry", "weather_pool_refill",
-                           "weather_ml_day", "weather_llm_hour", "weather_llm_skill", "weather_obs_live", "weather_obs_atis",
+                           "weather_ml_day", "weather_fav_eve", "weather_fav_eve22", "weather_fav_eve4e", "weather_llm_hour", "weather_llm_skill", "weather_obs_live", "weather_obs_atis",
                            "weather_fastobs", "weather_copy_live", "weather_copy"]),
     ("Данные: цены, прогнозы, замеры", ["weather_edge", "weather_poly_resolve", "weather_station_obs", "weather_multimodel",
                                         "weather_ml_data", "weather_ens", "weather_pws_live", "weather_trades_history",
@@ -145,6 +148,9 @@ FLOWS = {   # key -> (источники, куда пишет)
     "weather_fastobs": (["fast", "awc"], ["файл:fastobs", "paper_obs_trades"]),
     "weather_copy_live": (["ws"], ["paper_trades"]),
     "weather_copy": (["data", "clob"], ["paper_trades", "decision_books"]),
+    "weather_fav_eve": (["om", "gamma", "clob", "awc", "db"], ["fav_eve_preds", "paper_trades", "decision_books"]),
+    "weather_fav_eve22": (["om", "gamma", "clob", "awc", "db"], ["fav_eve22_preds", "paper_trades", "decision_books"]),
+    "weather_fav_eve4e": (["om", "gamma", "clob", "awc", "db"], ["fav_eve4e_preds", "paper_trades", "decision_books"]),
     "weather_ml_day": (["clob", "awc", "db"], ["ml_day_preds", "paper_trades", "decision_books"]),
     "weather_llm_hour": (["openrouter", "agy", "om", "awc", "clob"], ["llm_hour_preds", "paper_trades", "decision_books"]),
     "weather_llm_skill": (["agy", "clob", "db"], ["llm_hour_preds", "paper_trades"]),

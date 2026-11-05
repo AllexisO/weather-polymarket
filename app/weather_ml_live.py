@@ -101,6 +101,12 @@ def train_and_save():
             timing["ml5_31"] = time.time() - t0
         except Exception as e:
             print(f"версия 5 с 31 листом: ошибка обучения — {e}", file=sys.stderr)
+        t0 = time.time()
+        try:  # 05.11: модель на 20:00 накануне (кошелёк fav_eve) — своя ошибка не ломает остальное
+            train_eve(conn)
+            timing["eve"] = time.time() - t0
+        except Exception as e:
+            print(f"модель накануне: ошибка обучения — {e}", file=sys.stderr)
         # 2026-09-26: подробный отчёт + экзамен для страницы /training
         import weather_ml_report
         rep = weather_ml_report.report(conn, started, df, dfm, sig, qm)
@@ -236,6 +242,70 @@ def train_v5(dfm, extra=None, prefix="q_fm"):
         (out / "features.json").write_text(json.dumps(ml.FEATURES))
     print(f"версия 5 (от рынка{', ' + str(extra) if extra else ''}, среднее {len(V5_SEEDS)} обучений): "
           f"обучено {len(V5_SEEDS)} × {len(mq.QUANTILES)} уровней → {prefix}")
+
+
+EVE_HOUR = -4   # 05.11 fav_eve: решение в 20:00 НАКАНУНЕ = полночь дня − 4 ч
+
+
+def train_eve(conn):
+    """05.11 (Alex «да», fav_eve): v3 на 20:00 накануне — прогнозы day1 и условия previous_day1 (выпущены за 24 ч до часа, к 20:00
+    накануне дневной максимум уже прогнозом известен), без замеров дня, рынок на 20:00 накануне (price_history — с полудня накануне).
+    Та же weather_ml.build со сдвинутым часом решения → data/ml/q_eve. Проверка по неделям 21.08-02.11 — data/research/_fav_eve_1105.py."""
+    import weather_ml_q as mq
+    old = (ml.DECISION_HOUR, ml.FEATURES, ml.USE_MKT)
+    ml.DECISION_HOUR, ml.USE_MKT = EVE_HOUR, True
+    try:
+        df = ml.build(conn)
+        df = df[df["actual_c"].notna()]
+        ml.FEATURES = ml.features(df)
+        qm = mq.train_q(df)
+        out = ML_DIR / "q_eve"
+        out.mkdir(parents=True, exist_ok=True)
+        for q, m in qm.items():
+            m.save_model(str(out / f"q{int(round(q * 100)):02d}.txt"))
+        (out / "features.json").write_text(json.dumps(ml.FEATURES))
+        print(f"накануне (fav_eve): обучено {len(qm)} уровней на {len(df)} днях, признаков {len(ml.FEATURES)}")
+        try:  # своя ошибка v4e накануне не ломает q_eve
+            train_eve4e(df)
+        except Exception as e:
+            print(f"накануне v4e (fav_eve4e): ошибка обучения — {e}", file=sys.stderr)
+    finally:
+        ml.DECISION_HOUR, ml.FEATURES, ml.USE_MKT = old
+
+
+def train_eve4e(df):
+    """05.11 (Alex «да», fav_eve4e): v4e на 20:00 накануне — та же таблица, что q_eve, 31 лист, среднее V4E_SEEDS обучений
+    → data/ml/q_eve4e_s*. Проверка по неделям 21.08-02.11 — data/research/_fav_eve_models_1105.py (168 ставок +20.7% против v3 125, +20.0%)."""
+    import lightgbm as lgb_
+    import weather_ml_q as mq
+    X, y = df[ml.FEATURES], df["actual_c"] - df["fc_mean"]
+    for seed in V4E_SEEDS:
+        out = ML_DIR / f"q_eve4e_s{seed}"
+        out.mkdir(parents=True, exist_ok=True)
+        ex = {**V4_EXTRA, "seed": seed, "bagging_seed": seed, "feature_fraction_seed": seed}
+        for q in mq.QUANTILES:
+            m = lgb_.train({**mq.Q_PARAMS, **ex, "alpha": q}, lgb_.Dataset(X, y, categorical_feature=["city_id"]), mq.Q_ROUNDS)
+            m.save_model(str(out / f"q{int(round(q * 100)):02d}.txt"))
+        (out / "features.json").write_text(json.dumps(ml.FEATURES))
+    print(f"накануне v4e (fav_eve4e): обучено {len(V4E_SEEDS)} × {len(mq.QUANTILES)} уровней")
+
+
+def _load_q_eve4e():
+    if "q_eve4e" not in _cache:
+        import weather_ml_q as mq
+        _cache["q_eve4e"] = [({q: lgb.Booster(model_file=str(ML_DIR / f"q_eve4e_s{s}" / f"q{int(round(q * 100)):02d}.txt"))
+                               for q in mq.QUANTILES}, json.loads((ML_DIR / f"q_eve4e_s{s}" / "features.json").read_text()))
+                             for s in V4E_SEEDS]
+    return _cache["q_eve4e"]
+
+
+def _load_q_eve():
+    if "q_eve" not in _cache:
+        import weather_ml_q as mq
+        d = ML_DIR / "q_eve"
+        _cache["q_eve"] = ({q: lgb.Booster(model_file=str(d / f"q{int(round(q * 100)):02d}.txt")) for q in mq.QUANTILES},
+                           json.loads((d / "features.json").read_text()))
+    return _cache["q_eve"]
 
 
 def _load_q_fm(prefix="q_fm"):

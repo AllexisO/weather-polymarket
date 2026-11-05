@@ -136,6 +136,9 @@ PAPER_WALLETS = {
     "ml_day_nohigh": "Против вариантов выше максимума (дневная модель)",
     "ml_day_conf": "Дневная модель — без ставок при уверенном рынке",
     "fav": "Недооценённые фавориты",
+    "fav_eve": "Недооценённые фавориты накануне",
+    "fav_eve22": "Недооценённые фавориты накануне, 22:00",
+    "fav_eve4e": "Недооценённые фавориты накануне (v4e)",
     "ml3_city": "Смесь — лучшие города",
     "copy": "Повтор за сильными трейдерами",
     # двойники: те же сигналы, но покупают своей заявкой (без комиссии, по нижней цене)
@@ -246,6 +249,12 @@ WALLET_INFO = {
                "Покупает «нет» на вариант за 25-80¢, если смесь модели и рынка считает его переоценённым на 8+ п.п. (правило бота AadiXD200)"),
     "techno": ("Правила без модели (перекосы рынка)", "Дешёвые «да» среди фаворитов",
                "Покупает «да» за 8-30¢ на одном из 4 самых дорогих вариантов, если смесь модели и рынка не ниже цены (правило бота technosheen)"),
+    "fav_eve": ("Правила без модели (перекосы рынка)", "Недооценённые фавориты накануне",
+                "Правило fav, но в 20:00 накануне: «да» на вариант за 50-95¢, который смесь модели «накануне» (v3 без замеров дня, рынок на 20:00) и рынка считает недооценённым (с 05.11)"),
+    "fav_eve22": ("Правила без модели (перекосы рынка)", "Недооценённые фавориты накануне, 22:00",
+                  "То же, что fav_eve, но в 22:00 накануне и только там, где fav_eve в 20:00 не купил (с 05.11)"),
+    "fav_eve4e": ("Правила без модели (перекосы рынка)", "Недооценённые фавориты накануне (v4e)",
+                  "То же, что fav_eve (20:00 накануне), но модель v4e накануне — 31 лист, среднее 3 обучений (с 05.11)"),
     "fav": ("Правила без модели (перекосы рынка)", "Недооценённые фавориты",
             "Покупает «да» на вариант за 50-95¢, который смесь модели и рынка считает недооценённым: рынок недоплачивает за фаворитов"),
     "copy": ("Повтор за сильными трейдерами", "Повтор за сильными трейдерами",
@@ -507,7 +516,7 @@ CITY_RU = {
     "wuhan": "Ухань", "zhengzhou": "Чжэнчжоу", "hong_kong": "Гонконг", "taipei": "Тайбэй",
 }
 WALLET_BADGE = {"ml3": "v3", "ml2": "v2", "ml": "v1", "ml_shift": "v1+", "mm": "MX", "emos": "EM", "main": "GI",
-                "mm_mk": "MX", "emos_mk": "EM", "main_mk": "GI", "ml3_mk": "v3", "ml3_cal": "v3+", "ml3_z": "v3Z", "ml3_no": "v3−", "ml3_cal_k": "v3$", "ml4": "v4", "ml4_cal": "v4+", "ml4e": "v4³", "ml4e_cal": "v4³+", "ens": "EN", "ml3_cal15": "v3+¢", "ml3_cal30": "v3+30", "no_cheap": "НЕТ", "fav": "ФАВ", "no_mid": "НЕТ½", "no_big": "НЕТ+", "techno": "ДА¢", "ml3_conf": "v3+У", "ml5_cal": "v5+", "ml5": "v5", "ml5_cal30": "v5+30", "ml5_25": "v5·25", "ml5_conf": "v5У", "ml_day_conf": "ДНУ", "ml5_31": "v5³¹", "ml5_31_cal": "v5³¹+", "ml5_31_mk": "v5³¹п", "ml5_p1": "П1", "ml5_p1o": "П1з", "ml5_p1o_no": "П1−", "ml5_cal_ask": "v5+ask", "ml5_cal_sz": "v5+$", "ml5_no": "v5−", "no_cheap5": "НЕТ5", "no_mid5": "НЕТ½5", "no_big5": "НЕТ+5", "ml_day": "ДН", "ml_day_fav": "ДН★", "ml_day_nohigh": "ДН↓", "ml3_city": "v3+Г", "copy": "CP", "obs": "OB", "obs_fmi": "FI", "obs_fast": "OB+", "obs_rt": "OB⚡", "obs_wethr": "OBW", "obs_speci": "SP", "llm_gem": "LG", "llm_ds": "LD", "llm_gem_agy": "LGa", "llm_agy_p": "AGp", "llm_agy_cal": "AG+", "llm_skill": "SK", "llm_mix5": "LM5"}
+                "mm_mk": "MX", "emos_mk": "EM", "main_mk": "GI", "ml3_mk": "v3", "ml3_cal": "v3+", "ml3_z": "v3Z", "ml3_no": "v3−", "ml3_cal_k": "v3$", "ml4": "v4", "ml4_cal": "v4+", "ml4e": "v4³", "ml4e_cal": "v4³+", "ens": "EN", "ml3_cal15": "v3+¢", "ml3_cal30": "v3+30", "no_cheap": "НЕТ", "fav": "ФАВ", "fav_eve": "ФАВ☾", "fav_eve22": "ФАВ☾22", "fav_eve4e": "ФАВ☾4", "no_mid": "НЕТ½", "no_big": "НЕТ+", "techno": "ДА¢", "ml3_conf": "v3+У", "ml5_cal": "v5+", "ml5": "v5", "ml5_cal30": "v5+30", "ml5_25": "v5·25", "ml5_conf": "v5У", "ml_day_conf": "ДНУ", "ml5_31": "v5³¹", "ml5_31_cal": "v5³¹+", "ml5_31_mk": "v5³¹п", "ml5_p1": "П1", "ml5_p1o": "П1з", "ml5_p1o_no": "П1−", "ml5_cal_ask": "v5+ask", "ml5_cal_sz": "v5+$", "ml5_no": "v5−", "no_cheap5": "НЕТ5", "no_mid5": "НЕТ½5", "no_big5": "НЕТ+5", "ml_day": "ДН", "ml_day_fav": "ДН★", "ml_day_nohigh": "ДН↓", "ml3_city": "v3+Г", "copy": "CP", "obs": "OB", "obs_fmi": "FI", "obs_fast": "OB+", "obs_rt": "OB⚡", "obs_wethr": "OBW", "obs_speci": "SP", "llm_gem": "LG", "llm_ds": "LD", "llm_gem_agy": "LGa", "llm_agy_p": "AGp", "llm_agy_cal": "AG+", "llm_skill": "SK", "llm_mix5": "LM5"}
 # 14.10 (просьба Alex): группы — по модели, к которой относится кошелёк (MODEL_GROUP ниже)
 WALLET_GROUPS = ["v3 — варианты главной модели", "v5 «от рынка»", "Дневная модель", "v4", "v2", "Правила без модели (перекосы рынка)",
                  "Повтор за сильными трейдерами", "Живые замеры"]
@@ -3902,7 +3911,141 @@ HOW_PAGES = [
      "desc": "Как идея становится кошельком и что она проходит до настоящих денег: 4 шага, пороги, кто решает, "
              "один счёт $100 с частью у каждого кошелька.",
      "tags": ["Кошельки", "Симуляция", "Вхолостую", "Live"]},
+    {"key": "wallets", "title": "Кошельки", "icon": "coin", "tone": "green", "updated": "05.11.2026",
+     "desc": "Каждый кошелёк, который сейчас ставит: когда решает, на какой модели, как выбирает и покупает, счёт и итог по неделям, "
+             "на каком он шаге и когда решение.",
+     "tags": ["Схема решения", "Параметры", "Кривая счёта", "Проверки"]},
 ]
+
+POOL_WALLETS = ("fav", "ml5_cal", "ml5", "ml4e_cal", "ml_day")   # общий банк /real (REAL_CANDIDATES «pool») — шаг 2
+
+
+def _how_wallet_rows(conn, w):
+    return conn.execute("SELECT * FROM paper_trades WHERE wallet = ? ORDER BY COALESCE(placed_at, snapshot_ts)", (w,)).fetchall()
+
+
+def _how_active(conn):
+    """05.11: кошельки, которые сейчас работают — была запись (ставка или пропуск) за 3 дня; новый (ещё ни одной записи) — тоже,
+    если у него есть схема и он не выключен."""
+    import how_wallets
+    since = (datetime.now(timezone.utc) - timedelta(days=3)).isoformat()
+    recent = {r[0] for r in conn.execute("SELECT DISTINCT wallet FROM paper_trades WHERE snapshot_ts >= ?", (since,))}
+    seen = {r[0] for r in conn.execute("SELECT DISTINCT wallet FROM paper_trades")}
+    out = [w for w in WALLET_DOCS if w not in RETIRED and how_wallets.spec(w) and (w in recent or w not in seen)]
+    return out
+
+
+def _how_notes(conn, w):
+    """Открытые заметки (notes.py), где имя кошелька (словом) есть в заголовке; таких нет — в начале текста. Пороги и даты решений."""
+    import notes
+    rx = _re.compile(r"(?<![\w])" + _re.escape(w) + r"(?![\w])")
+    opn = [n for n in notes.all_notes() if not n.get("done_at")]
+    out = [n for n in opn if rx.search(n["title"])] or [n for n in opn if rx.search((n.get("body") or "")[:200])]
+    return sorted(out, key=lambda n: n["due"])
+
+
+def _how_wallet_stats(conn, w):
+    rows = _how_wallet_rows(conn, w)
+    start = WALLET_START.get(w, PAPER_START_BALANCE)
+    st = [r for r in rows if r["status"] in ("won", "lost", "void")]
+    staked = sum(r["stake"] + _fee(r) for r in st)
+    pnl = sum(_pnl(r) for r in st)
+    opn = [r for r in rows if r["status"] == "open"]
+    ev = [(r["settled_at"] or r["local_date"], _pnl(r), r["city"], r["status"]) for r in st]
+    return {"rows": rows, "start": start, "n": len(st), "won": sum(r["status"] == "won" for r in st), "staked": staked, "pnl": pnl,
+            "roi": 100 * pnl / staked if staked else None, "luck": _luck_p(st), "open": len(opn),
+            "in_play": sum(r["stake"] + _fee(r) for r in opn), "balance": start + pnl, "events": ev,
+            "spark": spark([(r["local_date"], _pnl(r)) for r in st], start, w=120, h=34),
+            "skips": sum(r["status"] == "skip" for r in rows), "nofill": sum(r["status"] == "nofill" for r in rows)}
+
+
+def _how_weeks(st_rows):
+    """Итог по неделям (понедельник недели дня маркета) — столбики."""
+    wk = {}
+    for r in st_rows:
+        d = date.fromisoformat(r["local_date"])
+        k = (d - timedelta(days=d.weekday())).isoformat()
+        e = wk.setdefault(k, {"n": 0, "pnl": 0.0, "staked": 0.0})
+        e["n"] += 1
+        e["pnl"] += _pnl(r)
+        e["staked"] += r["stake"] + _fee(r)
+    ks = sorted(wk)
+    if not ks:
+        return None
+    W, H, L, R, T, B = 760, 220, 52, 14, 14, 34
+    top = max(max(abs(wk[k]["pnl"]) for k in ks), 1.0)
+    step = _nice_step(top * 2)
+    hi = step * math.ceil(top / step)
+    pw, ph = W - L - R, H - T - B
+    Y = lambda v: T + ph * (1 - (v + hi) / (2 * hi))
+    bw = pw / len(ks)
+    bars = []
+    for i, k in enumerate(ks):
+        e = wk[k]
+        y0, y1 = Y(0), Y(e["pnl"])
+        bars.append({"x": round(L + i * bw + bw * 0.18, 1), "w": round(bw * 0.64, 1), "y": round(min(y0, y1), 1),
+                     "h": round(max(abs(y1 - y0), 1), 1), "up": e["pnl"] >= 0, "label": f"{k[8:10]}.{k[5:7]}",
+                     "cx": round(L + i * bw + bw / 2, 1), "pnl": e["pnl"], "n": e["n"],
+                     "roi": 100 * e["pnl"] / e["staked"] if e["staked"] else 0})
+    ticks = [{"y": round(Y(v), 1), "label": f"{'+' if v > 0 else ''}{v:,.0f}$".replace("-", "−")} for v in (-hi, -hi / 2, 0, hi / 2, hi)]
+    every = max(1, math.ceil(len(ks) / 12))
+    return {"w": W, "h": H, "L": L, "R": W - R, "zero": round(Y(0), 1), "bars": bars, "ticks": ticks, "every": every, "B": H - B}
+
+
+@app.get("/how/wallets", response_class=HTMLResponse)
+def how_wallets_index(request: Request):
+    import how_wallets
+    p = next(x for x in HOW_PAGES if x["key"] == "wallets")
+    conn = db()
+    try:
+        groups = {}
+        for w in _how_active(conn):
+            info = WALLET_INFO.get(w, ("Другие", PAPER_WALLETS.get(w, w), ""))
+            s = _how_wallet_stats(conn, w)
+            notes = _how_notes(conn, w)
+            groups.setdefault(info[0], []).append({
+                "key": w, "title": info[1], "desc": info[2], "badge": WALLET_BADGE.get(w, w[:3]), "family": how_wallets.spec(w)["family"],
+                "n": s["n"], "pnl": s["pnl"], "roi": s["roi"], "luck": s["luck"], "spark": s["spark"], "open": s["open"],
+                "step": 2 if w in POOL_WALLETS else 1, "next": notes[0] if notes else None})
+        order = ["Главная модель"] + WALLET_GROUPS + ["LLM каждый час"]
+        gl = sorted(groups.items(), key=lambda kv: order.index(kv[0]) if kv[0] in order else len(order))
+        total = sum(len(v) for _, v in gl)
+    finally:
+        conn.close()
+    return TEMPLATES.TemplateResponse("how_wallets.html", {"request": request, "p": p, "groups": gl, "total": total})
+
+
+@app.get("/how/wallets/{w}", response_class=HTMLResponse)
+def how_wallet_page(request: Request, w: str):
+    import how_wallets
+    sp = how_wallets.spec(w)
+    if sp is None or w not in WALLET_DOCS:
+        raise HTTPException(404, "Нет такого кошелька")
+    conn = db()
+    try:
+        s = _how_wallet_stats(conn, w)
+        st = [r for r in s["rows"] if r["status"] in ("won", "lost", "void")]
+        curve = balance_chart(s["events"], s["start"], w=760, h=280, smooth=False)
+        weeks = _how_weeks(st)
+        reasons = {}
+        for r in s["rows"]:
+            if r["status"] in ("skip", "nofill") and r["reason"]:
+                k = _re.sub(r"[\d.,]+", "…", r["reason"].split(":")[0])[:90]
+                reasons[k] = reasons.get(k, 0) + 1
+        last = []
+        for r in reversed([r for r in s["rows"] if r["stake"] and r["stake"] > 0][-12:]):
+            last.append({"when": (r["placed_at"] or r["snapshot_ts"] or "")[:16], "city": CITY_RU.get(r["city"], r["city"]), "day": r["local_date"],
+                         "label": ("против " if r["side"] == "no" else "") + paper_bucket(r["bucket_lo"], r["bucket_hi"], r["unit"]),
+                         "price": r["price"], "stake": r["stake"] + _fee(r), "status": r["status"],
+                         "pnl": _pnl(r) if r["status"] in ("won", "lost", "void") else None})
+        notes = _how_notes(conn, w)
+    finally:
+        conn.close()
+    info = WALLET_INFO.get(w, ("Другие", PAPER_WALLETS.get(w, w), ""))
+    return TEMPLATES.TemplateResponse("how_wallet.html", {
+        "request": request, "w": w, "info": info, "badge": WALLET_BADGE.get(w, w[:3]), "sp": sp, "s": s, "curve": curve, "weeks": weeks,
+        "reasons": sorted(reasons.items(), key=lambda kv: -kv[1])[:6], "last": last, "notes": notes, "docs": WALLET_DOCS[w],
+        "step": 2 if w in POOL_WALLETS else 1})
 
 
 @app.get("/how", response_class=HTMLResponse)

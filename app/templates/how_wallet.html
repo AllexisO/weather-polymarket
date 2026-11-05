@@ -1,0 +1,267 @@
+{% extends "base.html" %}
+{% block title %}{{ w }} — как работает — weather-lab{% endblock %}
+{% block content %}
+{#
+  05.11 (Alex): страница одного кошелька в «Как работает» → «Кошельки»: схема решения и параметры (how_wallets.spec — утренние
+  собираются из настроек weather_paper), счёт и кривая, итог по неделям, шаг пути до Live и заметки с порогами, причины пропусков,
+  последние ставки, полное описание из wallet_docs. Данные — dashboard.how_wallet_page.
+#}
+{% import "_how_icons.html" as hi %}
+{% include "_how_style.html" %}
+{% macro money(v) %}{{ ('%+.2f$' | format(v)) | replace('-', '−') }}{% endmacro %}
+<style>
+  .hw .wf { display: flex; align-items: stretch; gap: 0; }
+  .hw .wf .nd { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 8px; border: 1px solid; border-radius: 11px; padding: 12px 11px; }
+  .hw .wf .nd .hd { display: flex; align-items: center; gap: 8px; }
+  .hw .wf .nd .no { margin-left: auto; font-size: 10.5px; color: var(--h-faint); font-variant-numeric: tabular-nums; }
+  .hw .wf .nd b { font-size: 12.5px; font-weight: 600; }
+  .hw .wf .nd span.s { font-size: 11.5px; color: var(--h-muted); line-height: 1.45; }
+  .hw .wf .nd.pink { background: var(--pink-bg); border-color: var(--pink-line); } .hw .wf .nd.blue { background: var(--blue-bg); border-color: var(--blue-line); }
+  .hw .wf .nd.green { background: var(--green-bg); border-color: var(--green-line); } .hw .wf .nd.yellow { background: var(--yellow-bg); border-color: var(--yellow-line); }
+  .hw .wf .nd.violet { background: var(--violet-bg); border-color: var(--violet-line); }
+  .hw .wf .nd .ic { background: rgba(10, 10, 11, .35); }
+  .hw .wf .ar { flex: none; width: 22px; display: flex; align-items: center; justify-content: center; color: var(--h-muted); }
+  .hw .wf .ar svg { width: 18px; height: 10px; }
+
+  .hw .facts { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .hw .facts div { background: var(--h-soft); border-radius: 10px; padding: 11px 13px; }
+  .hw .facts b { display: block; font-size: 19px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .hw .facts span { font-size: 11.5px; color: var(--h-muted); }
+  .hw .up { color: var(--green); } .hw .dn { color: var(--red); }
+
+  .hw .cv { position: relative; }
+  .hw .cv svg.viz { width: 100%; height: auto; display: block; overflow: visible; }
+  .hw .viz .grid line { stroke: var(--h-line); stroke-dasharray: 3 4; }
+  .hw .viz text { fill: var(--h-muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+  .hw .viz .line { stroke: #FFD58A; stroke-width: 1.6; stroke-linejoin: round; fill: none; }
+  .hw .viz .start { stroke: #A3E39A; stroke-width: 1.4; }
+  .hw .viz .dot { fill: #FFD58A; stroke: var(--h-bg); stroke-width: 2; }
+  .hw .viz .hit { fill: transparent; cursor: crosshair; }
+  .hw .viz .cross { stroke: var(--h-muted); stroke-dasharray: 3 4; opacity: 0; pointer-events: none; }
+  .hw .viz .hov { fill: var(--h-bg); stroke: #FFD58A; stroke-width: 2.2; opacity: 0; pointer-events: none; }
+  .hw .cv.on .viz .cross, .hw .cv.on .viz .hov, .hw .cv.on .viz-tip { opacity: 1; }
+  .hw .viz-tip { position: absolute; pointer-events: none; z-index: 5; background: rgba(28, 28, 30, .92); border: 1px solid #3A3A3E;
+    border-radius: 10px; padding: 8px 14px; line-height: 1.3; opacity: 0; width: max-content; max-width: 280px; }
+  .hw .viz-tip span { display: block; font-size: 12px; color: var(--h-muted); }
+  .hw .viz-tip b { display: block; font-size: 17px; font-weight: 600; color: #FFFFFF; font-variant-numeric: tabular-nums; }
+  .hw .viz-tip i { display: block; font-style: normal; font-size: 11.5px; color: var(--h-muted); margin-top: 2px; }
+  .hw .viz .bar.up { fill: rgba(163, 227, 154, .75); } .hw .viz .bar.dn { fill: rgba(244, 167, 127, .75); }
+  .hw .viz .bar:hover { fill-opacity: 1; stroke: #F4F4F5; stroke-width: 1; }
+  .hw .viz .zero { stroke: var(--h-muted); }
+
+  .hw .track { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin-bottom: 14px; }
+  .hw .track div { border-radius: 8px; padding: 8px 9px; font-size: 11.5px; background: var(--h-soft); color: var(--h-faint); border: 1px solid transparent; }
+  .hw .track div b { display: block; font-size: 12px; font-weight: 600; }
+  .hw .track div.done { color: var(--h-muted); } .hw .track div.done b { color: var(--green); }
+  .hw .track div.now { background: var(--h-acc-bg); border-color: var(--h-acc-line); color: var(--h-text); } .hw .track div.now b { color: var(--h-acc); }
+  .hw .nt { border-top: 1px solid var(--h-soft); padding: 10px 0 2px; font-size: 12.5px; }
+  .hw .nt .d { color: var(--h-acc); font-weight: 600; margin-right: 8px; }
+  .hw .nt p { margin: 4px 0 0; color: var(--h-muted); font-size: 12px; }
+
+  .hw .rs { display: grid; grid-template-columns: 1fr 44px; gap: 6px 10px; align-items: center; font-size: 12px; }
+  .hw .rs .bar { height: 22px; border-radius: 5px; background: var(--h-soft); position: relative; overflow: hidden; }
+  .hw .rs .bar i { position: absolute; inset: 0 auto 0 0; background: var(--yellow-bg); border-right: 2px solid var(--yellow-line); }
+  .hw .rs .bar span { position: relative; padding: 0 8px; line-height: 22px; color: var(--h-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+  .hw .rs .n { text-align: right; font-variant-numeric: tabular-nums; color: var(--h-muted); }
+
+  .hw table.bt { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .hw table.bt th { text-align: left; font-weight: 500; color: var(--h-faint); padding: 0 6px 7px; border-bottom: 1px solid var(--h-line); }
+  .hw table.bt td { padding: 7px 6px; border-bottom: 1px solid var(--h-soft); font-variant-numeric: tabular-nums; }
+  .hw table.bt .r { text-align: right; }
+  .hw .tw { overflow-x: auto; }
+  .hw .doc p { margin: 0 0 9px; font-size: 12.5px; color: var(--h-muted); } .hw .doc p:last-child { margin: 0; }
+  .hw .docs { display: grid; grid-template-columns: 1fr 1fr; gap: 0 26px; }
+  .hw .bdg { font-size: 12px; font-weight: 700; color: #0A0A0B; background: var(--h-acc); border-radius: 6px; padding: 2px 8px; }
+
+  @media (max-width: 1000px) {
+    .hw .wf { flex-direction: column; }
+    .hw .wf .ar { width: auto; height: 20px; } .hw .wf .ar svg { transform: rotate(90deg); }
+    .hw .track { grid-template-columns: 1fr 1fr; }
+    .hw .docs { grid-template-columns: 1fr; }
+  }
+</style>
+{% set arrow %}<svg viewBox="0 0 24 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1 6h21M17 1.5L22 6l-5 4.5"/></svg>{% endset %}
+<div class="hw">
+  <div class="crumb"><a href="/how">Как работает</a><span class="sep">›</span><a href="/how/wallets">Кошельки</a><span class="sep">›</span><span>{{ w }}</span></div>
+  <div class="file"><span class="bdg">{{ badge }}</span><span class="fn">{{ w }}</span><span class="nm" style="color:var(--h-faint);font-size:12px">{{ info[0] }} · {{ sp.family }}</span>
+    <span class="pill">{% if step == 2 %}Шаг 2 · Симуляция (общий банк $100){% else %}Шаг 1 · Кошельки (бумага){% endif %}</span></div>
+  <h1>{{ info[1] }}</h1>
+  <p class="lead">{{ info[2] }}</p>
+
+  <section class="hs">
+    <div class="hs-h"><span class="no">01</span><b>Схема решения</b></div>
+    <div class="hs-sub">Что кошелёк делает по шагам — от момента решения до итога. Скрипт: {{ sp.script }}.</div>
+    <div class="card">
+      <div class="wf">
+        {% for tone, icon, title, sub in sp.nodes %}
+        {% if not loop.first %}<div class="ar">{{ arrow }}</div>{% endif %}
+        <div class="nd {{ tone }}"><div class="hd"><span class="ic sm t-{{ tone }}">{{ hi.i(icon) }}</span><b>{{ title }}</b><span class="no">{{ loop.index }}</span></div><span class="s">{{ sub }}</span></div>
+        {% endfor %}
+      </div>
+    </div>
+  </section>
+
+  <div class="two">
+    <section class="hs">
+      <div class="hs-h"><span class="no">02</span><b>Параметры</b></div>
+      <div class="hs-sub">Как настроен сейчас{% if sp.family.startswith('Утренние') %} — прямо из настроек кода (weather_paper.py){% endif %}.</div>
+      <div class="card"><table class="kv">{% for k, v in sp.params %}<tr><td class="k">{{ k }}</td><td class="v">{{ v }}</td></tr>{% endfor %}</table></div>
+    </section>
+    <section class="hs">
+      <div class="hs-h"><span class="no">03</span><b>Счёт сейчас</b></div>
+      <div class="hs-sub">Бумага: старт ${{ '%.0f' | format(s.start) }}, итог — с комиссией.</div>
+      <div class="card">
+        <div class="facts">
+          <div><b class="{{ 'up' if s.balance >= s.start else 'dn' }}">${{ '%.2f' | format(s.balance) }}</b><span>счёт · в ставках ${{ '%.2f' | format(s.in_play) }} ({{ s.open }})</span></div>
+          <div><b>{{ s.n }}</b><span>закрыто · угадано {{ s.won }}</span></div>
+          <div><b class="{{ 'up' if s.pnl >= 0 else 'dn' }}">{{ money(s.pnl) if s.n else '—' }}</b><span>итог · {{ ('%+.1f%%' | format(s.roi)) | replace('-', '−') if s.roi is not none else '—' }} на поставленные ${{ '%.0f' | format(s.staked) }}</span></div>
+          <div><b>{{ ('%.1f%%' | format(s.luck)) if s.luck is not none else '—' }}</b><span>шанс получить такой итог удачей{% if s.luck is not none %} · {{ 'мало' if s.luck <= 5 else 'пока не отличить от удачи' }}{% endif %}</span></div>
+        </div>
+        <div class="note">Пропусков {{ s.skips }} (нет сигнала по правилу), не купили {{ s.nofill }} (сигнал был, но в стакане не было выгодной цены).</div>
+      </div>
+    </section>
+  </div>
+
+  <section class="hs">
+    <div class="hs-h"><span class="no">04</span><b>Кривая счёта</b></div>
+    <div class="hs-sub">Счёт после каждой закрытой ставки; зелёная линия — старт. Наведи на график — время и сумма.</div>
+    <div class="card">
+      {% if curve %}{% set ch = curve %}
+      <div class="cv" data-viz>
+        <svg class="viz" viewBox="0 0 {{ ch.w }} {{ ch.h }}" role="img" aria-label="Счёт: со старта до ${{ '%.2f' | format(ch.last.v) }}"
+          data-pts='{{ ch.points | map(attribute="x") | list | tojson }}' data-ys='{{ ch.points | map(attribute="y") | list | tojson }}'
+          data-vs='{{ ch.points | map(attribute="v") | list | tojson }}' data-ts='{{ ch.points | map(attribute="t") | list | tojson }}'
+          data-sub='{{ ch.points | map(attribute="sub") | list | tojson }}'>
+          <defs><linearGradient id="hw-area" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFD58A" stop-opacity=".22"/><stop offset="1" stop-color="#FFD58A" stop-opacity="0"/></linearGradient></defs>
+          <g class="grid">{% for t in ch.ticks %}<line x1="{{ ch.L }}" x2="{{ ch.R }}" y1="{{ t.y }}" y2="{{ t.y }}"/><text x="{{ ch.L - 8 }}" y="{{ t.y + 4 }}" text-anchor="end">{{ t.label }}</text>{% endfor %}</g>
+          <path d="{{ ch.area }}" fill="url(#hw-area)"/>
+          <line class="start" x1="{{ ch.L }}" x2="{{ ch.R }}" y1="{{ ch.start_y }}" y2="{{ ch.start_y }}"/>
+          <path class="line" d="{{ ch.path }}"/>
+          <line class="cross" y1="{{ ch.T }}" y2="{{ ch.B }}" x1="0" x2="0"/>
+          <circle class="dot" cx="{{ ch.last.x }}" cy="{{ ch.last.y }}" r="4.5"/>
+          <circle class="hov" cx="0" cy="0" r="5"/>
+          <text x="{{ ch.L }}" y="{{ ch.h - 6 }}">{{ ch.first_t[:5] }}</text>
+          <text x="{{ ch.R }}" y="{{ ch.h - 6 }}" text-anchor="end">{{ ch.last_t[:5] }}</text>
+          <rect class="hit" x="{{ ch.L }}" y="{{ ch.T }}" width="{{ ch.R - ch.L }}" height="{{ ch.B - ch.T }}"/>
+        </svg>
+      </div>
+      {% else %}<div class="note" style="margin:0">Закрытых ставок ещё нет — кривая появится после первой.</div>{% endif %}
+    </div>
+  </section>
+
+  <section class="hs">
+    <div class="hs-h"><span class="no">05</span><b>Итог по неделям</b></div>
+    <div class="hs-sub">Сумма закрытых ставок за неделю (по дню маркета, неделя с понедельника). Наведи на столбик — ставки и доходность.</div>
+    <div class="card">
+      {% if weeks %}{% set g = weeks %}
+      <div class="cv" data-bars>
+        <svg class="viz" viewBox="0 0 {{ g.w }} {{ g.h }}" role="img" aria-label="Итог по неделям">
+          <g class="grid">{% for t in g.ticks %}<line x1="{{ g.L }}" x2="{{ g.R }}" y1="{{ t.y }}" y2="{{ t.y }}"/><text x="{{ g.L - 8 }}" y="{{ t.y + 4 }}" text-anchor="end">{{ t.label }}</text>{% endfor %}</g>
+          <line class="zero" x1="{{ g.L }}" x2="{{ g.R }}" y1="{{ g.zero }}" y2="{{ g.zero }}"/>
+          {% for b in g.bars %}
+          <rect class="bar {{ 'up' if b.up else 'dn' }}" x="{{ b.x }}" y="{{ b.y }}" width="{{ b.w }}" height="{{ b.h }}" rx="2"
+            data-t="неделя с {{ b.label }}" data-v="{{ money(b.pnl) }}" data-s="{{ b.n }} ставок · {{ ('%+.1f%%' | format(b.roi)) | replace('-', '−') }}"/>
+          {% if loop.index0 % g.every == 0 %}<text x="{{ b.cx }}" y="{{ g.h - 12 }}" text-anchor="middle">{{ b.label }}</text>{% endif %}
+          {% endfor %}
+        </svg>
+      </div>
+      {% else %}<div class="note" style="margin:0">Закрытых ставок ещё нет.</div>{% endif %}
+    </div>
+  </section>
+
+  <div class="two">
+    <section class="hs">
+      <div class="hs-h"><span class="no">06</span><b>Путь до Live</b></div>
+      <div class="hs-sub">Где кошелёк сейчас и что дальше (правила — <a href="/how/wallet-live">Путь кошелька до Live</a>).</div>
+      <div class="card">
+        <div class="track">
+          {% for n, t, sub in [(0, 'Идея', 'проверки до ставки'), (1, 'Кошельки', 'бумага $100'), (2, 'Симуляция', 'своя часть счёта'), (3, 'Вхолостую', 'заявки не уходят'), (4, 'Live', 'счёт $100')] %}
+          <div class="{{ 'done' if n < step else ('now' if n == step else '') }}"><b>{{ n }} · {{ t }}</b>{{ sub }}</div>
+          {% endfor %}
+        </div>
+        {% if notes %}{% for n in notes %}
+        <div class="nt"><span class="d">{{ n.due[8:10] }}.{{ n.due[5:7] }}</span><b>{{ n.title }}</b>{% if n.body %}<p>{{ n.body }}</p>{% endif %}</div>
+        {% endfor %}{% else %}<div class="note">Открытых заметок с датой решения по этому кошельку нет.</div>{% endif %}
+      </div>
+    </section>
+    <section class="hs">
+      <div class="hs-h"><span class="no">07</span><b>Почему пропускает</b></div>
+      <div class="hs-sub">Самые частые причины, по которым в день не было ставки (числа в тексте заменены на «…»).</div>
+      <div class="card">
+        {% if reasons %}{% set top = reasons[0][1] %}
+        <div class="rs">{% for r, n in reasons %}<div class="bar"><i style="width:{{ (100 * n / top) | round(1) }}%"></i><span title="{{ r }}">{{ r }}</span></div><div class="n">{{ n }}</div>{% endfor %}</div>
+        {% else %}<div class="note" style="margin:0">Пропусков пока нет.</div>{% endif %}
+      </div>
+    </section>
+  </div>
+
+  <section class="hs">
+    <div class="hs-h"><span class="no">08</span><b>Последние ставки</b></div>
+    <div class="hs-sub">12 последних покупок: когда (UTC), город и день маркета, вариант, цена, сколько поставлено с комиссией, итог.</div>
+    <div class="card tw">
+      {% if last %}
+      <table class="bt"><thead><tr><th>Когда</th><th>Город</th><th>День</th><th>Вариант</th><th class="r">Цена</th><th class="r">Ставка</th><th class="r">Итог</th></tr></thead><tbody>
+      {% for b in last %}<tr><td>{{ b.when[8:10] }}.{{ b.when[5:7] }} {{ b.when[11:16] }}</td><td>{{ b.city }}</td><td>{{ b.day[8:10] }}.{{ b.day[5:7] }}</td><td>{{ b.label }}</td>
+        <td class="r">{{ '%.1f¢' | format(b.price * 100) if b.price is not none else '—' }}</td><td class="r">${{ '%.2f' | format(b.stake) }}</td>
+        <td class="r {{ '' if b.pnl is none else ('up' if b.pnl >= 0 else 'dn') }}">{% if b.pnl is none %}ждёт итога{% else %}{{ money(b.pnl) }}{% endif %}</td></tr>{% endfor %}
+      </tbody></table>
+      {% else %}<div class="note" style="margin:0">Ставок ещё не было.</div>{% endif %}
+    </div>
+  </section>
+
+  <section class="hs">
+    <div class="hs-h"><span class="no">09</span><b>Всё о кошельке</b></div>
+    <div class="hs-sub">Полное описание: идея, проверки на прошлом, данные, правило выбора, покупка, итог (то же, что на странице кошелька в /paper).</div>
+    <div class="docs">
+      {% for title, ps in docs %}
+      <div class="card doc" style="margin-bottom:14px"><div class="hs-h" style="margin-bottom:8px"><b style="font-size:13.5px">{{ title }}</b></div>{% for t in ps %}<p>{{ t }}</p>{% endfor %}</div>
+      {% endfor %}
+    </div>
+  </section>
+</div>
+<script>
+/* 05.11: наведение — как на /real: ближайшая точка кривой (пунктир, кружок, время, сумма, что закрылось); столбик недели — подсказка */
+(function () {
+  function tipOf(box) {
+    var tip = box.querySelector('.viz-tip');
+    if (!tip) { tip = document.createElement('div'); tip.className = 'viz-tip'; box.appendChild(tip); }
+    return tip;
+  }
+  function put(box, tip, px, py) {
+    var c = box.getBoundingClientRect(), left = px + 14;
+    if (left + tip.offsetWidth > c.width) left = px - 14 - tip.offsetWidth;
+    tip.style.left = Math.max(0, left) + 'px'; tip.style.top = Math.max(0, py - tip.offsetHeight - 6) + 'px';
+  }
+  function fill(tip, a, b, c) {
+    tip.textContent = '';
+    [['span', a], ['b', b], ['i', c]].forEach(function (x) { if (x[1]) { var e = document.createElement(x[0]); e.textContent = x[1]; tip.appendChild(e); } });
+  }
+  function hideAll() { document.querySelectorAll('.hw .cv').forEach(function (c) { c.classList.remove('on'); }); }
+  document.addEventListener('pointermove', function (e) {
+    var bar = e.target.closest && e.target.closest('.hw .cv[data-bars] rect.bar');
+    if (bar) {
+      var box = bar.closest('.cv'), tip = tipOf(box);
+      fill(tip, bar.dataset.t, bar.dataset.v, bar.dataset.s);
+      box.classList.add('on');
+      var c = box.getBoundingClientRect();
+      put(box, tip, e.clientX - c.left, e.clientY - c.top);
+      return;
+    }
+    var svg = e.target.closest && e.target.closest('.hw .cv[data-viz] svg.viz');
+    if (!svg) { hideAll(); return; }
+    var box = svg.closest('.cv'), vb = svg.viewBox.baseVal, r = svg.getBoundingClientRect();
+    var xs = JSON.parse(svg.dataset.pts), ys = JSON.parse(svg.dataset.ys), vs = JSON.parse(svg.dataset.vs), ts = JSON.parse(svg.dataset.ts), sb = JSON.parse(svg.dataset.sub);
+    var x = (e.clientX - r.left) * vb.width / r.width, i = 0;
+    for (var k = 1; k < xs.length; k++) if (Math.abs(xs[k] - x) < Math.abs(xs[i] - x)) i = k;
+    var cross = svg.querySelector('.cross'), hov = svg.querySelector('.hov');
+    cross.setAttribute('x1', xs[i]); cross.setAttribute('x2', xs[i]); hov.setAttribute('cx', xs[i]); hov.setAttribute('cy', ys[i]);
+    var tip = tipOf(box);
+    fill(tip, ts[i], '$' + vs[i].toFixed(2), sb[i]);
+    box.classList.add('on');
+    var c = box.getBoundingClientRect();
+    put(box, tip, r.left - c.left + xs[i] * r.width / vb.width, r.top - c.top + ys[i] * r.height / vb.height);
+  });
+  document.addEventListener('pointerleave', hideAll);
+})();
+</script>
+{% endblock %}
