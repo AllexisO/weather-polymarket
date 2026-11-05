@@ -128,7 +128,7 @@ flowchart LR
 
 | Таблица | Кто пишет | Что внутри |
 |---|---|---|
-| `snapshots` | `weather_edge.py`, `weather_multimodel.py` | снимок каждые 2 ч: цены всех вариантов + шансы всех моделей (колонка на модель) |
+| `snapshots` | `weather_edge.py`, `weather_multimodel.py` | снимок каждые 2 ч (индекс город+дата+время с 05.11 — без него weather_paper шёл 2.5 мин): цены всех вариантов + шансы всех моделей (колонка на модель) |
 | `snapshots_fast` | `weather_ml_fast.py` | то же для обучаемых моделей, ровно в 08:00 местного |
 | `mm_forecasts` | `weather_multimodel.py` | прогнозы 16 погодных моделей |
 | `ml_fcst_vars` | `weather_ml_data.py` | прогнозные условия (облака, ветер и т. п.) |

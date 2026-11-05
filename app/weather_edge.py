@@ -329,6 +329,9 @@ def ensure_schema(conn):
         # 2026-09-28: 6 ансамблей (weather_ens.py) + смесь с рынком — кошелёк ens
         conn.execute("ALTER TABLE snapshots ADD COLUMN ens_model_p REAL")
         conn.execute("ALTER TABLE snapshots ADD COLUMN ens_edge REAL")
+    # 05.11: без индекса каждый запрос weather_paper.place (дни без ставки, строки снимка) читал всю таблицу — ~95 мс,
+    # ~1400 запросов за запуск (2.5 мин); с индексом 8 мс и < 1 мс (замер на копии)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_snapshots_city_date_ts ON snapshots(city, local_date, ts_utc)")
     conn.commit()
 
 

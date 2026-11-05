@@ -106,6 +106,11 @@ def run_checks():
             if ro.execute("SELECT 1 FROM sqlite_master WHERE name = ?", (t,)).fetchone():
                 mem.execute(f"CREATE TABLE {t} AS SELECT * FROM src.{t}")
         mem.execute("DETACH DATABASE src")
+        # 05.11: CREATE TABLE AS не переносит индексы — без них прогон шёл 74 с (полный просмотр таблиц на каждый запрос)
+        mem.execute("CREATE INDEX m_snap ON snapshots(city, local_date, ts_utc)")
+        mem.execute("CREATE INDEX m_trades ON paper_trades(wallet, city, local_date)")
+        if ro.execute("SELECT 1 FROM sqlite_master WHERE name = 'snapshots_fast'").fetchone():
+            mem.execute("CREATE INDEX m_fast ON snapshots_fast(city, local_date, ts_utc)")
         # 15.10 (проверка проекта): день — последний, где уже есть снимок 08:00 (решения кошельков). Раньше — MAX(local_date): с ~14:00
         # по Кишинёву там уже завтрашний день (снимки на завтра без 08:00), и прогон шёл с 0 решений — ничего не проверял.
         last = mem.execute("SELECT MAX(local_date) FROM snapshots WHERE local_hour = 8").fetchone()[0]
