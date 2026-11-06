@@ -1105,9 +1105,14 @@ def system_health(conn):
     al = next(j for j in jobs if j["key"] == "weather_alerts")
     preflight = {"ok": pre_alert is None, "msg": pre_alert["msg"] if pre_alert else None,
                  "when": al["ok_when"] or (runs.get("weather_alerts") and _when(runs["weather_alerts"], now.astimezone(VIEWER_TZ)))}
-    om_total = sum(n for _l, n in om_by_job)
-    om = {"total": om_total, "pct": om_total / OPEN_METEO_DAILY * 100, "limit": OPEN_METEO_DAILY,
-          "by_job": sorted(om_by_job, key=lambda x: -x[1]), "counted": has_log and any(j["runs"] for j in jobs)}
+    om_cron = sum(n for _l, n in om_by_job)
+    # 06.11: + ручные запуски и исследования (sitecustomize.py → om_usage.sqlite3) — раньше в счёт не входили
+    import om_usage
+    om_research = om_usage.last_24h(DB_PATH.parent / "om_usage.sqlite3")
+    om_total = om_cron + sum(n for _s, n in om_research)
+    om = {"total": om_total, "cron": om_cron, "research": sum(n for _s, n in om_research), "pct": om_total / OPEN_METEO_DAILY * 100,
+          "limit": OPEN_METEO_DAILY, "by_job": sorted(om_by_job + [(f"вручную: {s_}", n) for s_, n in om_research], key=lambda x: -x[1]),
+          "counted": has_log and any(j["runs"] for j in jobs)}
 
     problems = []
     for j in jobs:
@@ -3670,7 +3675,17 @@ def system_page_data(conn):
     b = backup_page_data()
     today = datetime.now(VIEWER_TZ).date()
     soon = [x["name"] for x in SUBSCRIPTIONS if x.get("ends") and 0 <= (date.fromisoformat(x["ends"]) - today).days <= 14]
-    return {"jobs": lst, "backup": b,
+    # 06.11 (Alex): запросы к Open-Meteo за сутки — как карточка /status (крон по скриптам JOBS + ручные запуски, om_usage)
+    import om_usage
+    from jobs_info import JOBS
+    day_ago = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+    keys = [k for k, *_ in JOBS]
+    cron = conn.execute(f"SELECT COALESCE(SUM(om_calls), 0) FROM job_log WHERE finished_at >= ? AND job IN ({','.join('?' * len(keys))})",
+                        (day_ago, *keys)).fetchone()[0] if table_exists(conn, "job_log") else 0
+    research = sum(n for _s, n in om_usage.last_24h(DB_PATH.parent / "om_usage.sqlite3"))
+    om = {"total": cron + research, "cron": cron, "research": research, "limit": OPEN_METEO_DAILY,
+          "pct": (cron + research) / OPEN_METEO_DAILY * 100}
+    return {"jobs": lst, "backup": b, "om": om,
             "svc": {"n": sum(len(items) for _, items in SERVICES), "live": sum(i["mode"] == "live" for _, items in SERVICES for i in items), "subs": len(SUBSCRIPTIONS), "soon": soon}}
 
 

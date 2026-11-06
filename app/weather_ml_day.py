@@ -406,9 +406,8 @@ def run(dry=False):
     # 06.10: первый запуск — aviationweather ответил пустым телом, час пропал; как weather_llm_hour.metars — две повторные попытки
     for wait in ((10, 30, None) if due else ()):
         try:
-            for m in requests.get("https://aviationweather.gov/api/data/metar", timeout=30,
-                                  params={"ids": ",".join(station_for(c, lt.date()) for c, _, lt in due), "hours": 36,
-                                          "format": "json"}).json():
+            import awc   # 06.11: предел AWC 400 строк — по частям
+            for m in awc.metars([station_for(c, lt.date()) for c, _, lt in due], 36):
                 metars.setdefault(m["icaoId"], []).append(m)
             break
         except (requests.RequestException, ValueError) as e:

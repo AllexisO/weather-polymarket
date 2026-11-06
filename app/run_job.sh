@@ -12,7 +12,8 @@ if [ "$LIMIT" = "0" ]; then exec python "$@"; fi
 case "$1" in *.py) ;; *) exec timeout -s TERM -k 30 "$LIMIT" python "$@" ;; esac
 # 2026-09-27: запуск через job_wrap.py — каждый запуск пишется в job_log (страница /status)
 T0=$(date +%s)
-timeout -s TERM -k 30 "$LIMIT" python /app/job_wrap.py "$@"
+# 06.11: запросы к Open-Meteo этого запуска считает job_wrap — sitecustomize.py (счётчик ручных запусков) их пропускает
+OM_WRAPPED=1 timeout -s TERM -k 30 "$LIMIT" python /app/job_wrap.py "$@"
 code=$?
 if [ $code -eq 124 ] || [ $code -eq 137 ] || [ $code -eq 143 ]; then
   echo "$(date '+%F %T') ПРЕРВАНО по пределу времени ${LIMIT} с: $*" >&2

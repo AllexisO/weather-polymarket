@@ -150,6 +150,7 @@
       <div class="v num">{{ '{:,}'.format(h.om.total).replace(',', ' ') }} <span class="muted" style="font-size:14px;font-weight:500">запросов</span></div>
       {% set pct = [h.om.pct, 100] | min %}
       <div class="meter"><i class="{{ 'bad' if pct > 90 else ('warn' if pct > 70 else '') }}" style="width: {{ '%.0f' | format(pct) }}%"></i></div>
+      <div class="s">крон <b class="num">{{ '{:,}'.format(h.om.cron).replace(',', ' ') }}</b> · вручную и исследования <b class="num">{{ '{:,}'.format(h.om.research).replace(',', ' ') }}</b></div>
       <div class="s">лимит ~{{ '{:,}'.format(h.om.limit).replace(',', ' ') }} вызовов; ансамбли Open-Meteo считает за несколько вызовов — реальный расход выше</div>
       {% else %}
       <div class="v">—</div>

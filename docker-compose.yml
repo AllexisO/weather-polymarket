@@ -14,6 +14,8 @@ services:
     environment:
       TZ: Europe/Chisinau
       POLY_LAB_DB: /data/db/polymarket_lab.sqlite3
+      # 06.11: app/sitecustomize.py — счётчик запросов к Open-Meteo у ручных запусков и исследований (om_usage.py)
+      PYTHONPATH: /app
     profiles:
       - cli
 

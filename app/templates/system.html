@@ -54,6 +54,14 @@
       <span class="go">Сервисы и подписки →</span>
     </a>
 
+    {# 06.11 (Alex): запросы к Open-Meteo за сутки — подробно на «Здоровье системы» #}
+    <a class="card{{ ' badc' if om.pct > 90 else (' warn' if om.pct > 70 else '') }}" href="/status">
+      <div class="hd"><span class="nm">Open-Meteo за сутки</span>{% if om.pct > 90 %}<span class="st fail">у лимита</span>{% elif om.pct > 70 %}<span class="st late">много</span>{% else %}<span class="st ok">в пределах</span>{% endif %}</div>
+      <div class="big">{{ '{:,}'.format(om.total).replace(',', ' ') }}<small>из ~{{ '{:,}'.format(om.limit).replace(',', ' ') }} запросов</small></div>
+      <div class="ln">Крон <b>{{ '{:,}'.format(om.cron).replace(',', ' ') }}</b> · вручную и исследования <b>{{ '{:,}'.format(om.research).replace(',', ' ') }}</b></div>
+      <span class="go">Кто тратит →</span>
+    </a>
+
     {% set bs = backup.state %}
     <a class="card{{ '' if bs and bs.ok else ' badc' }}" href="/backup">
       <div class="hd"><span class="nm">Бэкап</span>{% if bs and bs.ok %}<span class="st ok">копия свежая</span>{% else %}<span class="st fail">нет свежей копии</span>{% endif %}</div>

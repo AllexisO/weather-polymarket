@@ -353,9 +353,9 @@ def run():
     # обучаемой модели (архив Iowa Mesonet для утра ещё не готов).
     metars_by_icao = {}
     try:
-        icaos = ",".join(c["icao"] for c in OBS_CITIES.values())
-        for m in requests.get("https://aviationweather.gov/api/data/metar",
-                              params={"ids": icaos, "hours": 36, "format": "json"}, timeout=30).json():
+        # 06.11: одним запросом AWC отдавал 400 строк — у 47 станций последние ~4.5 ч (obs_tmin не с полуночи); awc.metars — по частям
+        import awc
+        for m in awc.metars([c["icao"] for c in OBS_CITIES.values()], 36):
             metars_by_icao.setdefault(m["icaoId"], []).append(m)
     except (requests.RequestException, ValueError) as e:
         print(f"METAR для обучаемой модели недоступны — {e}", file=sys.stderr)

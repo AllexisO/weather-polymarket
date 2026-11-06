@@ -320,16 +320,16 @@ def run():
         # 2026-09-30: разовая задержка aviationweather (1 раз из 2171 запуска) — одна повторная попытка через 5 с
         for attempt in range(2):
             try:
-                r = requests.get(METAR_API, params={"ids": ",".join(icaos), "hours": 30, "format": "json"}, timeout=30)
-                r.raise_for_status()
+                # 06.11: одним запросом AWC отдавал 400 строк — у 47 станций последние ~4.5 ч: максимум дня obs / obs_speci
+                # (плановые сводки ниже SPECI) считался без ранних часов; awc.metars — по частям
+                import awc as awc_api
+                awc_rows = awc_api.metars(icaos, 30)
                 break
             except requests.RequestException:
                 if attempt:
                     raise
                 time.sleep(5)
-        awc = r.json()
-        if not isinstance(awc, list):
-            raise ValueError(f"ответ не список: {str(awc)[:100]}")
+        awc = awc_rows
     except (requests.RequestException, ValueError) as e:
         import jobmark
         jobmark.ITEM_ERRORS.append(f"aviationweather: {e}")

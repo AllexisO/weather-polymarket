@@ -192,11 +192,13 @@ def markets(city, day):
 def metars(now):
     """Сводки 5 аэропортов за последние 30 ч (один запрос): сегодняшние — в письмо, вчерашний вечер — для разбора прогнозов.
     05.10: при обрыве сети падал с трассировкой — теперь две повторные попытки, потом понятная ошибка (без сводок
-    не знаем уже достигнутый максимум — ставить нельзя, час пропускается)."""
-    ids = ",".join(OBS_CITIES[c]["icao"] for c in ALL_CITIES)
+    не знаем уже достигнутый максимум — ставить нельзя, час пропускается).
+    06.11: AWC отдаёт не больше 400 строк на запрос — 23 станции за 30 ч обрезались до последних ~10 ч (ночные сводки пропадали
+    из писем, weather_deep_check «сводки METAR»); запрос по частям — awc.metars."""
+    import awc
     for wait in (10, 30, None):
         try:
-            return requests.get(AWC, params={"ids": ids, "hours": HOUR_ERR_HOURS, "format": "json"}, timeout=20).json()
+            return awc.metars([OBS_CITIES[c]["icao"] for c in ALL_CITIES], HOUR_ERR_HOURS, timeout=20)
         except (requests.RequestException, ValueError) as e:
             if wait is None:
                 sys.exit(f"сводки METAR (aviationweather.gov) недоступны — час пропущен ({type(e).__name__}: {str(e)[:150]})")

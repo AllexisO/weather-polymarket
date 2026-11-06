@@ -112,9 +112,8 @@ def main():
     if due:
         metars = {}
         try:
-            icaos = ",".join(OBS_CITIES[c]["icao"] for c, _, _ in due)
-            for m in requests.get("https://aviationweather.gov/api/data/metar",
-                                  params={"ids": icaos, "hours": 36, "format": "json"}, timeout=30).json():
+            import awc   # 06.11: предел AWC 400 строк — по частям
+            for m in awc.metars([OBS_CITIES[c]["icao"] for c, _, _ in due], 36):
                 metars.setdefault(m["icaoId"], []).append(m)
         except (requests.RequestException, ValueError) as e:
             print(f"METAR недоступны — {e}")

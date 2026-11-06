@@ -116,7 +116,7 @@ flowchart LR
 | Polymarket WS | `wss://ws-live-data.polymarket.com` | сделки в реальном времени (copier) | — |
 | Open-Meteo | `api.`, `ensemble-api.`, `previous-runs-api.`, `historical-forecast-api.open-meteo.com` | 16 погодных моделей, ансамбли, история прогнозов | ~10 тыс. вызовов/сутки, крон тратит 5-6 тыс. |
 | Iowa Mesonet | `mesonet.agron.iastate.edu` | METAR — факт температуры (как у Polymarket) | — |
-| aviationweather.gov, NOAA tgftp | METAR онлайн | кошелёк `obs` | — |
+| aviationweather.gov, NOAA tgftp | METAR онлайн (много станций — только через `awc.metars`: предел 400 строк на запрос, по 5 станций) | кошелёк `obs`, снимки, письма LLM | — |
 
 Личные данные во внешние API не передаются.
 
@@ -162,6 +162,7 @@ flowchart LR
 | Таблица | Кто пишет | Что внутри |
 |---|---|---|
 | `job_runs` | `jobmark.py` (из скриптов и обёртки) | последний успешный запуск |
+| `om_usage` (`data/db/om_usage.sqlite3`) | `sitecustomize.py` → `om_usage.py` (06.11; `PYTHONPATH=/app` у collector) | запросы к Open-Meteo у запусков мимо обёртки крона (исследования, `--entrypoint python`, `JOB_TIMEOUT=0`, `python -c`); крон помечен `OM_WRAPPED=1` — не дважды → карточки Open-Meteo на `/status` и `/system` (крон + вручную) |
 | `job_log` | `job_wrap.py` (обёртка каждого запуска крона) | каждый запуск: код выхода, длительность, запросы к Open-Meteo, хвост вывода (`output`, до 12 тыс. символов, с 29.09); хранится 14 дней → `/status`, `/events` |
 | `alerts` | `weather_alerts.py` | активные тревоги → красная плашка на сайте |
 | `night_check` | `weather_night_check.py` (через `night_check.sh`: 07:00 morning «ночь прошла?», 13:00 midday «утренние решения приняты?», 23:30 evening «ночь пройдёт?») | проверки в течение дня, колонка `mode`: код, ставки, крон, база, сервисы, модели к обучению, с 15.10 «Входные данные» (`check_inputs`: таблицы, которые читают скрипты по крону, пополняются; строки письма LLM не пустые); с 02.11 вечером — «Данные и логика» (`check_deep` → `weather_deep_check.py` за вчера и сегодня: данные писем LLM против архивов, пересчёт решений LLM, кошельков моделей и дневной модели) — ok / внимание / проблема с подсказкой «что делать»; выключенные кошельки (`RETIRED`) не проверяются; 60 дней → `/audit` |

@@ -215,8 +215,8 @@ def run(dry=False, only=None):
         # Теперь 3 попытки; не вышло — решения не принимаем, города остаются на следующий запуск в окне (каждые 5 мин, окно 15 мин)
         for attempt in range(3):
             try:
-                for m in requests.get("https://aviationweather.gov/api/data/metar", timeout=30,
-                                      params={"ids": ",".join(station_for(c, lt.date()) for c, _, lt in due), "hours": 24, "format": "json"}).json():
+                import awc   # 06.11: предел AWC 400 строк — по частям
+                for m in awc.metars([station_for(c, lt.date()) for c, _, lt in due], 24):
                     metars.setdefault(m["icaoId"], []).append(m)
                 break
             except (requests.RequestException, ValueError) as e:

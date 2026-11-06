@@ -73,8 +73,8 @@ def seed(now):
     mx = {}
     for wait in (5, 20, None):
         try:
-            rows = requests.get("https://aviationweather.gov/api/data/metar", params={"ids": ",".join(ids), "hours": 30, "format": "json"},
-                                timeout=30).json()
+            import awc   # 06.11: предел AWC 400 строк (11 станций США за 30 ч — на грани) — по частям
+            rows = awc.metars(list(ids), 30)
             break
         except (requests.RequestException, ValueError) as e:
             if wait is None:
