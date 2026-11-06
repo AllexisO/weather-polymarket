@@ -75,7 +75,13 @@ THRESHOLD_CITIES = ("chicago", "atlanta", "austin", "miami", "dallas")   # по�
 # 10.10 (решение Alex): ещё 4 города только для llm_agy и llm_agy_nomem (agy, без OpenRouter); пороги п.18 и п.20 — по-прежнему
 # по 5 городам США, эти — отдельно; llm_agy_bet — только 5 городов США (его 4 условия и общий дневной предел записаны на них)
 AGY_EXTRA_CITIES = ("london", "nyc", "paris", "tokyo")
-ALL_CITIES = CITIES + tuple(c for c in AGY_EXTRA_CITIES if c not in CITIES)
+# 06.11 (Alex: лимит agy занят на 25% в неделю — «добавь города»): ещё 13 городов только для llm_agy — все с оборотом ≥ $24 тыс. в день
+# (poly_trades 06.10-06.11; отбор по обороту, не по прошлым итогам). Пороги — по-прежнему 5 городов США, эти — отдельной строкой.
+# В NEW_CITIES — с первого дня: разброс agy_sigma и папка скилла считаются по прежним городам, у старых городов ничего не меняется.
+AGY_NEW_CITIES = ("seoul", "shanghai", "wellington", "beijing", "munich", "cape_town", "sao_paulo", "madrid", "istanbul", "helsinki",
+                  "amsterdam", "los_angeles", "singapore")
+NEW_CITIES.update({c: "2026-11-07" for c in AGY_NEW_CITIES})
+ALL_CITIES = CITIES + tuple(c for c in AGY_EXTRA_CITIES + AGY_NEW_CITIES if c not in CITIES)
 HOURS = range(8, 20)    # час запроса (slot) по местному: 8-й — в 08:05, остальные — в :56 часом раньше (04.10: с 05:05; 06.10, решение Alex: с 08:05 — минус 20% расхода)
 BET_FROM = 8            # ставки — как раньше, с 08:05 (ранние часы — только прогноз и учёба, правило ставок не меняется)
 EDGE = 0.05             # шанс LLM выше цены продавца минимум на 5 п.п.
@@ -1044,7 +1050,8 @@ def run():
             hrs, sun = hourly(city)
             # 01.11 (разбор LLM, заметка #56): llm_agy_bet выключен — после порога 11-24.10 (+5.1%) потерял 19% за 18-31.10;
             # писем ему больше нет, код ставки (agy_bet_*) остаётся для истории
-            agy_ws = ((AGY_WALLET, AGY_NOMEM_WALLET) if city in THRESHOLD_CITIES + AGY_EXTRA_CITIES else ()) + \
+            # 06.11: llm_agy_nomem выключен (заметка #63, порог 18.10-05.11: память лучше на 0.002° при нужных 0.1°) — писем ему нет
+            agy_ws = ((AGY_WALLET,) if city in THRESHOLD_CITIES + AGY_EXTRA_CITIES + AGY_NEW_CITIES else ()) + \
                 ((AGY_P_WALLET,) if city in THRESHOLD_CITIES else ())
             for aw in agy_ws:
                 with item_guard(f"{city}/{aw}", conn):

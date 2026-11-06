@@ -45,7 +45,7 @@ def rule_of(wallet):
             "yes_band": wp.YES_BAND.get(wallet), "yes_floor": wp.YES_FLOOR.get(wallet), "yes_ceil": wp.YES_CEIL.get(wallet, 1.0),
             "conf_skip": wp.CONF_SKIP.get(wallet), "top_rank": wp.TOP_RANK.get(wallet),
             "pick": "ask" if wallet in wp.PICK_ASK else ("ratio" if wallet in wp.PICK_RATIO else "mid"),
-            "stake": wp.STAKE, "fast": wallet in wp.FAST_WALLETS, "start": wp.START_TS.get(wallet, wp.ML_START_TS)}
+            "stake": wp.STAKE_BY_WALLET.get(wallet, wp.STAKE), "fast": wallet in wp.FAST_WALLETS, "start": wp.START_TS.get(wallet, wp.ML_START_TS)}
 
 
 def snapshot(c, city, d, field, fast):

@@ -129,6 +129,7 @@ PAPER_WALLETS = {
     "ml5_p1o_no": "П1 Argon + замер — ставки «против»",
     "ml5_cal_ask": "v5 + рынок — выбор по цене продажи",
     "ml5_cal_sz": "v5 + рынок — ставка по спору о центре",
+    "ml5_cal_6": "v5 + рынок — ставка $6",
     "ml5_no": "v5 «от рынка» — ставки «против»",
     "no_cheap5": "Против лотерейных билетов (v5)", "no_mid5": "Против средних вариантов (v5)", "no_big5": "Против сильно переоценённых (v5)",
     "ml_day": "Дневная модель (10/12/14 ч)",
@@ -147,7 +148,7 @@ PAPER_WALLETS = {
 }
 PAPER_START_BALANCE = 100.0
 # свой старт у кошелька (как weather_paper.START_BY_WALLET; совпадение проверяет preflight.py)
-WALLET_START = {"copy": 1000.0, "ml": 300.0, "mm_mk": 300.0, "mm": 300.0, "ml3": 200.0, "ml3_mk": 200.0, "ml3_cal": 200.0, "ml4": 150.0, "ml3_no": 150.0}  # как weather_paper.START_BY_WALLET (preflight сверяет)
+WALLET_START = {"copy": 1000.0, "ml": 300.0, "mm_mk": 300.0, "mm": 300.0, "ml3": 200.0, "ml3_mk": 200.0, "ml3_cal": 200.0, "ml4": 150.0, "ml3_no": 150.0, "ml5_cal_6": 300.0}  # как weather_paper.START_BY_WALLET (preflight сверяет)
 PAPER_STAKE = 2.0  # ставка кошельков (weather_paper.STAKE): меньше на счёте — новых ставок нет
 # 2026-09-25 (просьба Alex — "много кошельков, не понять что к чему"):
 # одна главная модель наверху, остальные — компактно, по группам, с
@@ -221,6 +222,8 @@ WALLET_INFO = {
                  "ставки ml5 при уверенном рынке в октябре −29.8% (25), при 35-60¢ +20.5% (148)"),
     "ml5_31": ("v5 «от рынка»", "v5 с 31 листом",
                "Правило ml5 (перевес от 10 п.п.), но шанс — v5, обученная с 31 листом вместо 15 (с 27.10): на 05-10.2026 точнее v5 во всех 6 месяцах"),
+    "ml5_cal_6": ("v5 «от рынка»", "v5 + рынок — ставка $6",
+                  "Правило ml5_cal, ставка до $6 вместо $2: держит ли стакан крупную ставку (с 06.11)"),
     "ml5_cal_sz": ("v5 «от рынка»", "v5 + рынок — ставка по спору о центре",
                    "Правило ml5_cal, ставка $1 / $2 / $3 по тому, насколько центр v5 расходится с центром рынка (с 29.10)"),
     "ml5_cal_ask": ("v5 «от рынка»", "v5 + рынок — выбор по цене продажи",
@@ -311,7 +314,7 @@ WALLET_INFO = {
 }
 # 14.10 (решение Alex): выключенные кошельки — история и страница остаются, в подписи дата
 HIDDEN_VERSIONS = {"ml", "ml2"}  # 14.10: версии модели без кошельков — не показываем на /training (27.10: и v2)
-RETIRED = {**{w: "2026-10-14" for w in ("main", "main_mk", "emos", "emos_mk", "mm", "mm_mk", "ml", "ml_shift")}, "ens": "2026-10-14", "obs_rt": "2026-10-15", "obs_fmi": "2026-10-15", "techno": "2026-10-27", "ml2": "2026-10-27", "no_big5": "2026-10-28", "obs_wethr": "2026-10-31", "llm_ds": "2026-11-01", "llm_agy_bet": "2026-11-01"}  # как weather_paper.RETIRED (сверяет preflight.py)
+RETIRED = {**{w: "2026-10-14" for w in ("main", "main_mk", "emos", "emos_mk", "mm", "mm_mk", "ml", "ml_shift")}, "ens": "2026-10-14", "obs_rt": "2026-10-15", "obs_fmi": "2026-10-15", "techno": "2026-10-27", "ml2": "2026-10-27", "no_big5": "2026-10-28", "obs_wethr": "2026-10-31", "llm_ds": "2026-11-01", "llm_agy_bet": "2026-11-01", "llm_agy_nomem": "2026-11-06"}  # как weather_paper.RETIRED (сверяет preflight.py)
 for _w, _d in RETIRED.items():
     if _w in WALLET_INFO:
         _g, _n, _t = WALLET_INFO[_w]
@@ -520,7 +523,7 @@ CITY_RU = {
     "wuhan": "Ухань", "zhengzhou": "Чжэнчжоу", "hong_kong": "Гонконг", "taipei": "Тайбэй",
 }
 WALLET_BADGE = {"ml3": "v3", "ml2": "v2", "ml": "v1", "ml_shift": "v1+", "mm": "MX", "emos": "EM", "main": "GI",
-                "mm_mk": "MX", "emos_mk": "EM", "main_mk": "GI", "ml3_mk": "v3", "ml3_cal": "v3+", "ml3_z": "v3Z", "ml3_no": "v3−", "ml3_cal_k": "v3$", "ml4": "v4", "ml4_cal": "v4+", "ml4e": "v4³", "ml4e_cal": "v4³+", "ens": "EN", "ml3_cal15": "v3+¢", "ml3_cal30": "v3+30", "no_cheap": "НЕТ", "fav": "ФАВ", "fav_eve": "ФАВ☾", "fav_eve22": "ФАВ☾22", "fav_eve4e": "ФАВ☾4", "no_mid": "НЕТ½", "no_big": "НЕТ+", "techno": "ДА¢", "ml3_conf": "v3+У", "ml5_cal": "v5+", "ml5": "v5", "ml5_cal30": "v5+30", "ml5_25": "v5·25", "ml5_conf": "v5У", "ml_day_conf": "ДНУ", "ml5_31": "v5³¹", "ml5_31_cal": "v5³¹+", "ml5_31_mk": "v5³¹п", "ml5_p1": "П1", "ml5_p1o": "П1з", "ml5_p1o_no": "П1−", "ml5_cal_ask": "v5+ask", "ml5_cal_sz": "v5+$", "ml5_no": "v5−", "no_cheap5": "НЕТ5", "no_mid5": "НЕТ½5", "no_big5": "НЕТ+5", "ml_day": "ДН", "ml_day_fav": "ДН★", "ml_day_nohigh": "ДН↓", "ml3_city": "v3+Г", "copy": "CP", "obs": "OB", "obs_fmi": "FI", "obs_fast": "OB+", "obs_rt": "OB⚡", "obs_wethr": "OBW", "obs_speci": "SP", "llm_gem": "LG", "llm_ds": "LD", "llm_gem_agy": "LGa", "llm_agy_p": "AGp", "llm_agy_cal": "AG+", "llm_skill": "SK", "llm_mix5": "LM5"}
+                "mm_mk": "MX", "emos_mk": "EM", "main_mk": "GI", "ml3_mk": "v3", "ml3_cal": "v3+", "ml3_z": "v3Z", "ml3_no": "v3−", "ml3_cal_k": "v3$", "ml4": "v4", "ml4_cal": "v4+", "ml4e": "v4³", "ml4e_cal": "v4³+", "ens": "EN", "ml3_cal15": "v3+¢", "ml3_cal30": "v3+30", "no_cheap": "НЕТ", "fav": "ФАВ", "fav_eve": "ФАВ☾", "fav_eve22": "ФАВ☾22", "fav_eve4e": "ФАВ☾4", "no_mid": "НЕТ½", "no_big": "НЕТ+", "techno": "ДА¢", "ml3_conf": "v3+У", "ml5_cal": "v5+", "ml5": "v5", "ml5_cal30": "v5+30", "ml5_25": "v5·25", "ml5_conf": "v5У", "ml_day_conf": "ДНУ", "ml5_31": "v5³¹", "ml5_31_cal": "v5³¹+", "ml5_31_mk": "v5³¹п", "ml5_p1": "П1", "ml5_p1o": "П1з", "ml5_p1o_no": "П1−", "ml5_cal_ask": "v5+ask", "ml5_cal_sz": "v5+$", "ml5_cal_6": "v5+6", "ml5_no": "v5−", "no_cheap5": "НЕТ5", "no_mid5": "НЕТ½5", "no_big5": "НЕТ+5", "ml_day": "ДН", "ml_day_fav": "ДН★", "ml_day_nohigh": "ДН↓", "ml3_city": "v3+Г", "copy": "CP", "obs": "OB", "obs_fmi": "FI", "obs_fast": "OB+", "obs_rt": "OB⚡", "obs_wethr": "OBW", "obs_speci": "SP", "llm_gem": "LG", "llm_ds": "LD", "llm_gem_agy": "LGa", "llm_agy_p": "AGp", "llm_agy_cal": "AG+", "llm_skill": "SK", "llm_mix5": "LM5"}
 # 14.10 (просьба Alex): группы — по модели, к которой относится кошелёк (MODEL_GROUP ниже)
 WALLET_GROUPS = ["v3 — варианты главной модели", "v5 «от рынка»", "Дневная модель", "v4", "v2", "Правила без модели (перекосы рынка)",
                  "Повтор за сильными трейдерами", "Живые замеры"]
@@ -788,7 +791,7 @@ def line_chart(labels, series, fmt, w=520, h=300, vline=None):
             "first": labels[0], "last": labels[-1], "vline": round(X(vline), 1) if vline is not None else None}
 
 
-SKILL_PARENT = {"main_mk": "main", "emos_mk": "emos", "mm_mk": "mm", "ml3_mk": "ml3", "ml3_cal_k": "ml3_cal", "ml3_cal15": "ml3_cal", "ml3_cal30": "ml3_cal", "ml5_cal30": "ml5_cal", "ml5_cal_ask": "ml5_cal", "ml5_cal_sz": "ml5_cal", "ml3_z": "ml3_cal", "ml3_city": "ml3_cal"}  # «своя заявка» — сигнал родителя
+SKILL_PARENT = {"main_mk": "main", "emos_mk": "emos", "mm_mk": "mm", "ml3_mk": "ml3", "ml3_cal_k": "ml3_cal", "ml3_cal15": "ml3_cal", "ml3_cal30": "ml3_cal", "ml5_cal30": "ml5_cal", "ml5_cal_ask": "ml5_cal", "ml5_cal_sz": "ml5_cal", "ml5_cal_6": "ml5_cal", "ml3_z": "ml3_cal", "ml3_city": "ml3_cal"}  # «своя заявка» — сигнал родителя
 
 
 def model_skill(conn, key):
@@ -1293,7 +1296,9 @@ def _llm_range(lab):
 
 LLM_V2_FROM = "2026-10-06T09:45:00+00:00"   # как weather_llm_hour.V2_FROM: с этого запуска — обучение v2 (LightGBM, ошибки, деньги, поправка шансов)
 LLM_KEY_LIMIT = 19.95  # всего внесено на OpenRouter: 08.10 баланс $16.70 после пополнения на $10 + потрачено $3.25 (было $10)
-LLM_CITIES = ("chicago", "atlanta", "austin", "miami", "dallas", "london", "nyc", "paris", "tokyo", "san_francisco")   # как weather_llm_hour.ALL_CITIES (Лондон с 04.10; Нью-Йорк, Париж, Токио — только agy, с 10.10; Сан-Франциско — OpenRouter и llm_gem_agy, с 03.11)
+LLM_CITIES = ("chicago", "atlanta", "austin", "miami", "dallas", "london", "nyc", "paris", "tokyo", "san_francisco",
+              "seoul", "shanghai", "wellington", "beijing", "munich", "cape_town", "sao_paulo", "madrid", "istanbul", "helsinki",
+              "amsterdam", "los_angeles", "singapore")   # 06.11: + 13 городов llm_agy с 07.11 (weather_llm_hour.AGY_NEW_CITIES)   # как weather_llm_hour.ALL_CITIES (Лондон с 04.10; Нью-Йорк, Париж, Токио — только agy, с 10.10; Сан-Франциско — OpenRouter и llm_gem_agy, с 03.11)
 LLM_MODEL_NAME = {"llm_gem": "Gemini 3.8 Flash", "llm_ds": "DeepSeek V4 Pro", "llm_mix": "Смесь Gemini + LightGBM", "llm_cal": "Gemini + рынок", "llm_agy": "Gemini через Antigravity", "llm_agy_bet": "Gemini ставит сама", "llm_agy_nomem": "Gemini без памяти", "llm_gem_agy": "Gemini (письмо llm_gem) через agy", "llm_agy_p": "agy — шансы сама", "llm_agy_cal": "agy + рынок", "llm_skill": "Скилл (agy + Python)", "llm_mix5": "Смесь Gemini + v5"}
 
 

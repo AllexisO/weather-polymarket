@@ -219,6 +219,7 @@ $100 на кошелёк (`ml`, `mm_mk`, `mm` — $300, `copy` — $1000, `ml3` 
 | `no_cheap5` / `no_mid5` / `no_big5` / `ml5_cal30` | с 20.10 10:00: двойники `no_cheap` / `no_mid` / `no_big` / `ml3_cal30` — то же правило на смеси v5 (`ml5c_model_p`) |
 | `ml5_31` | с 27.10 20:00: правило `ml5`, шанс — v5 с 31 листом (`V531_PREFIX`, папки `q_fm31_s*`, колонка `ml531_model_p` в `snapshots` и `snapshots_fast`) |
 | `ml5_cal_sz` | с 29.10 20:00: правило `ml5_cal`, ставка $1 / $2 / $3 по сдвигу центра v5 (`ml5_model_p`, `center_c`) от центра рынка ≤ 0.18 / 0.18-0.36 / > 0.36°C (`STAKE_BY_SHIFT`) |
+| `ml5_cal_6` | с 06.11 17:00: правило `ml5_cal`, покупка до $6 вместо $2 (`STAKE_BY_WALLET`), старт $300 |
 | `ml5_cal_ask` | с 29.10 20:00: правило `ml5_cal`, но вариант — наибольший перевес смеси над лучшей ценой продажи из снимка (`best_ask`) + комиссия 0.05·p(1−p); цена продажи 10-95¢; потолок покупки — `ask_limit(смесь − 3 п.п.)` (`PICK_ASK`) |
 | `ml5_31_cal` | с 28.10 20:00: правило `ml5_cal` (смесь 35/65 с рынком, перевес от 3 п.п.), смесь на v5 с 31 листом (колонка `ml531c_model_p` в `snapshots` и `snapshots_fast`) |
 | `ml5_31_mk` | с 28.10 20:00: правило `ml5_31_cal`, но рынок в смеси поправлен по перекосу (`blend_with_market_cal`: logit p′ = 0.066 + 1.061·logit p), колонка `ml531m_model_p` в `snapshots` и `snapshots_fast` |
@@ -353,7 +354,9 @@ Gemini напрямую в Google при `GEMINI_DIRECT`, отказ → OpenRou
 `AGY_P_HEAD`, 5 городов США), `llm_agy_cal` (без писем: llm_agy 35% + рынок, `AGY_CAL_CITIES`, `CAL_EDGE`) (`llm_agy_bet` выключен 01.11 — писем нет): письма кладутся в `data/agy/queue/`,
 `agy_runner.py` (крон сервера каждую минуту) отдаёт их `agy -p`, ответ — `data/agy/done/`; ждём до `AGY_WAIT`; лимит Google →
 пауза (`data/agy/paused_until`). Ответ — `{"max_f"}`, шансы — код (`agy_probs`, разброс `agy_sigma` по `AGY_BLOCKS`). Доп. города
-`AGY_EXTRA_CITIES`. `llm_agy_bet` — сама решает ставку в рамках `AGY_BET_*`; `llm_agy_nomem` — без памяти (`nomem=True`).
+`AGY_EXTRA_CITIES`, с 07.11 ещё 13 городов только у llm_agy — `AGY_NEW_CITIES` (в `NEW_CITIES`: разброс и папка скилла — по прежним городам).
+`llm_agy_bet` — сама решает ставку в рамках `AGY_BET_*`; `llm_agy_nomem` — без памяти (`nomem=True`; выключен 06.11, писем нет — письмо
+`nomem=True` осталось у скилла).
 
 **Скилл agy с Python** (проверка на прошлом; страница **/skill**, `app/skill_status.py`). С 01.11 живой кошелёк `llm_skill` —
 `weather_llm_skill.py` (крон :10, письмо в 08 местного, 5 городов США; папка дня `agy_skill.build` + `app/agy_skill_live`;

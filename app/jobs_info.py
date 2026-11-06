@@ -43,7 +43,7 @@ JOBS = [
     ("weather_fav_eve4e", "Фавориты накануне на v4e — решение в 20:00 местного на завтра (кошелёк fav_eve4e)", "weather_fav_eve4e.py", "каждые 5 мин", 15, "weather_fav_eve4e.log"),
     ("weather_ml_day", "Дневная модель — решения в 10/12/14 местного (кошелёк ml_day)", "weather_ml_day.py", "каждый час в :06", 75, "weather_ml_day.log"),
     ("weather_ml_day_train", "Дневная модель — обучение и экзамен", "weather_ml_day.py --train", "05:45", 26 * 60, "weather_ml_day_train.log"),
-    ("weather_llm_hour", "LLM-прогноз каждый час (llm_gem через OpenRouter и смеси llm_mix, llm_cal; llm_agy, llm_agy_nomem, llm_agy_p и двойник llm_gem_agy через agy, смеси llm_agy_cal и llm_mix5; llm_ds и llm_agy_bet выключены 01.11)", "weather_llm_hour.py", "каждый час в :56 (первый час дня — в :05)", 75, "weather_llm_hour.log"),
+    ("weather_llm_hour", "LLM-прогноз каждый час (llm_gem через OpenRouter и смеси llm_mix, llm_cal; llm_agy (с 07.11 — 22 города), llm_agy_p и двойник llm_gem_agy через agy, смеси llm_agy_cal и llm_mix5; llm_ds и llm_agy_bet выключены 01.11, llm_agy_nomem — 06.11)", "weather_llm_hour.py", "каждый час в :56 (первый час дня — в :05)", 75, "weather_llm_hour.log"),
     ("weather_llm_skill", "Скилл agy с Python — кошелёк llm_skill (08:10 местного, 5 городов США)", "weather_llm_skill.py", "каждый час в :10", 75, "weather_llm_skill.log"),
     # 03.11: стаканы всех погодных вариантов каждую минуту (без ставок, отдельные файлы data/booklog/books_ГГГГ-ММ.sqlite3)
     ("weather_book_rec", "Стаканы всех вариантов 47 городов каждую минуту, в минуты решений — раз в 5 с; 30 уровней, только изменившиеся (без ставок, data/booklog)", "weather_book_rec.py", "каждый час с :55, живёт час", 25, "weather_book_rec.log"),

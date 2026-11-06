@@ -14,7 +14,7 @@ from types import SimpleNamespace
 
 _NEED = ("WALLETS", "MAKER_WALLETS", "NO_WALLETS", "EDGE_BY_WALLET", "MIN_EDGE", "NO_BAND", "NO_BAND_NOCAP", "TOP_RANK", "YES_BAND",
          "YES_FLOOR", "YES_CEIL", "CONF_SKIP", "CITY_PICK", "SHIFT_WALLETS", "PICK_ASK", "PICK_RATIO", "MIN_PRICE_BY_WALLET", "MIN_PRICE",
-         "YES_MIN", "MAX_PRICE", "STAKE_BY_EDGE", "STAKE_BY_SHIFT", "STAKE", "FAST_WALLETS", "START_TS")
+         "YES_MIN", "MAX_PRICE", "STAKE_BY_EDGE", "STAKE_BY_SHIFT", "STAKE_BY_WALLET", "STAKE", "FAST_WALLETS", "START_TS")
 _SAFE = (ast.Expression, ast.Constant, ast.Dict, ast.Set, ast.List, ast.Tuple, ast.Name, ast.Load, ast.UnaryOp, ast.USub, ast.UAdd)
 
 
@@ -114,7 +114,7 @@ def _snapshot_spec(w):
         tiers = wp.STAKE_BY_SHIFT[w][1]
         stake = "по сдвигу центра v5 от рынка: " + ", ".join(f"≤ {lim:g}°C — ${s:g}" if lim < 50 else f"больше — ${s:g}" for lim, s in tiers)
     else:
-        stake = f"${wp.STAKE:g}"
+        stake = f"${wp.STAKE_BY_WALLET.get(w, wp.STAKE):g}"
     if maker:
         buy = "своя заявка по нижней цене стакана, без комиссии; ждём, пока кто-то продаст, до полудня"
     else:
